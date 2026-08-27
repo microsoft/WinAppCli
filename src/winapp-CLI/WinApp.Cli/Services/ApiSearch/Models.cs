@@ -110,6 +110,15 @@ internal sealed class PackageMeta
 
     public required string Version { get; init; }
 
+    /// <summary>
+    /// A fingerprint of the metadata files this cache was built from. A cache whose
+    /// fingerprint no longer matches the files a project resolves to is rebuilt: the
+    /// package id and version do not change when a referenced project is rebuilt, nor
+    /// when a different target framework selects different assets from the same package.
+    /// Absent in caches written before this field existed, which therefore rebuild once.
+    /// </summary>
+    public string? SourceStamp { get; init; }
+
     public required List<string> WinMdFiles { get; init; }
 
     public required int TotalTypes { get; init; }

@@ -383,6 +383,8 @@ export async function findApiEnums(options: FindApiEnumsOptions = {}): Promise<W
 export interface FindApiMembersOptions extends CommonOptions {
   /** One or more types to inspect. Accepts short names (NavigationView) or fully-qualified names (Microsoft.UI.Xaml.Controls.NavigationView). Pass several to resolve them in a single call. */
   type?: string | string[];
+  /** List the complete member surface: include dependency-property identifier statics (BackgroundProperty) and per-member descriptions, both of which an unfiltered listing omits to save context. Implied by --verbose, and usable together with --json (--verbose is not). */
+  all?: boolean;
   /** Only list members whose name contains this text (case-insensitive), e.g. --filter background. Totals for the unfiltered type are still reported. Applies to every type in the call. */
   filter?: string;
   /** Format output as JSON */
@@ -402,6 +404,7 @@ export async function findApiMembers(options: FindApiMembersOptions = {}): Promi
     const typeArr = Array.isArray(options.type) ? options.type : [options.type];
     args.push(...typeArr);
   }
+  if (options.all) args.push('--all');
   if (options.filter) args.push('--filter', options.filter);
   if (options.json) args.push('--json');
   if (options.project) args.push('--project', options.project);

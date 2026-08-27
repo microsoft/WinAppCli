@@ -32,17 +32,14 @@ internal sealed class FindApiMembersCommand : Command, IShortDescription
         Description = "List the complete member surface: include dependency-property identifier statics (BackgroundProperty) and per-member descriptions, both of which an unfiltered listing omits to save context. Implied by --verbose, and usable together with --json (--verbose is not).",
     };
 
-    public static Option<string?> ProjectDirOption { get; } = FindApiShared.CreateProjectDirOption();
-    public static Option<string?> ProjectOption { get; } = FindApiShared.CreateProjectOption();
-
     public FindApiMembersCommand()
         : base("members", "List the properties, events, and methods of one or more types (with XML-doc descriptions and inherited members), resolved from the project's indexed API metadata. Pass several type names to inspect them all in one call.")
     {
         Arguments.Add(TypeArgument);
         Options.Add(FilterOption);
         Options.Add(AllOption);
-        Options.Add(ProjectDirOption);
-        Options.Add(ProjectOption);
+        Options.Add(FindApiShared.ProjectDirOption);
+        Options.Add(FindApiShared.ProjectOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -59,7 +56,7 @@ internal sealed class FindApiMembersCommand : Command, IShortDescription
                 return FindApiShared.Fail(console, json, "At least one type name is required, e.g. winapp find-api members NavigationView (or several: members NavigationView InfoBar).");
             }
 
-            var scope = FindApiShared.ReadScope(parseResult, ProjectDirOption, ProjectOption);
+            var scope = FindApiShared.ReadScope(parseResult);
             string? filter = parseResult.GetValue(FilterOption);
 
             // --verbose cannot be combined with --json, so --all is the escape hatch that
@@ -108,16 +105,13 @@ internal sealed class FindApiCheckPropertyCommand : Command, IShortDescription
         Arity = ArgumentArity.ZeroOrMore,
     };
 
-    public static Option<string?> ProjectDirOption { get; } = FindApiShared.CreateProjectDirOption();
-    public static Option<string?> ProjectOption { get; } = FindApiShared.CreateProjectOption();
-
     public FindApiCheckPropertyCommand()
         : base("check-property", "Validate that one or more properties exist on a type before you write XAML/code against it. Pass several property names to check them in one call. On a miss, suggests similar properties on the type, attached-property forms, and other types that declare the property. Exits non-zero when any property does not exist.")
     {
         Arguments.Add(TypeArgument);
         Arguments.Add(PropertyArgument);
-        Options.Add(ProjectDirOption);
-        Options.Add(ProjectOption);
+        Options.Add(FindApiShared.ProjectDirOption);
+        Options.Add(FindApiShared.ProjectOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -135,7 +129,7 @@ internal sealed class FindApiCheckPropertyCommand : Command, IShortDescription
                 return FindApiShared.Fail(console, json, "Usage: winapp find-api check-property <Type> <Property> [<Property>...].");
             }
 
-            var scope = FindApiShared.ReadScope(parseResult, ProjectDirOption, ProjectOption);
+            var scope = FindApiShared.ReadScope(parseResult);
 
             if (properties.Count == 1)
             {
@@ -175,9 +169,6 @@ internal sealed class FindApiTypesCommand : Command, IShortDescription
         Arity = ArgumentArity.ZeroOrOne,
     };
 
-    public static Option<string?> ProjectDirOption { get; } = FindApiShared.CreateProjectDirOption();
-    public static Option<string?> ProjectOption { get; } = FindApiShared.CreateProjectOption();
-
     public FindApiTypesCommand()
         : base("types", "List the types declared in a namespace (class/struct/enum/interface/delegate) with their base types.")
     {
@@ -187,8 +178,8 @@ internal sealed class FindApiTypesCommand : Command, IShortDescription
         // `members`, and `types`. It still works for anyone who knows it exists.
         Hidden = true;
         Arguments.Add(NamespaceArgument);
-        Options.Add(ProjectDirOption);
-        Options.Add(ProjectOption);
+        Options.Add(FindApiShared.ProjectDirOption);
+        Options.Add(FindApiShared.ProjectOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -205,7 +196,7 @@ internal sealed class FindApiTypesCommand : Command, IShortDescription
                 return FindApiShared.Fail(console, json, "A namespace is required, e.g. winapp find-api types Microsoft.UI.Xaml.Controls.");
             }
 
-            var scope = FindApiShared.ReadScope(parseResult, ProjectDirOption, ProjectOption);
+            var scope = FindApiShared.ReadScope(parseResult);
             var result = service.Types(ns, scope);
             return FindApiShared.Emit(
                 console, json, "types", result, WinAppJsonContext.Default.ApiTypesOutput,
@@ -231,16 +222,13 @@ internal sealed class FindApiEnumsCommand : Command, IShortDescription
         Description = "Only list values whose name contains this text (case-insensitive), e.g. --filter folder. The unfiltered total is still reported. Prefer listing the whole enum once over repeated filtered calls \u2014 most enums are small enough that the full list is cheaper than several narrowed lookups.",
     };
 
-    public static Option<string?> ProjectDirOption { get; } = FindApiShared.CreateProjectDirOption();
-    public static Option<string?> ProjectOption { get; } = FindApiShared.CreateProjectOption();
-
     public FindApiEnumsCommand()
         : base("enums", "List the values of one or more enum types. Pass several type names to list them in one call. Exits non-zero when a type exists but is not an enum.")
     {
         Arguments.Add(TypeArgument);
         Options.Add(FilterOption);
-        Options.Add(ProjectDirOption);
-        Options.Add(ProjectOption);
+        Options.Add(FindApiShared.ProjectDirOption);
+        Options.Add(FindApiShared.ProjectOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -257,7 +245,7 @@ internal sealed class FindApiEnumsCommand : Command, IShortDescription
                 return FindApiShared.Fail(console, json, "At least one enum type name is required, e.g. winapp find-api enums Symbol (or several: enums Symbol IconSource).");
             }
 
-            var scope = FindApiShared.ReadScope(parseResult, ProjectDirOption, ProjectOption);
+            var scope = FindApiShared.ReadScope(parseResult);
             string? filter = parseResult.GetValue(FilterOption);
 
             if (types.Count == 1)
@@ -295,17 +283,14 @@ internal sealed class FindApiNamespacesCommand : Command, IShortDescription
         Description = "Only list namespaces starting with this prefix, e.g. --filter Microsoft.UI.",
     };
 
-    public static Option<string?> ProjectDirOption { get; } = FindApiShared.CreateProjectDirOption();
-    public static Option<string?> ProjectOption { get; } = FindApiShared.CreateProjectOption();
-
     public FindApiNamespacesCommand()
         : base("namespaces", "List the namespaces available to the project across its indexed API metadata, optionally filtered by prefix.")
     {
         // Hidden for the same reason as `types`: never invoked in 48 trial-runs.
         Hidden = true;
         Options.Add(FilterOption);
-        Options.Add(ProjectDirOption);
-        Options.Add(ProjectOption);
+        Options.Add(FindApiShared.ProjectDirOption);
+        Options.Add(FindApiShared.ProjectOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -317,7 +302,7 @@ internal sealed class FindApiNamespacesCommand : Command, IShortDescription
         {
             bool json = parseResult.GetValue(WinAppRootCommand.JsonOption);
             string? filter = parseResult.GetValue(FilterOption);
-            var scope = FindApiShared.ReadScope(parseResult, ProjectDirOption, ProjectOption);
+            var scope = FindApiShared.ReadScope(parseResult);
             var result = service.Namespaces(filter, scope);
             return FindApiShared.Emit(
                 console, json, "namespaces", result, WinAppJsonContext.Default.ApiNamespacesOutput,
@@ -332,14 +317,11 @@ internal sealed class FindApiPackagesCommand : Command, IShortDescription
 {
     public string ShortDescription => "List the indexed metadata packages for a project";
 
-    public static Option<string?> ProjectDirOption { get; } = FindApiShared.CreateProjectDirOption();
-    public static Option<string?> ProjectOption { get; } = FindApiShared.CreateProjectOption();
-
     public FindApiPackagesCommand()
         : base("packages", "List the NuGet/SDK packages whose API metadata is indexed for a project, with per-package type and member counts.")
     {
-        Options.Add(ProjectDirOption);
-        Options.Add(ProjectOption);
+        Options.Add(FindApiShared.ProjectDirOption);
+        Options.Add(FindApiShared.ProjectOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -350,7 +332,7 @@ internal sealed class FindApiPackagesCommand : Command, IShortDescription
         private int Execute(ParseResult parseResult)
         {
             bool json = parseResult.GetValue(WinAppRootCommand.JsonOption);
-            var scope = FindApiShared.ReadScope(parseResult, ProjectDirOption, ProjectOption);
+            var scope = FindApiShared.ReadScope(parseResult);
             var result = service.Packages(scope);
             return FindApiShared.Emit(
                 console, json, "packages", result, WinAppJsonContext.Default.ApiPackagesOutput,
@@ -365,14 +347,11 @@ internal sealed class FindApiStatsCommand : Command, IShortDescription
 {
     public string ShortDescription => "Show aggregate API-index statistics for a project";
 
-    public static Option<string?> ProjectDirOption { get; } = FindApiShared.CreateProjectDirOption();
-    public static Option<string?> ProjectOption { get; } = FindApiShared.CreateProjectOption();
-
     public FindApiStatsCommand()
         : base("stats", "Show aggregate statistics for a project's API index: package, namespace, type, member, and .winmd file counts.")
     {
-        Options.Add(ProjectDirOption);
-        Options.Add(ProjectOption);
+        Options.Add(FindApiShared.ProjectDirOption);
+        Options.Add(FindApiShared.ProjectOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -383,7 +362,7 @@ internal sealed class FindApiStatsCommand : Command, IShortDescription
         private int Execute(ParseResult parseResult)
         {
             bool json = parseResult.GetValue(WinAppRootCommand.JsonOption);
-            var scope = FindApiShared.ReadScope(parseResult, ProjectDirOption, ProjectOption);
+            var scope = FindApiShared.ReadScope(parseResult);
             var result = service.Stats(scope);
             return FindApiShared.Emit(
                 console, json, "stats", result, WinAppJsonContext.Default.ApiStatsOutput,
@@ -434,15 +413,12 @@ internal sealed class FindApiRefreshCommand : Command, IShortDescription
         Description = "Recursively discover and index every project under the directory instead of just the top-level project(s).",
     };
 
-    public static Option<string?> ProjectDirOption { get; } = FindApiShared.CreateProjectDirOption();
-    public static Option<string?> ProjectOption { get; } = FindApiShared.CreateProjectOption();
-
     public FindApiRefreshCommand()
         : base("refresh", "Rebuild the API metadata index for a project from its restored packages. Runs automatically when a project is restored; run it manually to force a re-index or to index a project for the first time.")
     {
         Options.Add(ScanOption);
-        Options.Add(ProjectDirOption);
-        Options.Add(ProjectOption);
+        Options.Add(FindApiShared.ProjectDirOption);
+        Options.Add(FindApiShared.ProjectOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -455,7 +431,7 @@ internal sealed class FindApiRefreshCommand : Command, IShortDescription
             bool json = parseResult.GetValue(WinAppRootCommand.JsonOption);
             bool quiet = parseResult.GetValue(WinAppRootCommand.QuietOption);
             bool scan = parseResult.GetValue(ScanOption);
-            var scope = FindApiShared.ReadScope(parseResult, ProjectDirOption, ProjectOption);
+            var scope = FindApiShared.ReadScope(parseResult);
 
             // Progress prints in text mode only; --json and --quiet suppress it so
             // scripted/quiet callers get a clean payload on stdout.

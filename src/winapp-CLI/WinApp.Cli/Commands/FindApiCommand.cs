@@ -3,6 +3,7 @@
 
 using System.CommandLine;
 using System.CommandLine.Invocation;
+using System.CommandLine.Parsing;
 using Spectre.Console;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
@@ -37,10 +38,6 @@ internal sealed class FindApiCommand : Command, IShortDescription
         DefaultValueFactory = _ => 5,
     };
 
-    public static Option<string?> ProjectDirOption { get; } = FindApiShared.CreateProjectDirOption();
-
-    public static Option<string?> ProjectOption { get; } = FindApiShared.CreateProjectOption();
-
     public FindApiCommand(
         FindApiMembersCommand membersCommand,
         FindApiCheckPropertyCommand checkPropertyCommand,
@@ -55,8 +52,8 @@ internal sealed class FindApiCommand : Command, IShortDescription
     {
         Arguments.Add(QueryArgument);
         Options.Add(MaxOption);
-        Options.Add(ProjectDirOption);
-        Options.Add(ProjectOption);
+        Options.Add(FindApiShared.ProjectDirOption);
+        Options.Add(FindApiShared.ProjectOption);
         Options.Add(WinAppRootCommand.JsonOption);
 
         Subcommands.Add(membersCommand);
@@ -68,6 +65,16 @@ internal sealed class FindApiCommand : Command, IShortDescription
         Subcommands.Add(statsCommand);
         Subcommands.Add(projectsCommand);
         Subcommands.Add(refreshCommand);
+
+        // The bare form takes a free-form query, so a word typed before a verb parses as
+        // a query for `find-api` itself and is then discarded when the verb runs —
+        // `winapp find-api NavigationView members Button` answers only about Button and
+        // never says the other half was dropped. The check is registered on each verb
+        // because only the innermost command's validators run.
+        foreach (Command verb in Subcommands)
+        {
+            FindApiShared.RejectStrayQuery(verb, QueryArgument);
+        }
     }
 
     public sealed class Handler(IApiMetadataService service, IAnsiConsole console) : AsynchronousCommandLineAction
@@ -93,7 +100,7 @@ internal sealed class FindApiCommand : Command, IShortDescription
                 return FindApiShared.Fail(console, json, "--max must be at least 1.");
             }
 
-            var scope = FindApiShared.ReadScope(parseResult, ProjectDirOption, ProjectOption);
+            var scope = FindApiShared.ReadScope(parseResult);
             bool verbose = parseResult.GetValue(WinAppRootCommand.VerboseOption);
 
             if (queries.Count == 1)

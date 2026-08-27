@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
+using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.Services.ApiSearch;
 
@@ -65,14 +66,24 @@ internal static partial class NuGetResolver
                 monikers.AddRange(frameworksEl.EnumerateObject().Select(p => p.Name));
             }
 
+            // The highest version wins, matching the target whose compile assets are
+            // read (see SelectWindowsTarget). Taking the first moniker instead would let
+            // a multi-targeted project read 26100 package assets against 19041 SDK
+            // metadata and report a 26100 API as missing.
+            string? best = null;
+            Version? bestVersion = null;
             foreach (string moniker in monikers)
             {
                 Match match = WindowsPlatformMoniker.Match(moniker);
-                if (match.Success)
+                if (match.Success
+                    && Version.TryParse(match.Groups[1].Value, out Version? platform)
+                    && (bestVersion is null || platform > bestVersion))
                 {
-                    return match.Groups[1].Value;
+                    bestVersion = platform;
+                    best = match.Groups[1].Value;
                 }
             }
+            return best;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -86,6 +97,18 @@ internal static partial class NuGetResolver
 
     [GeneratedRegex(@"-windows(\d+\.\d+\.\d+(?:\.\d+)?)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex WindowsPlatformMonikerRegex();
+
+    private static readonly Regex WindowsTargetMoniker = WindowsTargetMonikerRegex();
+
+    /// <summary>
+    /// Any Windows target framework moniker, including the two-component forms
+    /// (<c>net8.0-windows7.0</c>, <c>net8.0-windows10.0</c>) that name no Windows SDK
+    /// version. Those are not usable for SDK metadata selection — hence the separate,
+    /// stricter <see cref="WindowsPlatformMoniker"/> — but they are still the target a
+    /// Windows build compiles against, so package assets must be read from them.
+    /// </summary>
+    [GeneratedRegex(@"-windows(\d+(?:\.\d+){1,3})", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex WindowsTargetMonikerRegex();
 
     /// <summary>
     /// The machine-wide metadata that needs no project at all: the Windows SDK
@@ -277,7 +300,7 @@ internal static partial class NuGetResolver
             foreach (string reference in references)
             {
                 string fullPath = Path.GetFullPath(Path.Combine(projectDir, reference));
-                if (!File.Exists(fullPath))
+                if (!IsProbeablePath(fullPath) || !File.Exists(fullPath))
                 {
                     continue;
                 }
@@ -351,6 +374,38 @@ internal static partial class NuGetResolver
         return newest;
     }
 
+    /// <summary>
+    /// Picks the restore target whose compile assets a Windows build actually uses.
+    /// A multi-targeted project lists several targets in <c>project.assets.json</c>, and
+    /// the first one is whichever the project file happened to name first — taking it
+    /// blindly reads <c>net8.0</c> assets for a <c>net8.0-windows10.0.19041.0</c> build and
+    /// reports Windows-only types as missing. Prefers the highest Windows platform version,
+    /// then falls back to the first target so non-Windows projects behave as before.
+    /// </summary>
+    private static JsonElement? SelectWindowsTarget(JsonElement targetsEl)
+    {
+        JsonElement? first = null;
+        JsonElement? best = null;
+        Version? bestVersion = null;
+
+        foreach (JsonProperty target in targetsEl.EnumerateObject())
+        {
+            first ??= target.Value;
+            Match match = WindowsTargetMoniker.Match(target.Name);
+            if (!match.Success || !Version.TryParse(match.Groups[1].Value, out Version? platform))
+            {
+                continue;
+            }
+            if (bestVersion == null || platform > bestVersion)
+            {
+                bestVersion = platform;
+                best = target.Value;
+            }
+        }
+
+        return best ?? first;
+    }
+
     internal static List<PackageWithWinMd> FindPackagesFromAssets(string assetsPath)
     {
         var packages = new List<PackageWithWinMd>();
@@ -364,7 +419,10 @@ internal static partial class NuGetResolver
             {
                 foreach (JsonProperty folder in packageFoldersEl.EnumerateObject())
                 {
-                    packageFolders.Add(folder.Name);
+                    if (IsProbeablePath(folder.Name))
+                    {
+                        packageFolders.Add(folder.Name);
+                    }
                 }
             }
 
@@ -373,30 +431,30 @@ internal static partial class NuGetResolver
                 return packages;
             }
 
-            // Map "id/version" -> compile-time .dll relative paths from the first target.
+            // Map "id/version" -> compile-time .dll/.winmd relative paths from the target
+            // the project actually builds for Windows.
             var compileByLibrary = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-            if (root.TryGetProperty("targets", out var targetsEl))
+            if (root.TryGetProperty("targets", out var targetsEl) && targetsEl.ValueKind == JsonValueKind.Object
+                && SelectWindowsTarget(targetsEl) is JsonElement selectedTarget)
             {
-                using JsonElement.ObjectEnumerator targets = targetsEl.EnumerateObject().GetEnumerator();
-                if (targets.MoveNext())
+                foreach (JsonProperty library in selectedTarget.EnumerateObject())
                 {
-                    foreach (JsonProperty library in targets.Current.Value.EnumerateObject())
+                    if (!library.Value.TryGetProperty("compile", out var compileEl))
                     {
-                        if (!library.Value.TryGetProperty("compile", out var compileEl))
-                        {
-                            continue;
-                        }
-                        var dlls = compileEl.EnumerateObject()
-                            .Select(entry => entry.Name)
-                            .Where(entryName => (entryName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
-                                    || entryName.EndsWith(".winmd", StringComparison.OrdinalIgnoreCase))
-                                && !entryName.EndsWith("/_._", StringComparison.Ordinal))
-                            .ToList();
-                        if (dlls.Count > 0)
-                        {
-                            compileByLibrary[library.Name] = dlls;
-                        }
+                        continue;
                     }
+                    // A compile group that exists is authoritative even when every entry is
+                    // NuGet's "_._" placeholder: that means the package deliberately exposes
+                    // no compile-time assets for this target. Recording the empty list — rather
+                    // than leaving the library out of the map — keeps the scan fallback below
+                    // from indexing some other target's .winmd and confirming an API the
+                    // project cannot compile against.
+                    compileByLibrary[library.Name] = compileEl.EnumerateObject()
+                        .Select(entry => entry.Name)
+                        .Where(entryName => (entryName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+                                || entryName.EndsWith(".winmd", StringComparison.OrdinalIgnoreCase))
+                            && !entryName.EndsWith("/_._", StringComparison.Ordinal))
+                        .ToList();
                 }
             }
 
@@ -425,18 +483,19 @@ internal static partial class NuGetResolver
 
                 var files = new List<string>();
                 bool hasSelectedAssets = compileByLibrary.TryGetValue(library.Name, out var selectedAssets);
-                foreach (string packageFolder in packageFolders)
+                var packageDirs = packageFolders
+                    .Select(packageFolder => TryResolveUnderRoot(packageFolder, relativePath, out string dir) ? dir : null)
+                    .Where(dir => dir != null && Directory.Exists(dir))
+                    .Select(dir => dir!)
+                    .ToList();
+                if (hasSelectedAssets)
                 {
-                    string packageDir = Path.Combine(packageFolder, relativePath);
-                    if (!Directory.Exists(packageDir))
-                    {
-                        continue;
-                    }
-                    if (hasSelectedAssets)
+                    foreach (string packageDir in packageDirs)
                     {
                         files.AddRange(selectedAssets!
-                            .Select(asset => Path.Combine(packageDir, asset.Replace('/', Path.DirectorySeparatorChar)))
-                            .Where(File.Exists));
+                            .Select(asset => TryResolveUnderRoot(packageDir, asset.Replace('/', Path.DirectorySeparatorChar), out string assetPath) ? assetPath : null)
+                            .Where(assetPath => assetPath != null && File.Exists(assetPath))
+                            .Select(assetPath => assetPath!));
                     }
                 }
 
@@ -444,15 +503,11 @@ internal static partial class NuGetResolver
                 // assets for it. Scanning unconditionally pulls in .winmd files for
                 // TFMs and RIDs NuGet did not select, so the project gets a confident
                 // positive for an API it cannot actually compile against.
-                if (files.Count == 0)
+                if (!hasSelectedAssets)
                 {
-                    foreach (string packageFolder in packageFolders)
+                    foreach (string packageDir in packageDirs)
                     {
-                        string packageDir = Path.Combine(packageFolder, relativePath);
-                        if (Directory.Exists(packageDir))
-                        {
-                            files.AddRange(Directory.GetFiles(packageDir, "*.winmd", SearchOption.AllDirectories));
-                        }
+                        files.AddRange(Directory.GetFiles(packageDir, "*.winmd", SearchOption.AllDirectories));
                     }
                 }
                 var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -462,11 +517,7 @@ internal static partial class NuGetResolver
                     continue;
                 }
 
-                var xmlDocs = packageFolders
-                    .Select(packageFolder => Path.Combine(packageFolder, relativePath))
-                    .Where(Directory.Exists)
-                    .SelectMany(FindXmlDocsInPackageFolder)
-                    .ToList();
+                var xmlDocs = packageDirs.SelectMany(FindXmlDocsInPackageFolder).ToList();
                 packages.Add(new PackageWithWinMd(id, version, files, xmlDocs));
             }
         }
@@ -510,21 +561,17 @@ internal static partial class NuGetResolver
                     continue;
                 }
                 var files = new List<string>();
-                if (solutionPackages != null)
+                if (solutionPackages != null
+                    && TryResolveUnderRoot(solutionPackages, id + "." + version, out string solutionDir)
+                    && Directory.Exists(solutionDir))
                 {
-                    string dir = Path.Combine(solutionPackages, id + "." + version);
-                    if (Directory.Exists(dir))
-                    {
-                        files.AddRange(Directory.GetFiles(dir, "*.winmd", SearchOption.AllDirectories));
-                    }
+                    files.AddRange(Directory.GetFiles(solutionDir, "*.winmd", SearchOption.AllDirectories));
                 }
-                if (files.Count == 0 && Directory.Exists(globalPackages))
+                if (files.Count == 0 && Directory.Exists(globalPackages)
+                    && TryResolveUnderRoot(globalPackages, Path.Combine(id.ToLowerInvariant(), version), out string globalDir)
+                    && Directory.Exists(globalDir))
                 {
-                    string dir = Path.Combine(globalPackages, id.ToLowerInvariant(), version);
-                    if (Directory.Exists(dir))
-                    {
-                        files.AddRange(Directory.GetFiles(dir, "*.winmd", SearchOption.AllDirectories));
-                    }
+                    files.AddRange(Directory.GetFiles(globalDir, "*.winmd", SearchOption.AllDirectories));
                 }
                 var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 files = files.Where(f => seen.Add(Path.GetFileName(f))).ToList();
@@ -665,6 +712,42 @@ internal static partial class NuGetResolver
             return core + "." + packageVersion.Minor + (suffix.Length > core.Length ? suffix.Substring(core.Length) : string.Empty);
         }
         return suffix;
+    }
+
+    /// <summary>
+    /// Whether a path named by project metadata may be touched. <c>project.assets.json</c>,
+    /// <c>packages.config</c>, and project files all live in the repository, so cloning a
+    /// repository is enough to choose these values. A UNC path among them turns a local,
+    /// read-only query into an outbound SMB authentication attempt against a host the
+    /// repository picked, so network paths are skipped rather than probed.
+    /// </summary>
+    private static bool IsProbeablePath(string? path) =>
+        !string.IsNullOrWhiteSpace(path) && !PathSafety.IsNetworkPath(path);
+
+    /// <summary>
+    /// Resolves a relative path named by project metadata against <paramref name="root"/>,
+    /// rejecting rooted values and anything that climbs out of the root. A rooted asset
+    /// name silently wins over the root it is combined with, which is how a package-relative
+    /// value reaches an arbitrary location on disk. The root itself is the caller's
+    /// responsibility: a NuGet cache configured outside the repository may legitimately
+    /// be a network share.
+    /// </summary>
+    private static bool TryResolveUnderRoot(string root, string relative, out string resolved)
+    {
+        resolved = string.Empty;
+        if (string.IsNullOrWhiteSpace(root) || string.IsNullOrWhiteSpace(relative) || Path.IsPathRooted(relative))
+        {
+            return false;
+        }
+        try
+        {
+            return ApiCachePaths.TryCombineContained(root, new[] { relative }, out resolved);
+        }
+        catch (Exception ex) when (ex is ArgumentException or PathTooLongException or NotSupportedException)
+        {
+            resolved = string.Empty;
+            return false;
+        }
     }
 
     private static string GetNuGetPackagesDir()

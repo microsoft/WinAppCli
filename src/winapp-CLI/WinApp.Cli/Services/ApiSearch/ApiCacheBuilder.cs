@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -86,11 +87,17 @@ internal static class ApiCacheBuilder
         if (pendingExports.Count > 0)
         {
             report?.Invoke($"Parsing {pendingExports.Count} package(s)…");
+            var failures = new ConcurrentBag<(string Key, string Message)>();
+            var unrecorded = new ConcurrentBag<string>();
             Parallel.ForEach(pendingExports, entry =>
             {
-                ExportPackageCache(entry.Value, entry.Key);
-                Interlocked.Increment(ref parsed);
+                if (TryExportPackageCache(entry.Value, entry.Key, failures, unrecorded))
+                {
+                    Interlocked.Increment(ref parsed);
+                }
             });
+            ReportFailures(failures, report);
+            DropUnrecordedPackages(pendingManifests, unrecorded);
         }
 
         // Manifests are written last so a project is only ever advertised as indexed
@@ -150,7 +157,7 @@ internal static class ApiCacheBuilder
                 // Already resolved for an earlier project in this run.
                 reused++;
             }
-            else if (!mustRebuild && IsReusableCache(packageCacheDir))
+            else if (!mustRebuild && IsReusableCache(packageCacheDir, ComputeSourceStamp(package)))
             {
                 reused++;
             }
@@ -169,9 +176,10 @@ internal static class ApiCacheBuilder
     /// the query side looks for, so reusing it would read as an empty index — a silent
     /// wrong answer — rather than an error. It is also not reusable when the previous
     /// run failed to parse one of its metadata files, so a transient read failure heals
-    /// on the next refresh instead of being cached forever.
+    /// on the next refresh instead of being cached forever, or when the metadata files
+    /// it was built from have changed (see <see cref="ComputeSourceStamp"/>).
     /// </summary>
-    private static bool IsReusableCache(string packageCacheDir)
+    private static bool IsReusableCache(string packageCacheDir, string expectedSourceStamp)
     {
         string metaPath = Path.Combine(packageCacheDir, "meta.json");
         if (!File.Exists(metaPath))
@@ -181,7 +189,9 @@ internal static class ApiCacheBuilder
         try
         {
             PackageMeta? meta = JsonSerializer.Deserialize(File.ReadAllText(metaPath), ApiSearchJsonContext.Default.PackageMeta);
-            return meta is { Incomplete: false } && meta.Format == ApiCachePaths.CacheFormatVersion;
+            return meta is { Incomplete: false }
+                && meta.Format == ApiCachePaths.CacheFormatVersion
+                && string.Equals(meta.SourceStamp, expectedSourceStamp, StringComparison.Ordinal);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -189,6 +199,37 @@ internal static class ApiCacheBuilder
             // package is simply re-exported.
             return false;
         }
+    }
+
+    /// <summary>
+    /// A short fingerprint of the metadata files a package actually resolved to — their
+    /// paths, sizes, and write times, hashed to roughly twenty characters so the cache
+    /// does not grow a per-file record. A package id and version alone do not identify
+    /// what is cached: rebuilding a referenced project rewrites its <c>.winmd</c> in
+    /// place, and two projects on different target frameworks select different assets
+    /// from the same package version while sharing one cache directory. Comparing the
+    /// fingerprint re-exports in those cases instead of answering from stale metadata.
+    /// </summary>
+    private static string ComputeSourceStamp(PackageWithWinMd package)
+    {
+        var builder = new StringBuilder();
+        foreach (string file in package.WinMdFiles.Concat(package.XmlDocFiles).OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+        {
+            builder.Append(file);
+            try
+            {
+                var info = new FileInfo(file);
+                builder.Append('|').Append(info.Length).Append('|').Append(info.LastWriteTimeUtc.Ticks);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // An unreadable input cannot be fingerprinted, so it never compares equal
+                // and the package is re-exported rather than trusted.
+                builder.Append("|unreadable|").Append(Guid.NewGuid().ToString("N"));
+            }
+            builder.Append(';');
+        }
+        return ApiCachePaths.ShortHash(builder.ToString());
     }
 
     /// <summary>
@@ -237,11 +278,18 @@ internal static class ApiCacheBuilder
         if (pendingExports.Count > 0)
         {
             report?.Invoke($"Parsing {pendingExports.Count} package(s)…");
+            var failures = new ConcurrentBag<(string Key, string Message)>();
+            var unrecorded = new ConcurrentBag<string>();
             Parallel.ForEach(pendingExports, entry =>
             {
-                ExportPackageCache(entry.Value, entry.Key);
-                Interlocked.Increment(ref parsed);
+                if (TryExportPackageCache(entry.Value, entry.Key, failures, unrecorded))
+                {
+                    Interlocked.Increment(ref parsed);
+                }
             });
+            ReportFailures(failures, report);
+            var unrecordedKeys = new HashSet<string>(unrecorded, StringComparer.OrdinalIgnoreCase);
+            packageRefs.RemoveAll(p => unrecordedKeys.Contains(PackageKey(p.Id, p.Version)));
         }
 
         var manifest = new ProjectManifest
@@ -264,6 +312,124 @@ internal static class ApiCacheBuilder
             PackagesReused = reused,
             ProjectNames = [ApiCachePaths.SdkScopeName],
         };
+    }
+
+    /// <summary>
+    /// Exports one package, turning a metadata read failure into a reported skip.
+    /// Files can become unreadable while a run is in progress — deleted, locked by a
+    /// build, or denied — and the export work is parallel, so without this the failure
+    /// surfaces as an unhandled <see cref="AggregateException"/> that ends a query the
+    /// user did not know was indexing. The package is recorded as incomplete rather
+    /// than left absent, so a later query can say the index is partial instead of
+    /// answering "no such type" from metadata it never read.
+    /// </summary>
+    private static bool TryExportPackageCache(
+        PackageWithWinMd package,
+        string cacheDir,
+        ConcurrentBag<(string Key, string Message)> failures,
+        ConcurrentBag<string> unrecorded)
+    {
+        try
+        {
+            ExportPackageCache(package, cacheDir);
+            return true;
+        }
+        catch (Exception ex) when (IsPackageReadFailure(ex))
+        {
+            string reason = Unwrap(ex).Message;
+            failures.Add((PackageKey(package.Id, package.Version), $"Skipped {package.Id} {package.Version}: {reason}"));
+            if (!TryMarkPackageIncomplete(package, cacheDir, reason))
+            {
+                unrecorded.Add(PackageKey(package.Id, package.Version));
+            }
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Records a failed export as an incomplete package cache. A query qualifies every
+    /// negative answer with the packages it could not fully read, so a package left with
+    /// no cache at all turns "that package was never read" into a confident "no such
+    /// type". The marker also keeps the index from looking half-written: it names a
+    /// current-format cache, so the read path does not decide the whole project is stale
+    /// and re-index on every query, while <see cref="IsReusableCache"/> still refuses to
+    /// reuse an incomplete cache, so the next index pass retries the package. Returns
+    /// false when even the marker cannot be written, leaving the caller to drop the
+    /// reference instead.
+    /// </summary>
+    private static bool TryMarkPackageIncomplete(PackageWithWinMd package, string cacheDir, string reason)
+    {
+        try
+        {
+            Directory.CreateDirectory(cacheDir);
+            var meta = new PackageMeta
+            {
+                Format = ApiCachePaths.CacheFormatVersion,
+                PackageId = package.Id,
+                Version = package.Version,
+                Incomplete = true,
+                ParseErrors = [reason],
+                WinMdFiles = package.WinMdFiles.Select(Path.GetFileName).Where(n => n != null).Select(n => n!).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                TotalTypes = 0,
+                TotalMembers = 0,
+                TotalNamespaces = 0,
+                GeneratedAt = DateTime.UtcNow.ToString("o"),
+            };
+            WriteFileAtomic(
+                Path.Combine(cacheDir, "meta.json"),
+                JsonSerializer.Serialize(meta, ApiSearchJsonContext.Default.PackageMeta));
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static string PackageKey(string id, string version) => id + "/" + version;
+
+    /// <summary>
+    /// Drops the packages whose failure could not even be recorded from the manifests
+    /// about to be written. A manifest names the package caches a query may read, so
+    /// advertising one that has no <c>meta.json</c> makes every later query see a
+    /// missing cache, decide the index is stale, and re-index — permanently, if the
+    /// failure is permanent.
+    /// </summary>
+    private static void DropUnrecordedPackages(
+        List<(string Name, ProjectManifest Manifest)> manifests,
+        ConcurrentBag<string> unrecorded)
+    {
+        if (unrecorded.IsEmpty)
+        {
+            return;
+        }
+        var failed = new HashSet<string>(unrecorded, StringComparer.OrdinalIgnoreCase);
+        foreach ((_, ProjectManifest manifest) in manifests)
+        {
+            manifest.Packages.RemoveAll(p => failed.Contains(PackageKey(p.Id, p.Version)));
+        }
+    }
+
+    private static bool IsPackageReadFailure(Exception ex) => ex switch
+    {
+        AggregateException aggregate => aggregate.InnerExceptions.Count > 0 && aggregate.InnerExceptions.All(IsPackageReadFailure),
+        IOException or UnauthorizedAccessException or JsonException => true,
+        _ => false,
+    };
+
+    private static Exception Unwrap(Exception ex) =>
+        ex is AggregateException { InnerExceptions.Count: > 0 } aggregate ? Unwrap(aggregate.InnerExceptions[0]) : ex;
+
+    private static void ReportFailures(ConcurrentBag<(string Key, string Message)> failures, Action<string>? report)
+    {
+        if (report == null)
+        {
+            return;
+        }
+        foreach (string message in failures.Select(f => f.Message).OrderBy(m => m, StringComparer.Ordinal))
+        {
+            report(message);
+        }
     }
 
     private static void ExportPackageCache(PackageWithWinMd package, string cacheDir)
@@ -334,6 +500,7 @@ internal static class ApiCacheBuilder
             Format = ApiCachePaths.CacheFormatVersion,
             PackageId = package.Id,
             Version = package.Version,
+            SourceStamp = ComputeSourceStamp(package),
             WinMdFiles = package.WinMdFiles.Select(Path.GetFileName).Where(n => n != null).Select(n => n!).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
             TotalTypes = types.Count,
             TotalMembers = types.Sum(t => t.Members.Count),
@@ -405,8 +572,36 @@ internal static class ApiCacheBuilder
         {
             results.AddRange(Directory.GetFiles(inputPath, "*.csproj"));
             results.AddRange(Directory.GetFiles(inputPath, "*.vcxproj"));
+            if (results.Count == 0 && FindSolutionFileInDir(inputPath) is not null)
+            {
+                // A solution directory holds no project of its own, so indexing it as
+                // given records nothing and every query typed there falls back to the
+                // SDK scope. The projects the solution builds live below it.
+                return DiscoverProjectFiles(inputPath, scan: true);
+            }
         }
         return results;
+    }
+
+    /// <summary>Returns the first solution file (<c>.sln</c>/<c>.slnx</c>) in a directory, or null.</summary>
+    internal static string? FindSolutionFileInDir(string dir)
+    {
+        if (!Directory.Exists(dir))
+        {
+            return null;
+        }
+        try
+        {
+            return Directory.EnumerateFiles(dir, "*.sln*")
+                .Where(f => f.EndsWith(".sln", StringComparison.OrdinalIgnoreCase)
+                    || f.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     /// <summary>Returns the first project name (<c>.csproj</c>/<c>.vcxproj</c>) in a directory, or null.</summary>

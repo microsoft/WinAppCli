@@ -215,6 +215,76 @@ public sealed class ApiMetadataServiceTests
     }
 
     [TestMethod]
+    public void Query_SolutionDir_ResolvesTheSingleProjectItBuilds()
+    {
+        // A solution directory holds no project of its own, so resolution used to widen
+        // to the SDK scope and drop every NuGet package the solution's project references.
+        File.WriteAllText(Path.Combine(_currentDir, "App.sln"), string.Empty);
+        WriteProjectFile(Path.Combine(_currentDir, "src", "Alpha"), "Alpha");
+        WriteManifest("Alpha", Path.Combine(_currentDir, "src", "Alpha"));
+        WriteSdkManifest();
+
+        var result = CreateService().Namespaces(null, new ApiRequestScope(null, null));
+
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        Assert.AreEqual(ApiScopeNames.Project, result.Data!.Scope);
+        Assert.AreEqual("Alpha", result.Data.ProjectName);
+    }
+
+    [TestMethod]
+    public void Query_SolutionDir_WithSeveralProjects_AsksWhichOne()
+    {
+        // Projects in one solution reference different packages, so picking whichever
+        // was enumerated first would make the answer depend on directory ordering.
+        File.WriteAllText(Path.Combine(_currentDir, "App.slnx"), "<Solution />");
+        WriteManifest("Alpha", Path.Combine(_currentDir, "src", "Alpha"));
+        WriteManifest("Beta", Path.Combine(_currentDir, "src", "Beta"));
+        WriteSdkManifest();
+
+        var result = CreateService().Namespaces(null, new ApiRequestScope(null, null));
+
+        Assert.AreEqual(ApiQueryOutcome.NoProject, result.Outcome);
+        StringAssert.Contains(result.Message, "'Alpha'");
+        StringAssert.Contains(result.Message, "'Beta'");
+        StringAssert.Contains(result.Message, "--project <name>");
+    }
+
+    [TestMethod]
+    public void Query_SolutionDir_IgnoresProjectsOutsideTheSolutionTree()
+    {
+        // Only the projects the solution actually contains may answer for it; an
+        // unrelated indexed project elsewhere must not be substituted.
+        File.WriteAllText(Path.Combine(_currentDir, "App.sln"), string.Empty);
+        WriteManifest("Alpha", Path.Combine(Path.GetTempPath(), "SomewhereElse", "Alpha"));
+        WriteSdkManifest();
+
+        var result = CreateService().Namespaces(null, new ApiRequestScope(null, null));
+
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        Assert.AreEqual(ApiScopeNames.Sdk, result.Data!.Scope);
+    }
+
+    [TestMethod]
+    public void Query_SolutionDirNamedByProjectDir_ResolvesTheSameAsTheCurrentDirectory()
+    {
+        // A directory must not mean two different things depending on whether it is the
+        // current directory or was named with --project-dir; naming it explicitly used to
+        // widen to the SDK scope and drop the solution's packages.
+        string solutionDir = Path.Combine(Directory.GetParent(_currentDir)!.FullName, "sln");
+        Directory.CreateDirectory(solutionDir);
+        File.WriteAllText(Path.Combine(solutionDir, "App.sln"), string.Empty);
+        WriteProjectFile(Path.Combine(solutionDir, "src", "Alpha"), "Alpha");
+        WriteManifest("Alpha", Path.Combine(solutionDir, "src", "Alpha"));
+        WriteSdkManifest();
+
+        var result = CreateService().Namespaces(null, new ApiRequestScope(solutionDir, null));
+
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        Assert.AreEqual(ApiScopeNames.Project, result.Data!.Scope);
+        Assert.AreEqual("Alpha", result.Data.ProjectName);
+    }
+
+    [TestMethod]
     public void Query_SdkProjectOption_SelectsSdkScopeExplicitly()
     {
         WriteProjectFile(_currentDir, "Alpha");

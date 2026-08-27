@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.CommandLine;
+using System.CommandLine.Parsing;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using Spectre.Console;
@@ -23,18 +24,46 @@ namespace WinApp.Cli.Commands;
 /// </summary>
 internal static class FindApiShared
 {
-    public static Option<string?> CreateProjectDirOption() => new("--project-dir")
+    /// <summary>
+    /// The scope options are declared once and shared by <c>find-api</c> and every verb
+    /// under it — the pattern the CLI already uses for <c>--verbose</c> and <c>--quiet</c>.
+    /// A separate instance per verb only binds after the verb name, so
+    /// <c>winapp find-api --project App members Button</c> would bind <c>--project</c> to
+    /// nothing and answer from the wrong scope instead of scoping the lookup.
+    /// </summary>
+    public static Option<string?> ProjectDirOption { get; } = new("--project-dir")
     {
         Description = "Project directory to query (defaults to the current directory). Used to locate the indexed project.",
     };
 
-    public static Option<string?> CreateProjectOption() => new("--project")
+    public static Option<string?> ProjectOption { get; } = new("--project")
     {
         Description = "Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project.",
     };
 
-    public static ApiRequestScope ReadScope(ParseResult parseResult, Option<string?> projectDir, Option<string?> project) =>
-        new(parseResult.GetValue(projectDir), parseResult.GetValue(project));
+    public static ApiRequestScope ReadScope(ParseResult parseResult) =>
+        new(parseResult.GetValue(ProjectDirOption), parseResult.GetValue(ProjectOption));
+
+    /// <summary>
+    /// Rejects a search query typed in front of a verb. <c>find-api</c> on its own takes a
+    /// free-form query, so <c>winapp find-api NavigationView members Button</c> binds
+    /// <c>NavigationView</c> to the parent's query argument and then drops it when the verb
+    /// runs — answering half the question with no indication the rest was ignored. The
+    /// validator is attached to the verb rather than the parent because only the innermost
+    /// command's validators run.
+    /// </summary>
+    public static void RejectStrayQuery(Command verb, Argument<string[]> queryArgument) =>
+        verb.Validators.Add(result =>
+        {
+            if (result.Parent is CommandResult parent
+                && parent.GetResult(queryArgument) is { Tokens.Count: > 0 } stray)
+            {
+                string dropped = string.Join(" ", stray.Tokens.Select(token => token.Value));
+                result.AddError(
+                    $"'{dropped}' cannot be combined with the '{verb.Name}' verb. "
+                    + $"Search on its own (winapp find-api \"{dropped}\"), or pass it to the verb as a subject.");
+            }
+        });
 
     /// <summary>
     /// Render an <see cref="ApiQueryResult{T}"/>: a clean error envelope for a

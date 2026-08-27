@@ -1263,9 +1263,11 @@ Search output lists the matching namespaces and types. Add `--verbose` to also p
 **Scopes.** Every answer comes from exactly one scope, reported as `scope` in `--json` and as a note in text output:
 
 - **`project`** - the project in the current directory (or `--project` / `--project-dir`). Covers the Windows SDK, the Windows App SDK, *and* the project's own NuGet packages.
-- **`sdk`** - the machine-wide Windows SDK + Windows App SDK metadata, used automatically when the current directory contains **no project**. This makes `find-api` usable for exploring APIs before any project exists, and needs no network access. It deliberately does **not** include third-party NuGet packages, so a type from (say) the Community Toolkit will not be found in this scope.
+- **`sdk`** - the machine-wide Windows SDK + Windows App SDK metadata, used automatically when the current directory contains **no project and no solution**. This makes `find-api` usable for exploring APIs before any project exists, and needs no network access. It deliberately does **not** include third-party NuGet packages, so a type from (say) the Community Toolkit will not be found in this scope.
 
-A query from a directory with no project is *always* answered by the `sdk` scope - never by whichever project happens to be indexed in the shared cache - so results never depend on unrelated global state. Pass `--project sdk` to select the SDK scope explicitly from inside a project, and `winapp find-api refresh --project sdk` to rebuild it after installing a new Windows SDK.
+A query from a directory with no project and no solution is *always* answered by the `sdk` scope - never by whichever project happens to be indexed in the shared cache - so results never depend on unrelated global state. Pass `--project sdk` to select the SDK scope explicitly from inside a project, and `winapp find-api refresh --project sdk` to rebuild it after installing a new Windows SDK.
+
+**Solution directories.** From a directory holding a `.sln`/`.slnx` with no project file beside it, the projects the solution builds answer instead of the `sdk` scope - they are indexed on demand, so their NuGet packages are included. When the solution builds more than one indexed project, the query lists them and asks for `--project <name>` rather than picking one.
 
 **Commands:**
 - *(bare)* `find-api "<query>" ["<query>"...]` - Lexically search type and member names, grouped by namespace

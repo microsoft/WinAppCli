@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using WinApp.Cli.Services.ApiSearch;
@@ -266,34 +267,41 @@ internal sealed class ApiMetadataService(
             projectDir = ResolveProjectDir(scope);
         }
 
-        string? assetsPath = NuGetResolver.FindProjectAssetsJson(projectDir);
-        if (assetsPath is null)
+        string[] manifestFiles = ManifestFiles(cacheDir);
+
+        // A solution directory has no project and no restore output of its own; the
+        // projects it builds live below it. Those are what must be indexed and
+        // stale-checked, or a query typed at the solution root either answers from the
+        // SDK scope with none of their packages or, once indexed, from an index that
+        // nothing ever refreshes.
+        if (ApiCacheBuilder.FindProjectNameInDir(projectDir) is null
+            && ApiCacheBuilder.FindSolutionFileInDir(projectDir) is not null)
+        {
+            List<ProjectManifest> indexed = FindManifestsUnderDir(manifestFiles, projectDir);
+            if (indexed.Count == 0
+                || indexed.Any(m => IsProjectDirStale(manifestFiles, Path.GetFullPath(m.ProjectDir), cacheDir))
+                || HasRestoredProjectMissingFromIndex(projectDir, indexed))
+            {
+                return RunIndexWithLock(projectDir, cacheDir);
+            }
+            return null;
+        }
+
+        if (NuGetResolver.FindProjectAssetsJson(projectDir) is null)
         {
             return null;
         }
 
-        DateTime assetsWriteTime = File.GetLastWriteTimeUtc(assetsPath);
-        string projectsDir = Path.Combine(cacheDir, "projects");
-        bool needsUpdate = false;
-
-        if (!Directory.Exists(projectsDir))
+        bool needsUpdate;
+        if (manifestFiles.Length == 0)
         {
             needsUpdate = true;
         }
         else
         {
-            string? projectName = ApiCacheBuilder.FindProjectNameInDir(projectDir);
-            if (projectName is not null)
-            {
-                // Match on the manifest's recorded ProjectDir, not on its file name:
-                // a same-named project in another directory must not be mistaken for
-                // this one and suppress indexing of the project actually being queried.
-                string? manifestPath = FindManifestPathForDir(Directory.GetFiles(projectsDir, "*.json"), projectDir);
-                if (manifestPath is null || assetsWriteTime > File.GetLastWriteTimeUtc(manifestPath))
-                {
-                    needsUpdate = true;
-                }
-            }
+            // Only a directory that actually holds a project is indexed from here.
+            needsUpdate = ApiCacheBuilder.FindProjectNameInDir(projectDir) is not null
+                && IsProjectDirStale(manifestFiles, projectDir, cacheDir);
         }
 
         if (needsUpdate)
@@ -301,6 +309,133 @@ internal sealed class ApiMetadataService(
             return RunIndexWithLock(projectDir, cacheDir);
         }
         return null;
+    }
+
+    /// <summary>
+    /// Whether the solution tree holds a project that was restored after it was last
+    /// indexed but has no manifest — a project added to the solution since. Without this,
+    /// stale-checking only the projects already indexed leaves a newly added project
+    /// invisible, and a query at the solution root answers from the one project it
+    /// happens to know instead of asking which of the two was meant.
+    ///
+    /// Restore time is compared against the newest manifest under the tree rather than
+    /// simply treating "no manifest" as stale: a project that legitimately produces no
+    /// manifest — one that resolves no metadata packages at all — would otherwise be
+    /// missing forever and re-index the whole solution on every query.
+    /// </summary>
+    private static bool HasRestoredProjectMissingFromIndex(string solutionDir, List<ProjectManifest> indexed)
+    {
+        var indexedDirs = new HashSet<string>(
+            indexed.Select(m => Path.GetFullPath(m.ProjectDir).TrimEnd(Path.DirectorySeparatorChar)),
+            StringComparer.OrdinalIgnoreCase);
+
+        DateTime lastIndexed = DateTime.MinValue;
+        foreach (ProjectManifest manifest in indexed)
+        {
+            if (DateTime.TryParse(
+                    manifest.GeneratedAt,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal,
+                    out DateTime generated)
+                && generated > lastIndexed)
+            {
+                lastIndexed = generated;
+            }
+        }
+
+        foreach (string projectFile in ApiCacheBuilder.DiscoverProjectFiles(solutionDir, scan: false))
+        {
+            string dir = Path.GetFullPath(Path.GetDirectoryName(projectFile)!).TrimEnd(Path.DirectorySeparatorChar);
+            if (indexedDirs.Contains(dir))
+            {
+                continue;
+            }
+            string? assetsPath = NuGetResolver.FindProjectAssetsJson(dir);
+            if (assetsPath is not null && File.GetLastWriteTimeUtc(assetsPath) > lastIndexed)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Whether the cached index for one project directory no longer reflects it: never
+    /// indexed, indexed before the project's last restore, or invalidated by
+    /// <see cref="IsCachedIndexStale"/>. Manifests are matched on their recorded
+    /// <c>ProjectDir</c>, not on file name, so a same-named project in another directory
+    /// cannot be mistaken for this one and suppress indexing of the project being queried.
+    /// </summary>
+    private static bool IsProjectDirStale(string[] manifestFiles, string projectDir, string cacheDir)
+    {
+        string? manifestPath = FindManifestPathForDir(manifestFiles, projectDir);
+        if (manifestPath is null)
+        {
+            return true;
+        }
+        string? assetsPath = NuGetResolver.FindProjectAssetsJson(projectDir);
+        if (assetsPath is not null
+            && File.GetLastWriteTimeUtc(assetsPath) > File.GetLastWriteTimeUtc(manifestPath))
+        {
+            return true;
+        }
+        return IsCachedIndexStale(manifestPath, projectDir, cacheDir);
+    }
+
+    /// <summary>
+    /// Whether an existing manifest can still be answered from. Restore output is not the
+    /// only thing that invalidates an index: rebuilding a referenced project rewrites its
+    /// <c>.winmd</c> without touching <c>project.assets.json</c>, and a package cache written
+    /// by an older cache format no longer matches what the query side reads. Both are checked
+    /// here, on the read path, because the builder is never reached unless something is
+    /// already known to be stale — so a query would otherwise answer confidently from
+    /// metadata that no longer describes the project.
+    /// </summary>
+    private static bool IsCachedIndexStale(string manifestPath, string projectDir, string cacheDir)
+    {
+        DateTime manifestWriteTime = File.GetLastWriteTimeUtc(manifestPath);
+
+        foreach (string projectFile in ApiCacheBuilder.DiscoverProjectFiles(projectDir, scan: false))
+        {
+            foreach (PackageWithWinMd reference in NuGetResolver.FindWinMdFromProjectReferences(projectFile))
+            {
+                if (reference.WinMdFiles.Any(winmd => File.GetLastWriteTimeUtc(winmd) > manifestWriteTime))
+                {
+                    return true;
+                }
+            }
+        }
+
+        try
+        {
+            ProjectManifest? manifest = JsonSerializer.Deserialize(File.ReadAllText(manifestPath), ApiSearchJsonContext.Default.ProjectManifest);
+            if (manifest is null)
+            {
+                return true;
+            }
+            string packagesRoot = Path.Combine(cacheDir, "packages");
+            foreach (ProjectPackageRef package in manifest.Packages)
+            {
+                if (!ApiCachePaths.TryCombineContained(packagesRoot, new[] { package.Id, package.Version, "meta.json" }, out string metaPath)
+                    || !File.Exists(metaPath))
+                {
+                    return true;
+                }
+                PackageMeta? meta = JsonSerializer.Deserialize(File.ReadAllText(metaPath), ApiSearchJsonContext.Default.PackageMeta);
+                if (meta is null || meta.Format != ApiCachePaths.CacheFormatVersion)
+                {
+                    return true;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            // A manifest or meta.json that cannot be read is treated as stale so the
+            // next query rebuilds it rather than answering from an unknown state.
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -399,10 +534,7 @@ internal sealed class ApiMetadataService(
 
     private ResolvedScope ResolveManifest(ApiRequestScope scope, string cacheDir)
     {
-        string projectsDir = Path.Combine(cacheDir, "projects");
-        string[] files = Directory.Exists(projectsDir)
-            ? Directory.GetFiles(projectsDir, "*.json")
-            : [];
+        string[] files = ManifestFiles(cacheDir);
 
         if (scope.Project is not null)
         {
@@ -481,9 +613,13 @@ internal sealed class ApiMetadataService(
                     $"then run 'winapp find-api refresh' in that directory.{(available.Length == 0 ? "" : $" Indexed projects: {available}.")}");
             }
 
-            // --project-dir pointed at a directory with no project in it: same
-            // situation as running from a projectless directory, so answer from the
-            // SDK scope rather than erroring.
+            // --project-dir pointed at a directory with no project in it. A solution
+            // directory resolves the same way here as it does as the current directory,
+            // so naming it explicitly does not silently drop the solution's packages.
+            if (ResolveSolutionScope(fullPath, files) is { } namedSolution)
+            {
+                return namedSolution;
+            }
             return ResolveSdkScope(cacheDir);
         }
 
@@ -501,10 +637,79 @@ internal sealed class ApiMetadataService(
             return ResolvedScope.Failed(NoProjectMessage);
         }
 
+        // A solution directory contains no project of its own, but the projects it builds
+        // are indexed under it. Answering from the SDK scope there silently drops every
+        // NuGet package those projects reference.
+        if (ResolveSolutionScope(cwd, files) is { } solutionScope)
+        {
+            return solutionScope;
+        }
+
         // No project here. Answer from the machine-wide SDK scope. Note this does not
         // consult the cached project list at all: a query from a projectless directory
         // must not change meaning just because some unrelated project was indexed.
         return ResolveSdkScope(cacheDir);
+    }
+
+    /// <summary>
+    /// Resolves a directory that holds a solution but no project of its own to the single
+    /// project the solution builds, or asks which one when it builds several. Returns
+    /// <see langword="null"/> when the directory holds no solution or nothing under it is
+    /// indexed, leaving the caller's own fallback in charge.
+    /// </summary>
+    private static ResolvedScope? ResolveSolutionScope(string dir, string[] files)
+    {
+        if (ApiCacheBuilder.FindSolutionFileInDir(dir) is null)
+        {
+            return null;
+        }
+
+        List<IGrouping<string, ProjectManifest>> underSolution = FindManifestsUnderDir(files, dir)
+            .GroupBy(m => Path.GetFullPath(m.ProjectDir), StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (underSolution.Count == 1)
+        {
+            return ResolvedScope.Project(underSolution[0].First());
+        }
+        if (underSolution.Count > 1)
+        {
+            // Choosing one would make the answer depend on directory ordering, and the
+            // projects in a solution reference different packages.
+            string names = string.Join(", ", underSolution
+                .Select(g => $"'{g.First().ProjectName}'")
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase));
+            return ResolvedScope.Failed(
+                $"This solution has {underSolution.Count} indexed projects: {names}. " +
+                "Pick one with '--project <name>', or use '--project sdk' for the Windows SDK scope.");
+        }
+        return null;
+    }
+
+    private static string[] ManifestFiles(string cacheDir)
+    {
+        string projectsDir = Path.Combine(cacheDir, "projects");
+        return Directory.Exists(projectsDir) ? Directory.GetFiles(projectsDir, "*.json") : [];
+    }
+
+    /// <summary>
+    /// The indexed projects whose recorded directory lies under <paramref name="root"/>.
+    /// A solution directory contains no project of its own, so this is how a query typed
+    /// at the solution root reaches the projects the solution builds.
+    /// </summary>
+    private static List<ProjectManifest> FindManifestsUnderDir(string[] files, string root)
+    {
+        string prefix = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var found = new List<ProjectManifest>();
+        foreach (string path in files)
+        {
+            ProjectManifest? manifest = DeserializeManifest(path);
+            if (manifest is not null
+                && Path.GetFullPath(manifest.ProjectDir).StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                found.Add(manifest);
+            }
+        }
+        return found;
     }
 
     private static bool IsSdkScopeName(string name) =>
