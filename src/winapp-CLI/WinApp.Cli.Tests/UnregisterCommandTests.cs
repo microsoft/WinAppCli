@@ -81,7 +81,7 @@ public class UnregisterCommandTests : BaseCommandTests
         // Assert
         Assert.AreEqual(0, exitCode);
         Assert.IsTrue(_fakePackageRegistrationService.FindDevPackagesCalls.Contains("TestPackage"));
-        Assert.IsTrue(_fakePackageRegistrationService.UnregisterCalls.Any(c => c.PackageName == "TestPackage"));
+        Assert.IsTrue(_fakePackageRegistrationService.UnregisterByFullNameCalls.Any(c => c.PackageFullName == "TestPackage_1.0.0.0_x64__abc123"));
     }
 
     [TestMethod]
@@ -120,6 +120,7 @@ public class UnregisterCommandTests : BaseCommandTests
         // Assert
         Assert.AreEqual(0, exitCode);
         Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterCalls.Count);
+        Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterByFullNameCalls.Count);
     }
 
     [TestMethod]
@@ -141,6 +142,7 @@ public class UnregisterCommandTests : BaseCommandTests
         // Assert
         Assert.AreEqual(0, exitCode);
         Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterCalls.Count);
+        Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterByFullNameCalls.Count);
     }
 
     [TestMethod]
@@ -165,7 +167,7 @@ public class UnregisterCommandTests : BaseCommandTests
 
         // Assert
         Assert.AreEqual(0, exitCode);
-        Assert.IsTrue(_fakePackageRegistrationService.UnregisterCalls.Any(c => c.PackageName == "TestPackage"));
+        Assert.IsTrue(_fakePackageRegistrationService.UnregisterByFullNameCalls.Any(c => c.PackageFullName == "TestPackage_1.0.0.0_x64__abc123"));
     }
 
     [TestMethod]
@@ -188,6 +190,7 @@ public class UnregisterCommandTests : BaseCommandTests
 
         // Assert
         Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterCalls.Count);
+        Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterByFullNameCalls.Count);
         Assert.AreEqual(0, exitCode);
     }
 
@@ -210,7 +213,7 @@ public class UnregisterCommandTests : BaseCommandTests
 
         // Assert
         Assert.AreEqual(0, exitCode);
-        Assert.IsTrue(_fakePackageRegistrationService.UnregisterCalls.Any(c => c.PackageName == "TestPackage"));
+        Assert.IsTrue(_fakePackageRegistrationService.UnregisterByFullNameCalls.Any(c => c.PackageFullName == "TestPackage_1.0.0.0_x64__abc123"));
     }
 
     [TestMethod]
@@ -299,7 +302,7 @@ public class UnregisterCommandTests : BaseCommandTests
 
         Assert.AreEqual(0, exitCode);
         Assert.AreEqual(1, _fakeProjectRunService.ResolveSingleFileIdentityCalls.Count);
-        Assert.IsTrue(_fakePackageRegistrationService.UnregisterCalls.Any(c => c.PackageName == "counter"));
+        Assert.IsTrue(_fakePackageRegistrationService.UnregisterByFullNameCalls.Any(c => c.PackageFullName == "counter_1.0.0.0_x64__abc"));
     }
 
     [TestMethod]
@@ -323,6 +326,7 @@ public class UnregisterCommandTests : BaseCommandTests
 
         Assert.AreEqual(0, exitCode);
         Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterCalls.Count);
+        Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterByFullNameCalls.Count);
     }
 
     [TestMethod]
@@ -343,7 +347,7 @@ public class UnregisterCommandTests : BaseCommandTests
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--force"]);
 
         Assert.AreEqual(0, exitCode);
-        Assert.IsTrue(_fakePackageRegistrationService.UnregisterCalls.Any(c => c.PackageName == "counter"));
+        Assert.IsTrue(_fakePackageRegistrationService.UnregisterByFullNameCalls.Any(c => c.PackageFullName == "counter_1.0.0.0_x64__abc"));
     }
 
     [TestMethod]
@@ -366,7 +370,7 @@ public class UnregisterCommandTests : BaseCommandTests
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName]);
 
         Assert.AreEqual(0, exitCode);
-        Assert.IsTrue(_fakePackageRegistrationService.UnregisterCalls.Any(c => c.PackageName == "counter"));
+        Assert.IsTrue(_fakePackageRegistrationService.UnregisterByFullNameCalls.Any(c => c.PackageFullName == "counter_1.0.0.0_x64__abc"));
     }
 
     [TestMethod]
@@ -385,6 +389,7 @@ public class UnregisterCommandTests : BaseCommandTests
 
         Assert.AreEqual(0, exitCode);
         Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterCalls.Count);
+        Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterByFullNameCalls.Count);
         StringAssert.Contains(ambientOutput, "unpackaged app");
     }
 
@@ -415,6 +420,7 @@ public class UnregisterCommandTests : BaseCommandTests
 
         Assert.AreEqual(1, exitCode);
         Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterCalls.Count);
+        Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterByFullNameCalls.Count);
     }
 
     [TestMethod]
@@ -431,6 +437,81 @@ public class UnregisterCommandTests : BaseCommandTests
         Assert.AreEqual(1, exitCode);
         Assert.AreEqual(0, _fakeProjectRunService.ResolveSingleFileIdentityCalls.Count);
         Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterCalls.Count);
+        Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterByFullNameCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task UnregisterCommand_SiblingDirectorySharingAPrefix_IsSkipped()
+    {
+        // 'C:\...\counter-old' string-starts-with 'C:\...\counter' but is a different tree. A plain
+        // prefix check would remove that package and delete its app data.
+        var appDir = _tempDirectory.CreateSubdirectory("counter");
+        var manifest = await CreateTestManifestAsync(appDir.FullName);
+        var command = GetRequiredService<UnregisterCommand>();
+
+        _fakePackageRegistrationService.FakeDevPackages =
+        [
+            new DevPackageInfo("TestPackage_1.0.0.0_x64__abc123", "TestPackage", "1.0.0.0",
+                Path.Join(_tempDirectory.FullName, "counter-old", "AppX"), IsDevelopmentMode: true)
+        ];
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--manifest", manifest.FullName]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterByFullNameCalls.Count,
+            "A sibling directory that merely shares a string prefix is a different tree");
+    }
+
+    [TestMethod]
+    public async Task UnregisterCommand_RemovesOnlyTheVettedPackage_NotEverySameNamedOne()
+    {
+        // The per-package checks are meaningless if removal is name-wide: a same-named package this loop
+        // deliberately skipped would be deleted anyway, along with its application data.
+        var appDir = _tempDirectory.CreateSubdirectory("mine");
+        var manifest = await CreateTestManifestAsync(appDir.FullName);
+        var command = GetRequiredService<UnregisterCommand>();
+
+        _fakePackageRegistrationService.FakeDevPackages =
+        [
+            new DevPackageInfo("TestPackage_1.0.0.0_x64__theirs", "TestPackage", "1.0.0.0",
+                Path.Join(_tempDirectory.FullName, "someone-else", "AppX"), IsDevelopmentMode: true),
+            new DevPackageInfo("TestPackage_1.0.0.0_x64__mine", "TestPackage", "1.0.0.0",
+                Path.Join(appDir.FullName, "AppX"), IsDevelopmentMode: true)
+        ];
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--manifest", manifest.FullName]);
+
+        Assert.AreEqual(0, exitCode);
+        var removed = _fakePackageRegistrationService.UnregisterByFullNameCalls
+            .Select(c => c.PackageFullName)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        Assert.AreEqual(1, removed.Count, "Only the vetted package may be removed");
+        Assert.AreEqual("TestPackage_1.0.0.0_x64__mine", removed[0]);
+        Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterCalls.Count,
+            "The name-wide overload would also remove the out-of-tree package");
+    }
+
+    [TestMethod]
+    public async Task UnregisterCommand_WindowsRefusesRemoval_ReportsSkippedNotUnregistered()
+    {
+        TestAnsiConsole.Profile.Width = 1000;
+        var manifest = await CreateTestManifestAsync();
+        var command = GetRequiredService<UnregisterCommand>();
+
+        _fakePackageRegistrationService.FakeDevPackages =
+        [
+            new DevPackageInfo("TestPackage_1.0.0.0_x64__abc123", "TestPackage", "1.0.0.0",
+                _tempDirectory.FullName, IsDevelopmentMode: true)
+        ];
+        _fakePackageRegistrationService.FakeUnregisterByFullNameResult = false;
+
+        await ParseAndInvokeWithCaptureAsync(command, ["--manifest", manifest.FullName, "--json"]);
+
+        var root = System.Text.Json.JsonDocument.Parse(TestAnsiConsole.Output.Trim()).RootElement;
+        Assert.IsFalse(root.TryGetProperty("Unregistered", out var u) && u.ValueKind != System.Text.Json.JsonValueKind.Null,
+            "A refused removal must not be reported as unregistered");
+        Assert.IsTrue(root.TryGetProperty("Skipped", out var s) && s.ValueKind != System.Text.Json.JsonValueKind.Null);
     }
 
     #endregion
@@ -496,7 +577,7 @@ public class UnregisterCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task UnregisterCommand_Prune_OneFailure_StillRemovesTheRest()
+    public async Task UnregisterCommand_Prune_OneFailure_StillAttemptsTheRestAndReportsFailure()
     {
         var command = GetRequiredService<UnregisterCommand>();
         _fakePackageRegistrationService.FakeOrphanedDevPackages =
@@ -508,9 +589,30 @@ public class UnregisterCommandTests : BaseCommandTests
 
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--prune", "--force"]);
 
-        // Every package was attempted even though each threw, and the sweep still reports success.
-        Assert.AreEqual(0, exitCode);
+        // Nonzero: a script must not carry on as though the stale registrations were removed.
+        Assert.AreEqual(1, exitCode);
         Assert.AreEqual(1, _fakePackageRegistrationService.FindOrphanedDevPackagesCallCount);
+    }
+
+    [TestMethod]
+    public async Task UnregisterCommand_Prune_WindowsRefusesRemoval_DoesNotClaimSuccess()
+    {
+        // Windows reports a refused removal as error text rather than an exception, so ignoring the
+        // result would hand cleanup automation a false confirmation.
+        TestAnsiConsole.Profile.Width = 1000;
+        var command = GetRequiredService<UnregisterCommand>();
+        _fakePackageRegistrationService.FakeOrphanedDevPackages =
+        [
+            new DevPackageInfo("dead.one_1.0.0.0_x64__abc", "dead.one", "1.0.0.0", null, IsDevelopmentMode: true)
+        ];
+        _fakePackageRegistrationService.FakeUnregisterByFullNameResult = false;
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--prune", "--force", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        var root = System.Text.Json.JsonDocument.Parse(TestAnsiConsole.Output.Trim()).RootElement;
+        Assert.IsFalse(root.TryGetProperty("Unregistered", out var u) && u.ValueKind != System.Text.Json.JsonValueKind.Null,
+            "A refused removal must not be reported as unregistered");
     }
 
     [TestMethod]

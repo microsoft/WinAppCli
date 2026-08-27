@@ -51,7 +51,13 @@ internal interface IPackageRegistrationService
     /// for packages registered in development mode.
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task UnregisterByFullNameAsync(string packageFullName, bool preserveAppData = true, CancellationToken cancellationToken = default);
+    /// <returns>
+    /// <see langword="true"/> when Windows confirmed the removal; <see langword="false"/> when it
+    /// reported an error. A caller that tells the user something was removed must check this — Windows
+    /// reports a refused removal as error text rather than an exception, so ignoring the result claims
+    /// success for a package that is still registered.
+    /// </returns>
+    Task<bool> UnregisterByFullNameAsync(string packageFullName, bool preserveAppData = true, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Installs an MSIX/APPX package file, optionally forcing application shutdown.

@@ -162,7 +162,7 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
     }
 
     /// <inheritdoc />
-    public async Task UnregisterByFullNameAsync(string packageFullName, bool preserveAppData = true, CancellationToken cancellationToken = default)
+    public async Task<bool> UnregisterByFullNameAsync(string packageFullName, bool preserveAppData = true, CancellationToken cancellationToken = default)
     {
         logger.LogDebug("Removing package: {PackageFullName} (preserveAppData={PreserveAppData})", packageFullName, preserveAppData);
 
@@ -171,7 +171,10 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
         if (!string.IsNullOrEmpty(result.ErrorText))
         {
             logger.LogWarning("Warning removing package {PackageFullName}: {Error}", packageFullName, result.ErrorText);
+            return false;
         }
+
+        return true;
     }
 
     /// <inheritdoc />

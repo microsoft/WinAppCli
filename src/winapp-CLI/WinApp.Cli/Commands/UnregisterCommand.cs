@@ -198,11 +198,13 @@ internal class UnregisterCommand : Command, IShortDescription
                         continue;
                     }
 
-                    // Check the install location sits under the tree the caller identified
+                    // Confirm the install location really sits under the tree the caller identified.
+                    // Segment-aware on purpose: a plain string prefix treats SIBLING directories as the
+                    // same tree, so a package installed at 'C:\apps\counter-old\AppX' would pass a check
+                    // rooted at 'C:\apps\counter' and be removed along with its app data.
                     if (!force && !string.IsNullOrEmpty(pkg.InstallLocation) && trustedRoot.Length > 0)
                     {
-                        var installPath = Path.GetFullPath(pkg.InstallLocation);
-                        if (!installPath.StartsWith(trustedRoot, StringComparison.OrdinalIgnoreCase))
+                        if (!MsixService.IsPathInsideDirectory(pkg.InstallLocation, trustedRoot))
                         {
                             if (!isJson)
                             {
@@ -214,8 +216,19 @@ internal class UnregisterCommand : Command, IShortDescription
                         }
                     }
 
-                    // Explicit unregister command — remove package and its data
-                    await packageRegistrationService.UnregisterAsync(name, preserveAppData: false, cancellationToken);
+                    // Remove the package that was just vetted, BY FULL NAME. The name-wide overload
+                    // removes every package sharing this identity name, which would defeat the per-package
+                    // checks above: a same-named package that this loop deliberately skipped — because it
+                    // is Store-installed or lives in another tree — would be deleted anyway, along with
+                    // its application data.
+                    var removed = await packageRegistrationService.UnregisterByFullNameAsync(pkg.FullName, preserveAppData: false, cancellationToken);
+                    if (!removed)
+                    {
+                        // Windows reports a refused removal as error text rather than an exception, so
+                        // reporting it as unregistered would tell the user a still-registered package is gone.
+                        skipped.Add(pkg.FullName);
+                        continue;
+                    }
 
                     if (!isJson)
                     {
@@ -326,7 +339,16 @@ internal class UnregisterCommand : Command, IShortDescription
                     // By full name, not identity name: prune targets exactly the registrations it listed,
                     // so a same-named package that IS still installed from a live location is untouched.
                     // The files are already gone, so there is no app data worth preserving.
-                    await packageRegistrationService.UnregisterByFullNameAsync(orphan.FullName, preserveAppData: false, cancellationToken);
+                    var removed = await packageRegistrationService.UnregisterByFullNameAsync(orphan.FullName, preserveAppData: false, cancellationToken);
+                    if (!removed)
+                    {
+                        // Windows reports a refused removal as error text rather than an exception, so
+                        // counting it as unregistered would hand cleanup automation a false confirmation
+                        // while the dead registration is still there.
+                        skipped.Add(orphan.FullName);
+                        continue;
+                    }
+
                     unregistered.Add(orphan.FullName);
 
                     if (!isJson)
@@ -345,6 +367,19 @@ internal class UnregisterCommand : Command, IShortDescription
             if (isJson)
             {
                 PrintJson(unregistered, skipped, errorMessage: null);
+            }
+
+            // A sweep that could not remove everything it listed must not report success: scripts would
+            // carry on as though the stale registrations were gone.
+            if (skipped.Count > 0)
+            {
+                if (!isJson)
+                {
+                    logger.LogError("{UISymbol} {Skipped} of {Total} registration(s) could not be removed.",
+                        UiSymbols.Error, skipped.Count, orphans.Count);
+                }
+
+                return 1;
             }
 
             return 0;

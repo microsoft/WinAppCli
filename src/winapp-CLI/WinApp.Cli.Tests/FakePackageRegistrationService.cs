@@ -91,14 +91,20 @@ internal class FakePackageRegistrationService : IPackageRegistrationService
     /// </summary>
     public Exception? UnregisterByFullNameThrows { get; set; }
 
-    public Task UnregisterByFullNameAsync(string packageFullName, bool preserveAppData = true, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// When false, <see cref="UnregisterByFullNameAsync"/> reports the removal as refused by Windows
+    /// (error text rather than an exception). Defaults to true.
+    /// </summary>
+    public bool FakeUnregisterByFullNameResult { get; set; } = true;
+
+    public Task<bool> UnregisterByFullNameAsync(string packageFullName, bool preserveAppData = true, CancellationToken cancellationToken = default)
     {
         if (UnregisterByFullNameThrows is not null)
         {
             throw UnregisterByFullNameThrows;
         }
         UnregisterByFullNameCalls.Add((packageFullName, preserveAppData));
-        return Task.CompletedTask;
+        return Task.FromResult(FakeUnregisterByFullNameResult);
     }
 
     /// <summary>
