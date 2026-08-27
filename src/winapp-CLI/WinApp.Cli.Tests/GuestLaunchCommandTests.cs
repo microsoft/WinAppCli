@@ -111,8 +111,8 @@ public class GuestLaunchCommandTests : BaseCommandTests
     [TestMethod]
     public async Task ExactLayoutMatch_Launches_WithNoMutationCallsWhatsoever()
     {
-        var layout = Path.Combine(_tempDirectory.FullName, "layout");
-        var payload = Path.Combine(_tempDirectory.FullName, "payload");
+        var layout = Path.Join(_tempDirectory.FullName, "layout");
+        var payload = Path.Join(_tempDirectory.FullName, "payload");
 
         _fakePackageRegistrationService.FakeDevPackages =
         [
@@ -138,9 +138,9 @@ public class GuestLaunchCommandTests : BaseCommandTests
         // deployment sharing this package identity -- has re-registered the same identity from a
         // different location. The general `run` command would see this mismatch and silently
         // fall through to unregister+register; this verb must refuse outright instead.
-        var layoutA = Path.Combine(_tempDirectory.FullName, "layoutA");
-        var layoutB = Path.Combine(_tempDirectory.FullName, "layoutB");
-        var payload = Path.Combine(_tempDirectory.FullName, "payload");
+        var layoutA = Path.Join(_tempDirectory.FullName, "layoutA");
+        var layoutB = Path.Join(_tempDirectory.FullName, "layoutB");
+        var payload = Path.Join(_tempDirectory.FullName, "payload");
 
         _fakePackageRegistrationService.FakeDevPackages =
         [
@@ -170,8 +170,8 @@ public class GuestLaunchCommandTests : BaseCommandTests
         var handler = GetRequiredService<RunCommand.Handler>();
         var parsed = Parse(
             "Pkg", "CN=Test", "App",
-            Path.Combine(_tempDirectory.FullName, "layout"),
-            Path.Combine(_tempDirectory.FullName, "payload"));
+            Path.Join(_tempDirectory.FullName, "layout"),
+            Path.Join(_tempDirectory.FullName, "payload"));
 
         var exitCode = await handler.InvokeAsync(parsed.Value, TestContext.CancellationToken);
 
@@ -183,7 +183,7 @@ public class GuestLaunchCommandTests : BaseCommandTests
     [TestMethod]
     public async Task MultipleRegisteredPackages_RefusesToLaunch_WithNoMutationCalls()
     {
-        var layout = Path.Combine(_tempDirectory.FullName, "layout");
+        var layout = Path.Join(_tempDirectory.FullName, "layout");
 
         // Ambiguous: two dev-mode registrations under the same identity name. The verb must not
         // guess which one is "right" by mutating toward it -- it refuses.
@@ -195,7 +195,7 @@ public class GuestLaunchCommandTests : BaseCommandTests
 
         var handler = GetRequiredService<RunCommand.Handler>();
         var parsed = Parse(
-            "Pkg", "CN=Test", "App", layout, Path.Combine(_tempDirectory.FullName, "payload"));
+            "Pkg", "CN=Test", "App", layout, Path.Join(_tempDirectory.FullName, "payload"));
 
         var exitCode = await handler.InvokeAsync(parsed.Value, TestContext.CancellationToken);
 
@@ -210,7 +210,7 @@ public class GuestLaunchCommandTests : BaseCommandTests
         // A non-dev-mode (e.g. Store-installed) package under the same identity name must not be
         // treated as satisfying the expectation, even if its InstallLocation happened to match --
         // this verb only ever launches what this run's own dev-mode registration produced.
-        var layout = Path.Combine(_tempDirectory.FullName, "layout");
+        var layout = Path.Join(_tempDirectory.FullName, "layout");
 
         _fakePackageRegistrationService.FakeDevPackages =
         [
@@ -219,7 +219,7 @@ public class GuestLaunchCommandTests : BaseCommandTests
 
         var handler = GetRequiredService<RunCommand.Handler>();
         var parsed = Parse(
-            "Pkg", "CN=Test", "App", layout, Path.Combine(_tempDirectory.FullName, "payload"));
+            "Pkg", "CN=Test", "App", layout, Path.Join(_tempDirectory.FullName, "payload"));
 
         var exitCode = await handler.InvokeAsync(parsed.Value, TestContext.CancellationToken);
 
@@ -231,7 +231,7 @@ public class GuestLaunchCommandTests : BaseCommandTests
     [TestMethod]
     public async Task WithAlias_ExactMatch_NeverCallsLaunchByAumid_AndStillNoMutationCalls()
     {
-        var layout = Path.Combine(_tempDirectory.FullName, "layout");
+        var layout = Path.Join(_tempDirectory.FullName, "layout");
         var payload = _tempDirectory.CreateSubdirectory("aliasPayload").FullName;
 
         _fakePackageRegistrationService.FakeDevPackages =
@@ -260,8 +260,8 @@ public class GuestLaunchCommandTests : BaseCommandTests
         // returns (see RunCommand.Sandbox.cs's UnregisterDeploymentAfterExitAsync). This test only
         // confirms a mismatch still refuses exactly as it does without that (removed) flag, so the
         // refusal behavior is not accidentally coupled to it.
-        var layoutA = Path.Combine(_tempDirectory.FullName, "layoutA");
-        var layoutB = Path.Combine(_tempDirectory.FullName, "layoutB");
+        var layoutA = Path.Join(_tempDirectory.FullName, "layoutA");
+        var layoutB = Path.Join(_tempDirectory.FullName, "layoutB");
 
         _fakePackageRegistrationService.FakeDevPackages =
         [
@@ -271,7 +271,7 @@ public class GuestLaunchCommandTests : BaseCommandTests
         var handler = GetRequiredService<RunCommand.Handler>();
         var parsed = Parse(
             "Pkg", "CN=Test", "App", layoutA,
-            Path.Combine(_tempDirectory.FullName, "payload"));
+            Path.Join(_tempDirectory.FullName, "payload"));
 
         var exitCode = await handler.InvokeAsync(parsed.Value, TestContext.CancellationToken);
 
@@ -289,8 +289,8 @@ public class GuestLaunchCommandTests : BaseCommandTests
     [TestMethod]
     public async Task ActivationThrows_UnderJson_ProducesValidErrorEnvelope_AndKeepsStdoutPure()
     {
-        var layout = Path.Combine(_tempDirectory.FullName, "layout");
-        var payload = Path.Combine(_tempDirectory.FullName, "payload");
+        var layout = Path.Join(_tempDirectory.FullName, "layout");
+        var payload = Path.Join(_tempDirectory.FullName, "payload");
 
         _fakePackageRegistrationService.FakeDevPackages =
         [
@@ -329,8 +329,8 @@ public class GuestLaunchCommandTests : BaseCommandTests
     [TestMethod]
     public async Task ActivationThrows_WithoutJson_FailsCleanly_WithNoUnhandledException()
     {
-        var layout = Path.Combine(_tempDirectory.FullName, "layout");
-        var payload = Path.Combine(_tempDirectory.FullName, "payload");
+        var layout = Path.Join(_tempDirectory.FullName, "layout");
+        var payload = Path.Join(_tempDirectory.FullName, "payload");
 
         _fakePackageRegistrationService.FakeDevPackages =
         [

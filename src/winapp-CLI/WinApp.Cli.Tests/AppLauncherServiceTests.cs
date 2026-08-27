@@ -163,7 +163,7 @@ public class AppLauncherServiceTests
     [TestMethod]
     public void GetRegisteredPackageOrThrow_InjectedValue_SurvivesEvenWhenTheLocationDoesNotExistOnDisk()
     {
-        var missingLocation = Path.Combine(Path.GetTempPath(), $"winapp-test-does-not-exist-{Guid.NewGuid():n}");
+        var missingLocation = Path.Join(Path.GetTempPath(), $"winapp-test-does-not-exist-{Guid.NewGuid():n}");
         Assert.IsFalse(Directory.Exists(missingLocation), "Precondition: the simulated location must not exist.");
 
         _service.FindRegisteredPackageImpl = _ =>
@@ -221,7 +221,7 @@ public class AppLauncherServiceTests
             await launched.WaitForExitAsync(cts.Token);
 
             Assert.AreEqual(0, launched.ExitCode, "Suppressed launch must drain output and exit, not deadlock on a full pipe");
-            Assert.IsTrue(File.Exists(Path.Combine(workingDir.FullName, "marker.txt")),
+            Assert.IsTrue(File.Exists(Path.Join(workingDir.FullName, "marker.txt")),
                 "The child must run in the supplied working directory with the given arguments");
         }
         finally

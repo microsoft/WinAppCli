@@ -133,7 +133,7 @@ public class GuestHandshakeSocketTests
         await closing;
 
         Assert.IsTrue(
-            failure.Error.Context?.ContainsKey(GuestSecureChannel.ClosedDuringHandshakeKey) == true,
+            failure.Error.Context?.ContainsKey(GuestSecureChannel.ClosedDuringHandshakeKey),
             "A clean close during the handshake must classify the same as a reset.");
     }
 
@@ -164,7 +164,7 @@ public class GuestHandshakeSocketTests
 
         // The host sees the same classification a ceiling drop produces...
         Assert.IsTrue(
-            failure.Error.Context?.ContainsKey(GuestSecureChannel.ClosedDuringHandshakeKey) == true,
+            failure.Error.Context?.ContainsKey(GuestSecureChannel.ClosedDuringHandshakeKey),
             "A killed agent resets mid-handshake just as a ceiling drop does.");
 
         // ...so the decision cannot rest on that alone. Nothing is listening now, which is what
@@ -206,7 +206,7 @@ public class GuestHandshakeSocketTests
         await serving;
 
         Assert.IsFalse(
-            failure.Error.Context?.ContainsKey(GuestSecureChannel.ClosedDuringHandshakeKey) == true,
+            failure.Error.Context?.ContainsKey(GuestSecureChannel.ClosedDuringHandshakeKey) ?? false,
             "A key mismatch must not be reported as the peer declining the connection.");
     }
 
@@ -339,7 +339,7 @@ public class GuestHandshakeSocketTests
         catch (ExecutionTargetException dropped)
         {
             Assert.IsTrue(
-                dropped.Error.Context?.ContainsKey(GuestSecureChannel.ClosedDuringHandshakeKey) == true,
+                dropped.Error.Context?.ContainsKey(GuestSecureChannel.ClosedDuringHandshakeKey),
                 $"A dropped connection must be classified, not raw: {dropped.Error.Code} {dropped.Error.Message}");
             return;
         }
