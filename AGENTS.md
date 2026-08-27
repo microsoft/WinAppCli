@@ -134,27 +134,33 @@ the NuGet client instead, which reads `nuget.config` and ignores `WINAPP_NUGET_*
 `nuget.org` is disabled and no internal feed is a registered source, they fail with
 `[ERROR] - Failed to add Microsoft.WindowsAppSDK package reference`.
 
-Register the feed once (no password is stored — the Azure Artifacts credential provider supplies
-it at runtime from the variable below):
-
-```powershell
-dotnet nuget add source `
-    'https://pkgs.dev.azure.com/microsoft/pde-oss/_packaging/pde-oss_Internal/nuget/v3/index.json' `
-    --name pde-oss_Internal
-```
-
-Then, in the same session as the variables above, hand the credential provider the token.
-`VSS_NUGET_ACCESSTOKEN` alone is **not** enough here — the service index returns 401 without this:
+Do **not** fix this by adding a global package source — these tests run in `%TEMP%`, outside the
+repo, so a repo-local `nuget.config` never applies to them, and a machine-wide registration is a
+persistent change to a shared dev box. Instead point `APPDATA` at a throwaway directory holding
+the repo's own feed config, which scopes the whole thing to the session:
 
 ```powershell
 $feed = 'https://pkgs.dev.azure.com/microsoft/pde-oss/_packaging/pde-oss_Internal/nuget/v3/index.json'
+
+# NuGet resolves its user-level config from %APPDATA%\NuGet\NuGet.Config, so redirecting APPDATA
+# swaps in the repo's feed list without touching the real one.
+$cfg = Join-Path $env:TEMP "winapp-nuget-$PID"
+New-Item -ItemType Directory -Path "$cfg\NuGet" -Force | Out-Null
+Copy-Item .pipelines\release-nuget.config "$cfg\NuGet\NuGet.Config"
+$env:APPDATA = $cfg
+
+# The Azure Artifacts credential provider needs the endpoint spelled out.
+# VSS_NUGET_ACCESSTOKEN alone is NOT enough here - the service index returns 401 without this.
 $env:VSS_NUGET_EXTERNAL_FEED_ENDPOINTS = @{
     endpointCredentials = @(@{ endpoint = $feed; username = 'docker'; password = $env:VSS_NUGET_ACCESSTOKEN })
 } | ConvertTo-Json -Compress -Depth 5
 ```
 
-CI does the equivalent by copying `.pipelines/release-nuget.config` over
-`%APPDATA%\NuGet\NuGet.Config` before building.
+`.pipelines/release-nuget.config` is the single source of truth for the feed URL — do not hardcode
+it somewhere else. CI does the same thing less surgically, by copying that file over
+`%APPDATA%\NuGet\NuGet.Config` on a throwaway agent.
+
+Because `APPDATA` is redirected, run this in a dedicated shell and let it end with the run.
 
 More generally: if something fails locally but passes in CI, the difference is configuration,
 not luck. Check `.pipelines/templates/build.yaml` for the environment CI provides before
