@@ -73,9 +73,7 @@ finding — do not double-report).
 - New NuGet `.csproj` needs `<Copyright>© Microsoft Corporation. All rights
   reserved.</Copyright>`.
 - MSBuild globs are `**\*` / `**\*.*`, never bare `**`.
-- Release runs `.pipelines/release.yml` on `rel/v*` with ESRP signing, and
-  `.pipelines/release-nuget.yml` publishes the signed packages to nuget.org —
-  changes to signing flow, output paths, or artifact names need pipeline review.
-  The `nuget-packages` artifact name is a contract between the two pipelines.
+- Release runs `.pipelines/release.yml` on `rel/v*` with ESRP signing — changes
+  to signing flow, output paths, or artifact names need pipeline review.
 - Release builds treat warnings as errors with `EnforceCodeStyleInBuild=true`;
   flag new `<NoWarn>` that suppresses something real.
