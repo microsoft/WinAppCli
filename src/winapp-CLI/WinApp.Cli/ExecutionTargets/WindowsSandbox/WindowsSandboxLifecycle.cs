@@ -204,7 +204,7 @@ internal sealed class WindowsSandboxLifecycle(
         {
             return SelectAdoptionCandidate(running, state) is { } candidate
                 ? await AdoptRunningInstanceAsync(state, candidate, cancellationToken).ConfigureAwait(false)
-                : throw AmbiguousInstances(running);
+                : throw NoUsableCandidate(running);
         }
 
         return await StartOwnedInstanceAsync(state, cancellationToken).ConfigureAwait(false);
@@ -414,16 +414,48 @@ internal sealed class WindowsSandboxLifecycle(
     /// Sandbox produces today, so seeing it means the host is in a condition winapp does not
     /// understand — and picking arbitrarily from a set it cannot explain is how the wrong guest gets
     /// prepared.
+    /// <para>
+    /// A recorded instance is excluded only when the record actually establishes ownership, which
+    /// takes both an ID and a boot nonce. A half-written record names an instance winapp cannot
+    /// form an epoch for, so treating that ID as owned would exclude the one candidate on the host
+    /// and report a single running Sandbox as "more than one".
+    /// </para>
     /// </remarks>
     private static string? SelectAdoptionCandidate(IReadOnlyList<string> running, TargetState? state)
     {
+        var owned = state is { InstanceId: { } id, BootNonce.Length: > 0 } ? id : null;
+
         var candidates = running
-            .Where(id => !string.Equals(id, state?.InstanceId, StringComparison.OrdinalIgnoreCase))
-            .Where(id => !string.Equals(id, state?.PendingInstanceId, StringComparison.OrdinalIgnoreCase))
+            .Where(candidate => !string.Equals(candidate, owned, StringComparison.OrdinalIgnoreCase))
+            .Where(candidate => !string.Equals(
+                candidate, state?.PendingInstanceId, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
         return candidates.Count == 1 ? candidates[0] : null;
     }
+
+    /// <summary>
+    /// Explains why none of the running instances could be taken over.
+    /// </summary>
+    /// <remarks>
+    /// Two different situations reach this point and they need different guidance. Several running
+    /// Sandboxes is a host state winapp does not understand, and the user has to reduce it to one.
+    /// A single running Sandbox that is nonetheless not a candidate means it is already accounted
+    /// for by state that changed underneath this command — another winapp process claimed it while
+    /// this one was deciding — which retrying resolves and closing a Sandbox would not.
+    /// </remarks>
+    private static ExecutionTargetException NoUsableCandidate(IReadOnlyList<string> running) =>
+        running.Count > 1
+            ? AmbiguousInstances(running)
+            : ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.TargetAmbiguous,
+                "Windows Sandbox ownership changed while this command was deciding which instance to use.",
+                userAction: "Retry the command.",
+                context: new Dictionary<string, string>
+                {
+                    ["sandboxIds"] = string.Join(',', running),
+                },
+                example: "winapp run . --sandbox");
 
     /// <summary>Refuses a host with more running Sandboxes than winapp can account for.</summary>
     internal static ExecutionTargetException AmbiguousInstances(IReadOnlyList<string> running)

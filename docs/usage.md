@@ -1210,7 +1210,7 @@ winapp get-winapp-path [options]
 
 Run commands and copy files inside the Windows Sandbox winapp manages. These are escape hatches: reach for them when you need to prepare a dependency, inspect state, or diagnose something `winapp run --sandbox` cannot resolve on its own.
 
-Both commands start or reuse the managed Sandbox. Neither creates, stops, or otherwise manages Sandbox lifecycle — that stays with the Windows Sandbox CLI (`wsb`). See [Windows Sandbox execution](sandbox-execution.md) for the full model.
+Both commands start, reuse, or take over the one Sandbox Windows allows, installing the Sandbox prerequisites first if the machine needs them. Neither ever stops a Sandbox — ending one stays with the Windows Sandbox CLI (`wsb`). See [Windows Sandbox execution](sandbox-execution.md) for the full model.
 
 > [!NOTE]
 > `winapp run --sandbox`, `winapp unregister --sandbox`, and these commands are in development and

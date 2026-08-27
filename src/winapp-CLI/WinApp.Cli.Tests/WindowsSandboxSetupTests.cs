@@ -254,6 +254,27 @@ public class WindowsSandboxSetupTests
     }
 
     [TestMethod]
+    public async Task FeatureReportedEnabledButItsFilesAreNotThere_SaysWhatItMeasured()
+    {
+        // Servicing said success and the payload still is not there. winapp cannot see why, so it
+        // must not claim a restart is needed or that the client is installing -- neither was
+        // observed.
+        _probe.Enqueue(Facts());
+        _enabler.Result = new FeatureEnableResult(FeatureEnableOutcome.Enabled, 0);
+        _probe.Default = Facts();
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
+            () => NewSetup().EnsureReadyAsync(TestContext.CancellationToken));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.SetupIncomplete, failure.Error.Code);
+        Assert.AreEqual("false", failure.Error.Context!["featurePayloadPresent"]);
+        Assert.AreEqual(
+            0,
+            _bootstrapperLaunches,
+            "A client bootstrapper that is not on disk must not be launched, nor blamed for the failure.");
+    }
+
+    [TestMethod]
     public async Task NonWindowsHost_IsUnsupportedAndNothingIsAttempted()
     {
         _probe.Enqueue(Facts(isWindows: false));

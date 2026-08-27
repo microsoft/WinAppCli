@@ -180,6 +180,52 @@ public class SandboxAdoptionTests
             "A fixed agent path would match another generation's rule.");
     }
 
+    [TestMethod]
+    public async Task ManyGenerations_ArePrunedWithoutTouchingTheCurrentOne()
+    {
+        // Regression: `bootstrap-result-<token>` also starts with `bootstrap-`, so a single prefix
+        // match counted result folders toward the read-only family's retention -- and could delete
+        // the result folder this very run had just mapped into the guest.
+        using var harness = new AdoptionHarness();
+        harness.Cli.SetRunning(ManualInstanceId);
+
+        var stateRoot = harness.TargetRoot;
+        Directory.CreateDirectory(stateRoot);
+
+        for (var generation = 0; generation < 12; generation++)
+        {
+            Directory.CreateDirectory(Path.Join(stateRoot, $"bootstrap-old{generation:00}0000000000000"));
+            Directory.CreateDirectory(Path.Join(stateRoot, $"bootstrap-result-old{generation:00}0000000000000"));
+        }
+
+        await harness.RunUntilAgentLaunchAsync(TestContext.CancellationToken);
+
+        var shares = GuestSharePaths(harness);
+        var remaining = new DirectoryInfo(stateRoot).GetDirectories();
+
+        foreach (var share in shares)
+        {
+            var name = share[@"C:\WinApp".Length..];
+            var hostName = name.StartsWith("BootstrapResult-", StringComparison.Ordinal)
+                ? "bootstrap-result-" + name["BootstrapResult-".Length..]
+                : "bootstrap-" + name["Bootstrap-".Length..];
+
+            Assert.IsTrue(
+                remaining.Any(directory => string.Equals(directory.Name, hostName, StringComparison.OrdinalIgnoreCase)),
+                $"The folder mapped into the guest as '{share}' must survive pruning.");
+        }
+
+        var bootstraps = remaining.Count(d =>
+            d.Name.StartsWith("bootstrap-", StringComparison.Ordinal) &&
+            !d.Name.StartsWith("bootstrap-result-", StringComparison.Ordinal));
+        var results = remaining.Count(d => d.Name.StartsWith("bootstrap-result-", StringComparison.Ordinal));
+
+        var ceiling = WindowsSandboxBackend.MaxRetainedBootstrapGenerations + 1;
+
+        Assert.IsLessThanOrEqualTo(ceiling, bootstraps, "Stale read-only generations must be bounded.");
+        Assert.IsLessThanOrEqualTo(ceiling, results, "Stale result generations must be bounded.");
+    }
+
     private static List<string> GuestSharePaths(AdoptionHarness harness) =>
         [.. harness.Cli.Operations
             .Where(op => op.StartsWith("share|", StringComparison.Ordinal))
@@ -208,6 +254,10 @@ public class SandboxAdoptionTests
             var stateStore = new TargetStateStore(directories);
             Cli = new AdoptionSandboxCli();
 
+            TargetRoot = directories
+                .GetTargetRoot(ExecutionTargetRef.WindowsSandboxDefault, create: true)
+                .FullName;
+
             var binary = new FileInfo(Path.Join(_root.FullName, "winapp.exe"));
             File.WriteAllText(binary.FullName, "agent");
 
@@ -225,6 +275,9 @@ public class SandboxAdoptionTests
         public AdoptionSandboxCli Cli { get; }
 
         public WindowsSandboxBackend Backend { get; }
+
+        /// <summary>Where this target's per-generation bootstrap folders live.</summary>
+        public string TargetRoot { get; }
 
         public async Task RunUntilAgentLaunchAsync(CancellationToken cancellationToken)
         {

@@ -171,7 +171,24 @@ internal sealed class WindowsSandboxSetup(
 
         // Enabled without a restart. Re-measured rather than assumed: the client still has to
         // initialize, and only a fresh probe can say whether it already has.
-        return await probe.ProbeAsync(cancellationToken).ConfigureAwait(false);
+        facts = await probe.ProbeAsync(cancellationToken).ConfigureAwait(false);
+
+        // Servicing reported success, yet the payload it writes is still not there. winapp cannot
+        // see why -- a restart Windows did not ask for, or servicing still finishing -- so it says
+        // what it measured instead of naming a cause it did not observe.
+        if (facts.State is WindowsSandboxSetupState.FeaturePayloadMissing)
+        {
+            throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.SetupIncomplete,
+                "Windows reported the Windows Sandbox feature as enabled, but its files are not in place yet.",
+                userAction:
+                    "Windows may still be finishing. Wait, run the command again, and restart Windows if it "
+                    + "keeps reporting this.",
+                context: Detail(facts, result.Detail),
+                example: "winapp run . --sandbox");
+        }
+
+        return facts;
     }
 
     /// <summary>
