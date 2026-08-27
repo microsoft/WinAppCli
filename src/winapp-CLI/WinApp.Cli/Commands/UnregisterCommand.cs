@@ -27,7 +27,7 @@ internal class UnregisterCommand : Command, IShortDescription
     {
         InputArgument = new Argument<FileInfo>("input")
         {
-            Description = "Path to a .NET file-based app (a single .cs) whose package should be unregistered. Its identity is resolved the same way 'winapp run' resolves it, so no manifest path is needed. Omit to use --manifest or auto-detect a manifest in the current directory.",
+            Description = "Path to a .NET file-based app (a single .cs) whose package should be unregistered. Its identity is resolved the same way 'winapp run' resolves it, so no manifest path is needed. Omit to use --manifest or auto-detect a manifest in the current directory. Cannot be combined with --manifest.",
             Arity = ArgumentArity.ZeroOrOne
         };
         InputArgument.AcceptExistingOnly();
@@ -83,6 +83,16 @@ internal class UnregisterCommand : Command, IShortDescription
                 }
 
                 return await PruneOrphanedRegistrationsAsync(force, isJson, cancellationToken);
+            }
+
+            // An input and --manifest are two different ways to name a package, and they can name
+            // DIFFERENT ones. Silently preferring either would let the command remove a registration —
+            // and its app data — that the user did not ask for, so the ambiguity is rejected instead.
+            if (input != null && manifest != null)
+            {
+                return FailWith(
+                    $"'{input.Name}' and --manifest name the package two different ways, and they can resolve to different packages. Pass one or the other.",
+                    isJson);
             }
 
             string packageName;

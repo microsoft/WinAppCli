@@ -417,6 +417,22 @@ public class UnregisterCommandTests : BaseCommandTests
         Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterCalls.Count);
     }
 
+    [TestMethod]
+    public async Task UnregisterCommand_InputAndManifestTogether_IsRejected()
+    {
+        // The two name a package different ways and can resolve to DIFFERENT packages, so silently
+        // preferring one would remove a registration (and its app data) the user did not ask for.
+        var singleFile = CreateSingleFile();
+        var manifest = await CreateTestManifestAsync();
+        var command = GetRequiredService<UnregisterCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--manifest", manifest.FullName]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeProjectRunService.ResolveSingleFileIdentityCalls.Count);
+        Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterCalls.Count);
+    }
+
     #endregion
 
     #region Prune
