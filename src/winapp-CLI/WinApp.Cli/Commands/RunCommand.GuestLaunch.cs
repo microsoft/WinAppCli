@@ -88,7 +88,18 @@ internal partial class RunCommand
                 {
                     processId = appLauncherService.LaunchByAumid(aumid, appArgs);
                 }
-                catch (Exception error)
+                // IApplicationActivationManager.ActivateApplication has no documented, closed set of
+                // failure exception types: the shell surfaces whatever .NET's HRESULT-to-exception
+                // mapping produces for that particular failure. A missing package, for example,
+                // throws a plain COMException, while a missing file throws FileNotFoundException
+                // instead -- and other app-model-specific HRESULTs are free to map to still other
+                // built-in types. Narrowing this catch to a fixed exception list would let some real,
+                // expected activation failure whose HRESULT happens to map elsewhere escape as an
+                // unhandled crash, breaking the guarantee above that every activation failure -- not
+                // just the ones on a list -- produces the same structured --json envelope. Only
+                // cancellation is excluded, since that is caller-directed shutdown, not an activation
+                // failure.
+                catch (Exception error) when (error is not OperationCanceledException)
                 {
                     logger.LogError("{UISymbol} Failed to launch application: {Message}", UiSymbols.Error, error.Message);
 

@@ -500,10 +500,17 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
     /// </summary>
     private static string? LayoutDirectoryOf(GuestExecRequest request)
     {
-        var index = Array.IndexOf(request.Arguments?.ToArray() ?? [], "--output-appx-directory");
+        var arguments = request.Arguments;
 
-        return index >= 0 && index + 1 < request.Arguments!.Count
-            ? request.Arguments[index + 1]
+        if (arguments is null)
+        {
+            return null;
+        }
+
+        var index = arguments.IndexOf("--output-appx-directory");
+
+        return index >= 0 && index + 1 < arguments.Count
+            ? arguments[index + 1]
             : null;
     }
 
@@ -600,6 +607,7 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
     {
         private readonly CancellationTokenSource _cancellation = new(TimeSpan.FromSeconds(60));
         private readonly Task _serverTask;
+        private readonly Spectre.Console.Testing.TestConsole _console = new();
 
         public RunHarness(
             string guestManagedRoot,
@@ -690,7 +698,7 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
                 packageRegistrationService,
                 debugOutputService,
                 currentDirectoryProvider,
-                new Spectre.Console.Testing.TestConsole(),
+                _console,
                 statusService,
                 projectRunService,
                 orchestrator,
@@ -723,6 +731,7 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
             }
 
             _cancellation.Dispose();
+            _console.Dispose();
         }
     }
 
