@@ -747,13 +747,13 @@ Project mode requires the **.NET SDK 8.0.100 or newer** (for MSBuild `--getPrope
 **Project-mode options** (ignored in folder mode):
 
 - `-c, --configuration <name>` - Build configuration. Default: `Debug`. *(Also honored in single-file mode.)*
-- `--arch <x64|arm64|x86>` - Target architecture. Default: the current process architecture. Determines both the build RID and the architecture of the Windows App Runtime that gets installed. *(Rejected in single-file mode — use `#:property RuntimeIdentifier=win-x64`.)*
-- `-r, --runtime <rid>` - Target .NET runtime identifier (e.g. `win-x64`). Project mode uses only the RID's architecture, always builds the canonical `win-<arch>`, and rejects non-Windows RIDs (e.g. `linux-x64`). Its architecture overrides `--arch`. *(Rejected in single-file mode — use `#:property RuntimeIdentifier=win-x64`.)*
+- `--arch <x64|arm64|x86>` - Target architecture. Default: the current process architecture. Determines both the build RID and the architecture of the Windows App Runtime that gets installed. *(Also honored in single-file mode.)*
+- `-r, --runtime <rid>` - Target .NET runtime identifier (e.g. `win-x64`). Project mode uses only the RID's architecture, always builds the canonical `win-<arch>`, and rejects non-Windows RIDs (e.g. `linux-x64`). Its architecture overrides `--arch`. *(Also honored in single-file mode, where it overrides a `#:property RuntimeIdentifier` declared by the file.)*
 - `-f, --framework <tfm>` - Target framework moniker for multi-targeted projects (e.g. `net10.0-windows10.0.26100.0`). *(Rejected in single-file mode — use `#:property TargetFramework=...`.)*
 - `--project <name-or-path>` - When the input is a solution (`.sln`/`.slnx`) or a directory with multiple runnable app projects, selects which project to launch (by project name or path).
 - `--no-build` - Skip building and run the existing build output (still evaluates output properties). *(Also honored in single-file mode.)*
 - `--no-restore` - Skip restoring before building. *(Also honored in single-file mode.)*
-- `-p, --property <Name=Value>` - MSBuild property, forwarded to both the build and the property evaluation. Repeatable (e.g. `-p EnableMyFeature=true`). *(Also honored in single-file mode, where it is the only way to set `TargetFramework` or `RuntimeIdentifier`.)*
+- `-p, --property <Name=Value>` - MSBuild property, forwarded to both the build and the property evaluation. Repeatable (e.g. `-p EnableMyFeature=true`). *(Also honored in single-file mode, where it is the only way to set `TargetFramework`.)*
 
 **Build output & verbosity:** the project is built in two steps — a `dotnet build` whose output **streams live** to your console, followed by a fast property-evaluation pass. winapp prints the exact `dotnet build …` invocation before the output, and streams warnings even on a successful build. Verbosity:
 

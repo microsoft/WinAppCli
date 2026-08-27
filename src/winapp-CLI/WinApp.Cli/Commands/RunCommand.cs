@@ -992,6 +992,3 @@ internal sealed class RunCommandResult
     NewLine = "\n",
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 internal partial class RunCommandJsonContext : JsonSerializerContext;
-
-
-

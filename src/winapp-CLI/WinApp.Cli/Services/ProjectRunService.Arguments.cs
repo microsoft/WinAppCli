@@ -204,11 +204,13 @@ internal sealed partial class ProjectRunService
     /// <summary>
     /// Builds the arguments for the single-file BUILD pass: <c>dotnet build &lt;file&gt;.cs</c>.
     /// <para>
-    /// No <c>-r win-&lt;arch&gt;</c> and no <c>-p:Platform</c> are injected. A file-based app declares its
-    /// own <c>TargetFramework</c>/<c>Platform</c> through <c>#:property</c> directives, and injecting a RID
-    /// would relocate the build output away from the path the evaluate pass reads back, so the two passes
-    /// could disagree about where the app is. Only Configuration and the user's <c>-p</c> flow through, and
-    /// <see cref="BuildSingleFileEvaluateArguments"/> emits the SAME set.
+    /// No <c>-p:Platform</c> is ever injected — a file-based app accepts <c>Platform</c> but ignores it
+    /// for RID selection. A <c>-r win-&lt;arch&gt;</c> IS injected when
+    /// <see cref="SingleFileRunOptions.InjectedRuntimeIdentifier"/> is set, which is what lets a plain
+    /// <c>winapp run app.cs</c> build a self-contained Windows App SDK app instead of failing as
+    /// <c>AnyCPU</c>. That is safe because <see cref="BuildSingleFileEvaluateArguments"/> emits the SAME
+    /// set from the same options, so the evaluate reads back the RID-qualified directory this pass wrote
+    /// rather than the two disagreeing about where the app is.
     /// </para>
     /// </summary>
     internal static string BuildSingleFileBuildPassArguments(
@@ -265,8 +267,8 @@ internal sealed partial class ProjectRunService
     /// synthesis only exists inside the <c>dotnet build</c>/<c>dotnet run</c> CLI path. Passing
     /// <c>--getProperty</c> makes the invocation evaluate WITHOUT building, so this stays cheap.
     /// </para>
-    /// Fed the SAME Configuration + user <c>-p</c> as the build pass so the properties it reads describe
-    /// the output that was actually written.
+    /// Fed the SAME Configuration, injected RID, and user <c>-p</c> as the build pass so the properties it
+    /// reads describe the output that was actually written.
     /// </summary>
     internal static string BuildSingleFileEvaluateArguments(FileInfo singleFile, SingleFileRunOptions options)
     {

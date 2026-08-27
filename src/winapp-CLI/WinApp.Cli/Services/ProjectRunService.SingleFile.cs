@@ -61,9 +61,9 @@ internal sealed partial class ProjectRunService
         // The built TFM. Threaded into loose-layout runtime provisioning so the Windows App SDK version
         // is read from the framework the app was actually built for.
         "TargetFramework",
-        // Architecture. Single-file mode rejects --arch and tells the user to declare
-        // '#:property RuntimeIdentifier=win-x64' instead, so this is the only way the app's target
-        // architecture reaches the Windows App Runtime provisioning that follows registration.
+        // Architecture. Single-file mode injects the RID (see ResolveSingleFileRuntimeIdentifierAsync),
+        // and --arch/--runtime override a RuntimeIdentifier the file declares, so this is how the app's
+        // target architecture reaches the Windows App Runtime provisioning that follows registration.
         // Platform is deliberately NOT consulted: a file-based app accepts it but ignores it for RID
         // selection, so 'Platform=arm64' still yields an x64 apphost.
         "RuntimeIdentifier",
