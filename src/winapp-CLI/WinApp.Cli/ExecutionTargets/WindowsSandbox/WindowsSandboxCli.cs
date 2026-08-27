@@ -214,42 +214,56 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
         }
 
         // Some client builds exit immediately and leave the window to a separate process; others
-        // stay up for the life of the session. Waiting a bounded moment catches a fast, outright
-        // failure without ever blocking on the long-lived case -- which is why the timeout is short
-        // and a still-running client is simply left alone rather than waited on or killed.
-        try
+        // stay up for the life of the session. Watching for a bounded moment catches a fast,
+        // outright failure without ever blocking on the long-lived case -- which is why a client
+        // still running when the window closes is simply left alone, never waited on and never
+        // killed.
+        using (client)
         {
-            using (client)
-            {
-                var exited = await client
-                    .WaitForExitAsync(cancellationToken)
-                    .WaitAsync(ConnectFailureWindow, cancellationToken)
-                    .ContinueWith(
-                        task => task.IsCompletedSuccessfully,
-                        cancellationToken,
-                        TaskContinuationOptions.ExecuteSynchronously,
-                        TaskScheduler.Default)
-                    .ConfigureAwait(false);
+            using var window = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            window.CancelAfter(ConnectFailureWindow);
 
-                if (exited && client.ExitCode != 0)
-                {
-                    throw ExecutionTargetException.Create(
-                        ExecutionTargetErrorCodes.NoInteractiveSession,
-                        "The Windows Sandbox client could not connect to the Sandbox.",
-                        userAction: "Retry the command. If it keeps failing, close the Sandbox and try again.",
-                        context: new Dictionary<string, string>
-                        {
-                            ["sandboxId"] = id,
-                            ["exitCode"] = client.ExitCode.ToString(
-                                System.Globalization.CultureInfo.InvariantCulture),
-                        });
-                }
+            try
+            {
+                await client.WaitForExitAsync(window.Token).ConfigureAwait(false);
             }
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
-        {
-            // The client is gone or its exit code is unavailable. Not being able to observe a
-            // failure is not evidence of one; the agent heartbeat is what proves the session works.
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // Still running, which is the ordinary healthy case for an interactive client.
+                return;
+            }
+            catch (Exception ex) when (
+                ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+                // The client is already gone and its state is unavailable. Not being able to observe
+                // a failure is not evidence of one; the agent heartbeat proves the session works.
+                return;
+            }
+
+            int exitCode;
+
+            try
+            {
+                exitCode = client.ExitCode;
+            }
+            catch (Exception ex) when (
+                ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+                return;
+            }
+
+            if (exitCode != 0)
+            {
+                throw ExecutionTargetException.Create(
+                    ExecutionTargetErrorCodes.NoInteractiveSession,
+                    "The Windows Sandbox client could not connect to the Sandbox.",
+                    userAction: "Retry the command. If it keeps failing, close the Sandbox and try again.",
+                    context: new Dictionary<string, string>
+                    {
+                        ["sandboxId"] = id,
+                        ["exitCode"] = exitCode.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    });
+            }
         }
     }
 
@@ -288,23 +302,37 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
         string id,
         CancellationToken cancellationToken)
     {
-        // A fixed no-op. It changes nothing in the guest and its own exit code is irrelevant --
-        // what is being measured is whether `wsb` could dispatch it as the interactive user at all.
-        var result = await RunExecAsync(
-            id,
-            "cmd.exe /c exit 0",
-            workingDirectory: null,
-            asSystem: false,
-            cancellationToken).ConfigureAwait(false);
-
-        if (result.Dispatched)
+        try
         {
-            return GuestSessionAvailability.Ready;
-        }
+            // A fixed no-op. It changes nothing in the guest and its own exit code is irrelevant --
+            // what is being measured is whether `wsb` could dispatch it as the interactive user at
+            // all.
+            var result = await RunExecAsync(
+                id,
+                "cmd.exe /c exit 0",
+                workingDirectory: null,
+                asSystem: false,
+                cancellationToken).ConfigureAwait(false);
 
-        return result.HResult == WsbHResult.NoSuchLogonSession
-            ? GuestSessionAvailability.NoLoginSession
-            : GuestSessionAvailability.Unknown;
+            if (result.Dispatched)
+            {
+                return GuestSessionAvailability.Ready;
+            }
+
+            return result.HResult == WsbHResult.NoSuchLogonSession
+                ? GuestSessionAvailability.NoLoginSession
+                : GuestSessionAvailability.Unknown;
+        }
+        catch (Exception ex) when (ex is ExecutionTargetException
+                                     or System.ComponentModel.Win32Exception
+                                     or InvalidOperationException
+                                     or IOException)
+        {
+            // A probe exists to answer a question, not to fail a command. Unparseable output or a
+            // launch failure means winapp does not know, and "does not know" is a state the caller
+            // already handles by connecting a client.
+            return GuestSessionAvailability.Unknown;
+        }
     }
 
     /// <summary>What one <c>wsb exec</c> invocation actually reported.</summary>

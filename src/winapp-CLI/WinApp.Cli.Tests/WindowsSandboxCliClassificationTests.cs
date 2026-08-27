@@ -167,6 +167,94 @@ public class WindowsSandboxCliClassificationTests
     }
 
     [TestMethod]
+    public async Task ProbeInteractiveSession_WithUnparseableOutput_IsUnknownRatherThanAThrow()
+    {
+        // Regression: parsing lives underneath this probe, so malformed output used to escape as an
+        // exception and fail the whole command from a call that only meant to ask a question.
+        _runner.Result = new ProcessRunResult(0, "<not json>", string.Empty);
+
+        Assert.AreEqual(
+            GuestSessionAvailability.Unknown,
+            await _cli.ProbeInteractiveSessionAsync("sandbox-1", TestContext.CancellationToken));
+    }
+
+    [TestMethod]
+    public async Task Connect_WithALongLivedClient_DoesNotBlockAndDoesNotKillIt()
+    {
+        // The ordinary healthy case: the interactive client stays up for the life of the session.
+        // Waiting on it would hold up target preparation until the user closed Sandbox, and killing
+        // it would close the window winapp just asked for.
+        using var longLived = StartSleepingProcess();
+        var pid = longLived.Id;
+
+        _cli.ConnectLauncher = _ => longLived;
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        await _cli.ConnectAsync("sandbox-1", TestContext.CancellationToken);
+        stopwatch.Stop();
+
+        Assert.IsLessThan(
+            WindowsSandboxCli.ConnectFailureWindow + TimeSpan.FromSeconds(8),
+            stopwatch.Elapsed,
+            "Connect must return once the failure window closes, not wait for the client.");
+
+        // Checked by PID rather than through the handle: ConnectAsync owns and disposes that
+        // handle, which releases it without killing the process -- and "still running afterwards"
+        // is exactly the property under test.
+        using var stillRunning = System.Diagnostics.Process.GetProcessById(pid);
+
+        Assert.IsFalse(stillRunning.HasExited, "A live interactive client must never be killed.");
+
+        stillRunning.Kill();
+    }
+
+    [TestMethod]
+    public async Task Connect_WithAClientThatFailsImmediately_SurfacesTheFailure()
+    {
+        using var failed = StartFailingProcess();
+
+        _cli.ConnectLauncher = _ => failed;
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
+            () => _cli.ConnectAsync("sandbox-1", TestContext.CancellationToken));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.NoInteractiveSession, failure.Error.Code);
+        Assert.AreEqual("sandbox-1", failure.Error.Context!["sandboxId"]);
+    }
+
+    [TestMethod]
+    public async Task Connect_WithAClientThatExitsCleanly_IsNotAFailure()
+    {
+        // Measured: some client builds exit 0 straight away and leave the window to another
+        // process. That is success, not a problem to report.
+        using var quick = StartSucceedingProcess();
+
+        _cli.ConnectLauncher = _ => quick;
+
+        await _cli.ConnectAsync("sandbox-1", TestContext.CancellationToken);
+    }
+
+    private static System.Diagnostics.Process StartSleepingProcess() =>
+        StartCmd("/c timeout /t 120 /nobreak > nul");
+
+    private static System.Diagnostics.Process StartFailingProcess() => StartCmd("/c exit 3");
+
+    private static System.Diagnostics.Process StartSucceedingProcess() => StartCmd("/c exit 0");
+
+    private static System.Diagnostics.Process StartCmd(string arguments)
+    {
+        var startInfo = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = Path.Join(Environment.SystemDirectory, "cmd.exe"),
+            Arguments = arguments,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+
+        return System.Diagnostics.Process.Start(startInfo)!;
+    }
+
+    [TestMethod]
     public void UseExecutable_RefusesARelativePath()
     {
         // A relative path resolves against the current directory, which is exactly the hijack that

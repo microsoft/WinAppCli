@@ -152,8 +152,12 @@ internal sealed class WindowsSandboxHostProbe(IProcessRunner processRunner) : IW
                 return null;
             }
 
-            // Ties the file to the package it is supposed to belong to. An alias whose package is
-            // not registered for this user cannot be the Sandbox client, whatever it is named.
+            // A consistency gate, not a binding. It only asks whether the Sandbox package is
+            // registered for this user -- it does not read the alias's reparse data or compare its
+            // target to that package -- so on any host where Sandbox is genuinely installed it is
+            // unconditionally true and contributes nothing. What it does catch is a leftover or
+            // hand-made alias on a host that has no Sandbox package at all, which should not be
+            // bound as the control plane.
             var registered = isPackageRegistered ?? (() => DefaultQueryPackage().Registered);
 
             return registered() ? candidate : null;
