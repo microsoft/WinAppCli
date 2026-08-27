@@ -16,20 +16,54 @@ namespace WinApp.Cli.ExecutionTargets.WindowsSandbox;
 /// </remarks>
 internal interface IWindowsSandboxCli
 {
-    /// <summary>Whether <c>wsb.exe</c> is present on this host.</summary>
+    /// <summary>Whether a trusted <c>wsb.exe</c> has been resolved on this host.</summary>
+    /// <remarks>
+    /// Re-evaluated rather than cached for the life of the process, because prerequisite setup can
+    /// make an alias appear part-way through a single command. A value fixed at first use would
+    /// report the host as unusable for the rest of an invocation that had just finished making it
+    /// usable.
+    /// </remarks>
     bool IsAvailable { get; }
+
+    /// <summary>
+    /// Binds this client to the exact <c>wsb.exe</c> the readiness probe validated.
+    /// </summary>
+    /// <remarks>
+    /// Setup already resolved and executed this path to prove it answers, so reusing it here avoids
+    /// a second resolution that could pick a different file.
+    /// </remarks>
+    void UseExecutable(string executablePath);
 
     /// <summary>Lists the IDs of every running Sandbox, managed or not.</summary>
     Task<IReadOnlyList<string>> ListAsync(CancellationToken cancellationToken);
 
-    /// <summary>Starts a Sandbox and returns its ID.</summary>
-    Task<string> StartAsync(string? configuration, CancellationToken cancellationToken);
+    /// <summary>
+    /// Starts a Sandbox under the caller's own instance ID and returns the ID it reports.
+    /// </summary>
+    /// <remarks>
+    /// The caller assigns the ID so that a start which fails <em>after</em> creating an instance can
+    /// still be reconciled: without one, a later command could only guess which listed instance was
+    /// the one it had just tried to create, and guessing from a list delta would attribute someone
+    /// else's Sandbox to winapp.
+    /// </remarks>
+    Task<string> StartAsync(string instanceId, string? configuration, CancellationToken cancellationToken);
 
     /// <summary>Terminates the Sandbox with the given ID.</summary>
     Task StopAsync(string id, CancellationToken cancellationToken);
 
     /// <summary>Returns the guest's IPv4 address.</summary>
     Task<string> GetIpAddressAsync(string id, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Whether the instance resolves to a usable guest, without changing anything about it.
+    /// </summary>
+    /// <remarks>
+    /// A listed ID is not proof that a Sandbox can be used: an instance that is still coming up, or
+    /// on its way out, is listed exactly like a healthy one. Resolving its address is the cheapest
+    /// question whose answer requires the guest to actually be there, which is what makes it the
+    /// gate before anything winapp does would change guest state.
+    /// </remarks>
+    Task<bool> IsResolvableAsync(string id, CancellationToken cancellationToken);
 
     /// <summary>Shares a host folder into the guest.</summary>
     Task ShareFolderAsync(

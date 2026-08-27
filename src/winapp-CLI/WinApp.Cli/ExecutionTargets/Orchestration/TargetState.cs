@@ -46,6 +46,30 @@ internal sealed record TargetState
     /// </summary>
     public string? BootNonce { get; init; }
 
+    /// <summary>
+    /// Instance ID winapp assigned to a start it has not yet confirmed.
+    /// </summary>
+    /// <remarks>
+    /// Written <em>before</em> the provider is asked to start anything, which is the whole point: a
+    /// start that fails after creating an instance leaves no other evidence of which instance was
+    /// winapp's. Cleared once ownership is recorded, and left in place across a crash so the next
+    /// command reconciles that exact ID rather than inferring one from a list.
+    /// </remarks>
+    public string? PendingInstanceId { get; init; }
+
+    /// <summary>When the unconfirmed start was requested, for diagnostics and staleness.</summary>
+    public DateTimeOffset? PendingStartedUtc { get; init; }
+
+    /// <summary>
+    /// How winapp came to own the current instance: created, adopted, or recovered.
+    /// </summary>
+    /// <remarks>
+    /// Recorded because it changes what a later command may assume. Only an instance winapp itself
+    /// bootstrapped has connection material on disk that a warm reconnect can use; one that was
+    /// adopted or recovered has to be bootstrapped before it can be talked to.
+    /// </remarks>
+    public string? InstanceOrigin { get; init; }
+
     /// <summary>Version of the guest agent last known to be installed.</summary>
     public string? AgentVersion { get; init; }
 

@@ -514,29 +514,40 @@ public class SandboxUxRegressionTests
         /// <summary>Writes material in the shape an older build produced, for upgrade coverage.</summary>
         public void WriteLegacyMaterial(int port)
         {
+            var epoch = ExecutionTargetEpoch.Create("sandbox-existing", "nonce-existing");
             var bootstrap = Path.Join(
                 _directories.GetTargetRoot(ExecutionTargetRef.WindowsSandboxDefault, create: true).FullName,
-                "bootstrap");
+                "bootstrap-" + WindowsSandboxBackend.EpochToken(epoch));
 
             Directory.CreateDirectory(bootstrap);
 
-            var material = GuestBootstrapMaterial.Create(
-                ExecutionTargetRef.WindowsSandboxDefault,
-                ExecutionTargetEpoch.Create("sandbox-existing", "nonce-existing"),
-                port);
+            var material = GuestBootstrapMaterial.Create(ExecutionTargetRef.WindowsSandboxDefault, epoch, port);
 
             File.WriteAllText(Path.Join(bootstrap, GuestBootstrapMaterial.FileName), material.ToJson());
         }
 
         /// <summary>The material a later process would find on disk.</summary>
+        /// <remarks>
+        /// Located by searching rather than by a fixed name, because each generation now writes into
+        /// its own epoch-named folder. Finding exactly one is itself part of what is asserted: a run
+        /// that left two generations behind would be a real defect.
+        /// </remarks>
         public GuestBootstrapMaterial? ReadStagedMaterial()
         {
-            var path = Path.Join(
-                _directories.GetTargetRoot(ExecutionTargetRef.WindowsSandboxDefault, create: false).FullName,
-                "bootstrap",
-                GuestBootstrapMaterial.FileName);
+            var root = _directories.GetTargetRoot(ExecutionTargetRef.WindowsSandboxDefault, create: false);
 
-            return File.Exists(path) ? GuestBootstrapMaterial.TryParse(File.ReadAllText(path)) : null;
+            if (!root.Exists)
+            {
+                return null;
+            }
+
+            var path = root
+                .GetDirectories("bootstrap-*")
+                .Where(directory => !directory.Name.StartsWith("bootstrap-result-", StringComparison.Ordinal))
+                .Select(directory => Path.Join(directory.FullName, GuestBootstrapMaterial.FileName))
+                .FirstOrDefault(File.Exists);
+
+            return path is not null ? GuestBootstrapMaterial.TryParse(File.ReadAllText(path)) : null;
         }
 
         /// <summary>A second backend over the same state root, standing in for the next CLI process.</summary>
@@ -549,6 +560,10 @@ public class SandboxUxRegressionTests
                 _directories,
                 new StaticBinaryProvider(binary),
                 new NoOpWindowController(),
+
+                // No setup runner: this harness models a host where wsb.exe is already usable, so
+                // the support probe short-circuits on IsAvailable before setup would be consulted.
+                setup: null,
                 _stateStore,
                 NullTargetProgress.Instance);
 
@@ -575,6 +590,10 @@ public class SandboxUxRegressionTests
 
         public bool IsAvailable => true;
 
+        public void UseExecutable(string executablePath)
+        {
+        }
+
         /// <summary>Every operation, in the order it happened.</summary>
         public List<string> Operations { get; } = [];
 
@@ -587,12 +606,15 @@ public class SandboxUxRegressionTests
         public Task<IReadOnlyList<string>> ListAsync(CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<string>>([.. _running]);
 
-        public Task<string> StartAsync(string? configuration, CancellationToken cancellationToken)
+        public Task<string> StartAsync(string instanceId, string? configuration, CancellationToken cancellationToken)
         {
             Operations.Add("start");
-            _running.Add("sandbox-new");
-            return Task.FromResult("sandbox-new");
+            _running.Add(instanceId);
+            return Task.FromResult(instanceId);
         }
+
+        public Task<bool> IsResolvableAsync(string id, CancellationToken cancellationToken) =>
+            Task.FromResult(_running.Contains(id, StringComparer.OrdinalIgnoreCase));
 
         public Task StopAsync(string id, CancellationToken cancellationToken)
         {
