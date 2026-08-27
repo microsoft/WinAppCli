@@ -48,6 +48,22 @@ release — defaulting it `false` would make the weekly run publish for real, an
 Every gate is written as a **positive** test for `rel/v*`, so an unexpected branch fails **closed**.
 Grep `refs/heads/rel/v` in `release.yml` to find all of them.
 
+### Why this runs on the Official template
+
+A rehearsal that publishes nothing looks like it belongs on `1ES.Unofficial.PipelineTemplate.yml`,
+and that was the original design. It is deliberately **not** what this does.
+
+Unofficial enforces a weaker SDL subset — PoliCheck runs in both, but TSA upload, CodeQL TSA
+integration, SBOM enforcement and signing validation are Official-only. Those are exactly the
+policies that change under us, so a rehearsal on Unofficial would be blind to the failures it
+exists to catch. Staying on Official is the difference between rehearsing the release and
+rehearsing something that resembles it.
+
+Nothing is signed (`DoEsrp` is ANDed with the branch) and nothing is published, so a rehearsal
+produces no production binaries despite running the Official template.
+
+Do not "fix" this by switching to Unofficial.
+
 ### What the rehearsal skips
 
 Exactly seven things, each gated:
