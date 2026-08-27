@@ -168,7 +168,12 @@ internal partial class RunCommand
                 return Fail(ex.Message, isJson);
             }
 
-            WarnOnSingleFileIdentityCollision(resolvedManifest, outputAppXDirectory ?? new DirectoryInfo(Path.Join(outputFolder.FullName, "AppX")), isJson);
+            ReportSingleFileRegistrationImpact(
+                resolution.SingleFile,
+                resolvedManifest,
+                outputAppXDirectory ?? new DirectoryInfo(Path.Join(outputFolder.FullName, "AppX")),
+                unregisterOnExit,
+                isJson);
 
             HintAliasForConsoleApp(resolution, withAlias, noLaunch, detach, isJson);
 
@@ -245,29 +250,14 @@ internal partial class RunCommand
 
             var stem = Path.GetFileNameWithoutExtension(resolution.SingleFile.Name);
 
-            // Tier 2: an explicit WinAppManifestPath declared by the app itself.
-            if (resolution.Properties.TryGetValue("WinAppManifestPath", out var declaredPath) &&
-                !string.IsNullOrWhiteSpace(declaredPath))
-            {
-                var declared = new FileInfo(Path.GetFullPath(declaredPath.Trim(), resolution.SingleFile.DirectoryName ?? "."));
-                if (!declared.Exists)
-                {
-                    throw new ProjectRunException(
-                        $"'{resolution.SingleFile.Name}' sets WinAppManifestPath to '{declared.FullName}', but no file exists there. " +
-                        "Point it at an existing manifest, or remove it to let winapp generate one.");
-                }
-
-                LogSingleFileManifestSource(declared, "declared by WinAppManifestPath", isJson);
-                return declared;
-            }
-
-            // Tier 3: a manifest the user authored next to the .cs.
-            var sourceDirectory = resolution.SingleFile.Directory ?? new DirectoryInfo(currentDirectoryProvider.GetCurrentDirectory());
-            var authored = FindAuthoredSingleFileManifest(sourceDirectory, stem);
+            // Tiers 2 and 3: a manifest the app author supplied, via WinAppManifestPath or named
+            // <stem>.appxmanifest next to the .cs. Shared with `winapp unregister` so both commands agree
+            // on which manifest an app registers under.
+            var authored = SingleFileManifestPlanner.FindAuthoredManifest(resolution.SingleFile, resolution.Properties);
             if (authored != null)
             {
-                LogSingleFileManifestSource(authored, "found next to the file", isJson);
-                return authored;
+                LogSingleFileManifestSource(authored.File, authored.Source, isJson);
+                return authored.File;
             }
 
             // Tier 4: generate into the build output. The output directory belongs to exactly one .cs, so
@@ -392,33 +382,6 @@ internal partial class RunCommand
                 SingleFileManifestPlanner.ApplicationId,
                 cancellationToken);
 
-        /// <summary>
-        /// Finds a manifest the user authored next to the <c>.cs</c>.
-        /// </summary>
-        /// <remarks>
-        /// Only the per-file <c>&lt;stem&gt;.appxmanifest</c> name is discovered implicitly. The
-        /// directory-wide names (<c>Package.appxmanifest</c>, <c>appxmanifest.xml</c>) are deliberately
-        /// NOT probed: file-based apps are per-file and can sit side by side, so a shared
-        /// <c>Package.appxmanifest</c> would silently be applied to every <c>.cs</c> in the folder —
-        /// registering <c>bar.cs</c> under <c>foo.cs</c>'s identity. A user who genuinely wants one
-        /// manifest for several files points at it explicitly with <c>--manifest</c> or
-        /// <c>#:property WinAppManifestPath</c>.
-        /// </remarks>
-        private static FileInfo? FindAuthoredSingleFileManifest(DirectoryInfo sourceDirectory, string stem)
-        {
-            // Reduce the stem to a bare name before composing: it originates from the user-supplied input
-            // path, and a rooted or separator-bearing value would make Path.Combine discard sourceDirectory
-            // and probe somewhere else entirely.
-            var fileName = Path.GetFileName(stem);
-            if (string.IsNullOrEmpty(fileName))
-            {
-                return null;
-            }
-
-            var path = Path.Join(sourceDirectory.FullName, $"{fileName}.appxmanifest");
-            return File.Exists(path) ? new FileInfo(path) : null;
-        }
-
         private void LogSingleFileManifestSource(FileInfo manifest, string reason, bool isJson)
         {
             if (!isJson && logger.IsEnabled(LogLevel.Debug))
@@ -428,16 +391,27 @@ internal partial class RunCommand
         }
 
         /// <summary>
-        /// Warns when registering will REPLACE an existing development registration of the same package
-        /// name that was installed from a different location.
+        /// Reports what a registration leaves behind: a warning when it REPLACES a different app's
+        /// registration, and a one-time note when it creates one that outlives the run.
         /// </summary>
         /// <remarks>
+        /// <para>
         /// Two <c>counter.cs</c> files in different directories both default to
         /// <c>Identity Name="counter"</c>, so the second run silently replaces the first. Suffixing the
         /// identity with a path hash would prevent that, but it would make the AUMID and Start-menu entry
         /// ugly for everyone in order to protect a rare case — and identity is already scoped by
         /// <c>Publisher=CN=&lt;user&gt;</c>, so it can never collide across users. Keep the clean default
         /// and make the replacement visible instead of silent.
+        /// </para>
+        /// <para>
+        /// The persistence note is deliberately tied to the FIRST registration of an identity rather than
+        /// printed every run. <c>winapp run app.cs</c> is an inner-loop command that gets run dozens of
+        /// times while iterating, and a notice on every one of them trains people to stop reading the
+        /// output. It is also only true once: re-running the same file REPLACES its own registration
+        /// rather than accumulating another, so nothing new is left behind after the first time. It is not
+        /// gated on <c>OutputType</c> either — a windowed app persists exactly as a console one does, and
+        /// also lands in the Start menu, so scoping the note to console apps would teach the wrong model.
+        /// </para>
         /// <para>
         /// <paramref name="layoutDirectory"/> must be the EFFECTIVE AppX layout directory (honoring
         /// <c>--output-appx-directory</c>), because that is what a registration's install location points
@@ -445,7 +419,12 @@ internal partial class RunCommand
         /// custom layout path, which trains users to ignore a warning that is usually real.
         /// </para>
         /// </remarks>
-        private void WarnOnSingleFileIdentityCollision(FileInfo manifest, DirectoryInfo layoutDirectory, bool isJson)
+        private void ReportSingleFileRegistrationImpact(
+            FileInfo singleFile,
+            FileInfo manifest,
+            DirectoryInfo layoutDirectory,
+            bool unregisterOnExit,
+            bool isJson)
         {
             // Gate on Warning, not Information: --quiet suppresses Information but still promises
             // warnings, and silently replacing another app's registration is exactly what a user needs
@@ -469,6 +448,9 @@ internal partial class RunCommand
                     return;
                 }
 
+                var registeredElsewhere = false;
+                var alreadyRegistered = false;
+
                 foreach (var existing in packageRegistrationService.FindDevPackages(packageName))
                 {
                     if (!existing.IsDevelopmentMode || string.IsNullOrEmpty(existing.InstallLocation))
@@ -476,16 +458,26 @@ internal partial class RunCommand
                         continue;
                     }
 
-                    if (PathsPointToSameLocation(existing.InstallLocation, layoutDirectory.FullName))
-                    {
-                        continue;
-                    }
+                    alreadyRegistered = true;
 
-                    logger.LogWarning(
-                        "{UISymbol} Replacing the existing registration of '{PackageName}', which was installed from a different location ({InstallLocation}). Set '#:property {Property}=<name>' to give this app its own package identity.",
-                        UiSymbols.Warning, packageName, existing.InstallLocation, SingleFileManifestPlanner.PackageNameProperty);
+                    if (!PathsPointToSameLocation(existing.InstallLocation, layoutDirectory.FullName))
+                    {
+                        logger.LogWarning(
+                            "{UISymbol} Replacing the existing registration of '{PackageName}', which was installed from a different location ({InstallLocation}). Set '#:property {Property}=<name>' to give this app its own package identity.",
+                            UiSymbols.Warning, packageName, existing.InstallLocation, SingleFileManifestPlanner.PackageNameProperty);
+                        registeredElsewhere = true;
+                        break;
+                    }
+                }
+
+                // --unregister-on-exit already removes it, so the note would be wrong.
+                if (registeredElsewhere || alreadyRegistered || unregisterOnExit || !logger.IsEnabled(LogLevel.Information))
+                {
                     return;
                 }
+
+                ansiConsole.MarkupLineInterpolated(
+                    $"{UiSymbols.Note} '{singleFile.Name}' stays registered as '{packageName}' after it exits. Remove it with 'winapp unregister {singleFile.Name}', or use --unregister-on-exit.");
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or XmlException or ArgumentException or InvalidOperationException)
             {

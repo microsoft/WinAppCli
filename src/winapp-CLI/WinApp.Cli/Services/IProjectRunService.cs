@@ -112,6 +112,19 @@ internal interface IProjectRunService
         FileInfo singleFile,
         SingleFileRunOptions options,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Resolves the package identity a <c>.cs</c> file-based app registers under, without building it.
+    /// </summary>
+    /// <remarks>
+    /// Lets <c>winapp unregister app.cs</c> name the same package <c>winapp run app.cs</c> registered.
+    /// This evaluates only (one <c>--getProperty</c> pass, no compilation) and needs nothing on disk
+    /// beyond the <c>.cs</c> itself, so it still resolves after the SDK's temp output has been cleaned.
+    /// </remarks>
+    /// <exception cref="ProjectRunException">Thrown when the file cannot be evaluated or its identity cannot be determined.</exception>
+    Task<SingleFileIdentityResolution> ResolveSingleFileIdentityAsync(
+        FileInfo singleFile,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>

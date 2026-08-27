@@ -9,6 +9,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using WinApp.Cli.Helpers;
+using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Commands;
@@ -17,11 +18,19 @@ internal class UnregisterCommand : Command, IShortDescription
 {
     public string ShortDescription => "Unregister a sideloaded development package.";
 
+    public static Argument<FileInfo> InputArgument { get; }
     public static Option<FileInfo> ManifestOption { get; }
     public static Option<bool> ForceOption { get; }
 
     static UnregisterCommand()
     {
+        InputArgument = new Argument<FileInfo>("input")
+        {
+            Description = "Path to a .NET file-based app (a single .cs) whose package should be unregistered. Its identity is resolved the same way 'winapp run' resolves it, so no manifest path is needed. Omit to use --manifest or auto-detect a manifest in the current directory.",
+            Arity = ArgumentArity.ZeroOrOne
+        };
+        InputArgument.AcceptExistingOnly();
+
         ManifestOption = new Option<FileInfo>("--manifest")
         {
             Description = "Path to the Package.appxmanifest (default: auto-detect from current directory)"
@@ -36,6 +45,7 @@ internal class UnregisterCommand : Command, IShortDescription
 
     public UnregisterCommand() : base("unregister", "Unregisters a sideloaded development package. Only removes packages registered in development mode (e.g., via 'winapp run' or 'create-debug-identity').")
     {
+        Arguments.Add(InputArgument);
         Options.Add(ManifestOption);
         Options.Add(ForceOption);
         Options.Add(WinAppRootCommand.JsonOption);
@@ -43,48 +53,101 @@ internal class UnregisterCommand : Command, IShortDescription
 
     public class Handler(
         IPackageRegistrationService packageRegistrationService,
+        IProjectRunService projectRunService,
         ICurrentDirectoryProvider currentDirectoryProvider,
         IAnsiConsole ansiConsole,
         ILogger<UnregisterCommand> logger) : AsynchronousCommandLineAction
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
+            var input = parseResult.GetValue(InputArgument);
             var manifest = parseResult.GetValue(ManifestOption);
             var force = parseResult.GetValue(ForceOption);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
-            // Resolve manifest
-            FileInfo resolvedManifest;
-            if (manifest != null && manifest.Exists)
+            string packageName;
+            string trustedRoot;
+
+            if (input != null)
             {
-                resolvedManifest = manifest;
-            }
-            else
-            {
-                resolvedManifest = ManifestHelper.FindManifest(currentDirectoryProvider.GetCurrentDirectory());
-                if (!resolvedManifest.Exists)
+                if (!ProjectRunService.IsSingleFileApp(input))
                 {
-                    var message = "No manifest found in the current directory. Use --manifest to specify the path.";
-                    if (isJson)
+                    return FailWith(
+                        $"'{input.Name}' is not a .NET file-based app. Pass a single .cs file, or use --manifest to name a package's manifest.",
+                        isJson);
+                }
+
+                SingleFileIdentityResolution resolved;
+                try
+                {
+                    resolved = await projectRunService.ResolveSingleFileIdentityAsync(input, cancellationToken);
+                }
+                catch (ProjectRunException ex)
+                {
+                    return FailWith(ex.Message, isJson);
+                }
+
+                if (resolved.Packaging == ProjectPackaging.Unpackaged)
+                {
+                    // Nothing was ever registered, so reporting "no package found" would read as a failure
+                    // to find something that should exist.
+                    if (!isJson)
                     {
-                        PrintJson([], [], message);
+                        logger.LogInformation(
+                            "{UISymbol} '{File}' is an unpackaged app (WindowsPackageType=None), so it has no registration to remove.",
+                            UiSymbols.Note, input.Name);
                     }
                     else
                     {
-                        logger.LogError("{UISymbol} {Message}", UiSymbols.Error, message);
+                        PrintJson([], [], errorMessage: null);
                     }
-                    return 1;
-                }
-            }
 
-            // Parse package name from manifest
-            var manifestContent = await File.ReadAllTextAsync(resolvedManifest.FullName, Encoding.UTF8, cancellationToken);
-            var identity = MsixService.ParseAppxManifestAsync(manifestContent);
-            var packageName = identity.PackageName;
+                    return 0;
+                }
+
+                packageName = resolved.PackageName;
+
+                // A file-based app's layout lives in the SDK's own %TEMP%\dotnet\runfile\<stem>-<hash>
+                // directory, never under the user's working directory, so the guard is scoped to that
+                // per-file build root instead. That is strictly more precise than a directory-tree
+                // heuristic: it confirms the registration came from THIS .cs rather than a same-named
+                // app elsewhere — the collision `winapp run` warns about.
+                trustedRoot = resolved.BuildRootDirectory ?? string.Empty;
+            }
+            else
+            {
+                // Resolve manifest
+                FileInfo resolvedManifest;
+                if (manifest != null && manifest.Exists)
+                {
+                    resolvedManifest = manifest;
+                }
+                else
+                {
+                    resolvedManifest = ManifestHelper.FindManifest(currentDirectoryProvider.GetCurrentDirectory());
+                    if (!resolvedManifest.Exists)
+                    {
+                        return FailWith(
+                            "No manifest found in the current directory. Pass a .cs file-based app, or use --manifest to specify the path.",
+                            isJson);
+                    }
+                }
+
+                // Parse package name from manifest
+                var manifestContent = await File.ReadAllTextAsync(resolvedManifest.FullName, Encoding.UTF8, cancellationToken);
+                var identity = MsixService.ParseAppxManifestAsync(manifestContent);
+                packageName = identity.PackageName;
+
+                // Scope the "different project tree" guard to the resolved manifest's directory, not the
+                // current directory. When the manifest is auto-detected these are the same folder, so this
+                // is unchanged for the common case; they diverge for an explicit --manifest, where the tree
+                // the caller means is the one their manifest describes.
+                trustedRoot = Path.GetFullPath(
+                    resolvedManifest.DirectoryName ?? currentDirectoryProvider.GetCurrentDirectory());
+            }
 
             // Search for both the exact name and the .debug variant
             var namesToCheck = new[] { packageName, $"{packageName}.debug" };
-            var cwd = Path.GetFullPath(currentDirectoryProvider.GetCurrentDirectory());
 
             var unregistered = new List<string>();
             var skipped = new List<string>();
@@ -105,11 +168,11 @@ internal class UnregisterCommand : Command, IShortDescription
                         continue;
                     }
 
-                    // Check install location is under current directory tree
-                    if (!force && !string.IsNullOrEmpty(pkg.InstallLocation))
+                    // Check the install location sits under the tree the caller identified
+                    if (!force && !string.IsNullOrEmpty(pkg.InstallLocation) && trustedRoot.Length > 0)
                     {
                         var installPath = Path.GetFullPath(pkg.InstallLocation);
-                        if (!installPath.StartsWith(cwd, StringComparison.OrdinalIgnoreCase))
+                        if (!installPath.StartsWith(trustedRoot, StringComparison.OrdinalIgnoreCase))
                         {
                             if (!isJson)
                             {
@@ -142,8 +205,21 @@ internal class UnregisterCommand : Command, IShortDescription
             }
 
             return 0;
-        }
 
+            int FailWith(string message, bool json)
+            {
+                if (json)
+                {
+                    PrintJson([], [], message);
+                }
+                else
+                {
+                    logger.LogError("{UISymbol} {Message}", UiSymbols.Error, message);
+                }
+
+                return 1;
+            }
+        }
         private void PrintJson(List<string> unregistered, List<string> skipped, string? errorMessage)
         {
             var result = new UnregisterResult

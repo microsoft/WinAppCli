@@ -2,9 +2,17 @@
 // Licensed under the MIT License.
 
 using System.Text.RegularExpressions;
+using System.Xml;
 using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.Services;
+
+/// <summary>
+/// A manifest the app author supplied, rather than one winapp infers.
+/// </summary>
+/// <param name="File">The manifest file.</param>
+/// <param name="Source">Human-readable phrase naming which tier found it, for logs and errors.</param>
+internal sealed record AuthoredSingleFileManifest(FileInfo File, string Source);
 
 /// <summary>
 /// The manifest metadata inferred for a .NET file-based app, ready to hand to
@@ -181,6 +189,106 @@ internal static partial class SingleFileManifestPlanner
 
         var trimmed = value?.Trim();
         return string.IsNullOrEmpty(trimmed) ? null : trimmed;
+    }
+
+    /// <summary>MSBuild property pointing at a hand-authored manifest, mirroring the NuGet targets' escape hatch.</summary>
+    internal const string ManifestPathProperty = "WinAppManifestPath";
+
+    /// <summary>
+    /// Finds a manifest the app author supplied — tiers 2 and 3 of the manifest precedence — or
+    /// <see langword="null"/> when the identity is inferred instead.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Shared by <c>winapp run</c> (which generates a manifest when this returns null) and
+    /// <c>winapp unregister</c> (which infers the identity instead). Both must agree on which manifest an
+    /// app registers under, so the probe lives in one place rather than being restated per command.
+    /// </para>
+    /// <para>
+    /// Only the per-file <c>&lt;stem&gt;.appxmanifest</c> name is discovered implicitly. The
+    /// directory-wide names (<c>Package.appxmanifest</c>, <c>appxmanifest.xml</c>) are deliberately NOT
+    /// probed: file-based apps are per-file and can sit side by side, so a shared
+    /// <c>Package.appxmanifest</c> would silently be applied to every <c>.cs</c> in the folder —
+    /// registering <c>bar.cs</c> under <c>foo.cs</c>'s identity. A user who genuinely wants one manifest
+    /// for several files points at it explicitly with <c>--manifest</c> or
+    /// <c>#:property WinAppManifestPath</c>.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ProjectRunException">Thrown when <c>WinAppManifestPath</c> names a file that does not exist.</exception>
+    public static AuthoredSingleFileManifest? FindAuthoredManifest(
+        FileInfo singleFile,
+        IReadOnlyDictionary<string, string> properties)
+    {
+        var sourceDirectory = singleFile.DirectoryName ?? ".";
+
+        // Tier 2: an explicit WinAppManifestPath declared by the app itself.
+        var declaredPath = Read(properties, ManifestPathProperty);
+        if (declaredPath is not null)
+        {
+            var declared = new FileInfo(Path.GetFullPath(declaredPath, sourceDirectory));
+            if (!declared.Exists)
+            {
+                throw new ProjectRunException(
+                    $"'{singleFile.Name}' sets {ManifestPathProperty} to '{declared.FullName}', but no file exists there. " +
+                    "Point it at an existing manifest, or remove it to let winapp generate one.");
+            }
+
+            return new AuthoredSingleFileManifest(declared, $"declared by {ManifestPathProperty}");
+        }
+
+        // Tier 3: a manifest the user authored next to the .cs. Reduce the stem to a bare name first: it
+        // originates from the user-supplied input path, and a rooted or separator-bearing value would make
+        // the join discard sourceDirectory and probe somewhere else entirely.
+        var stem = Path.GetFileName(Path.GetFileNameWithoutExtension(singleFile.Name));
+        if (string.IsNullOrEmpty(stem))
+        {
+            return null;
+        }
+
+        var authoredPath = Path.Join(sourceDirectory, $"{stem}.appxmanifest");
+        return File.Exists(authoredPath)
+            ? new AuthoredSingleFileManifest(new FileInfo(authoredPath), "found next to the file")
+            : null;
+    }
+
+    /// <summary>
+    /// Resolves the <c>Identity/@Name</c> a file-based app registers under, without building it.
+    /// </summary>
+    /// <remarks>
+    /// An authored manifest is authoritative; otherwise the name is INFERRED with the same rules
+    /// <c>winapp run</c> applies, rather than read back from the generated manifest. Inference is
+    /// deterministic and needs nothing on disk, so this still resolves after the SDK's temp output has
+    /// been cleaned — which is exactly when a user reaches for <c>winapp unregister</c>.
+    /// </remarks>
+    /// <exception cref="ProjectRunException">Thrown when an authored manifest is unreadable or declares no identity.</exception>
+    public static string ResolvePackageName(
+        FileInfo singleFile,
+        IReadOnlyDictionary<string, string> properties)
+    {
+        var authored = FindAuthoredManifest(singleFile, properties);
+        if (authored is null)
+        {
+            return Plan(singleFile, properties).PackageName;
+        }
+
+        string? identityName;
+        try
+        {
+            identityName = AppxManifestDocument.Load(authored.File.FullName).IdentityName;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or XmlException)
+        {
+            throw new ProjectRunException(
+                $"Could not read the manifest '{authored.File.FullName}' ({authored.Source}): {ex.Message}");
+        }
+
+        if (string.IsNullOrWhiteSpace(identityName))
+        {
+            throw new ProjectRunException(
+                $"The manifest '{authored.File.FullName}' ({authored.Source}) declares no Identity/@Name.");
+        }
+
+        return identityName;
     }
 
     /// <summary>One to four dot-separated numeric components, and nothing else.</summary>

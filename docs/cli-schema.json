@@ -4933,6 +4933,19 @@
     "unregister": {
       "description": "Unregisters a sideloaded development package. Only removes packages registered in development mode (e.g., via 'winapp run' or 'create-debug-identity').",
       "hidden": false,
+      "arguments": {
+        "input": {
+          "description": "Path to a .NET file-based app (a single .cs) whose package should be unregistered. Its identity is resolved the same way 'winapp run' resolves it, so no manifest path is needed. Omit to use --manifest or auto-detect a manifest in the current directory.",
+          "order": 0,
+          "hidden": false,
+          "valueType": "System.IO.FileInfo",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      },
       "options": {
         "--force": {
           "description": "Skip the install-location directory check and unregister even if the package was registered from a different project tree",

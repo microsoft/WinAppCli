@@ -1454,6 +1454,8 @@ export async function uiWaitFor(options: UiWaitForOptions = {}): Promise<WinappR
 // ---------------------------------------------------------------------------
 
 export interface UnregisterOptions extends CommonOptions {
+  /** Path to a .NET file-based app (a single .cs) whose package should be unregistered. Its identity is resolved the same way 'winapp run' resolves it, so no manifest path is needed. Omit to use --manifest or auto-detect a manifest in the current directory. */
+  input?: string;
   /** Skip the install-location directory check and unregister even if the package was registered from a different project tree */
   force?: boolean;
   /** Format output as JSON */
@@ -1467,6 +1469,7 @@ export interface UnregisterOptions extends CommonOptions {
  */
 export async function unregister(options: UnregisterOptions = {}): Promise<WinappResult> {
   const args: string[] = ['unregister'];
+  if (options.input) args.push(options.input);
   if (options.force) args.push('--force');
   if (options.json) args.push('--json');
   if (options.manifest) args.push('--manifest', options.manifest);

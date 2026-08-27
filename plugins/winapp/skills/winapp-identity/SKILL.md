@@ -124,7 +124,7 @@ winapp create-debug-identity .\bin\Debug\myapp.exe
 | **Capture debug output** | `winapp run .\build\Debug --debug-output` | Captures `OutputDebugString`; on crash, writes minidump and analyzes managed exceptions automatically. **Blocks other debuggers** (one debugger per process) |
 | **Run and auto-clean** | `winapp run .\build\Debug --unregister-on-exit` | Unregisters the dev package after the app exits |
 | **Launch and detach (CI)** | `winapp run .\build\Debug --detach` | Returns immediately after launch; use `--json` to get PID for scripting |
-| **Clean up stale registration** | `winapp unregister` | Removes dev packages for the current project (auto-detects from manifest) |
+| **Clean up stale registration** | `winapp unregister` | Removes dev packages for the current project (auto-detects from manifest; pass a `.cs` for a file-based app) |
 
 > **Using Visual Studio with a packaging project?** VS already handles identity, AUMID activation, and debugger attachment from F5. These workflows are most useful for VS Code, terminal-based development, and frameworks VS doesn't natively package (Rust, Flutter, Tauri, Electron, C++).
 

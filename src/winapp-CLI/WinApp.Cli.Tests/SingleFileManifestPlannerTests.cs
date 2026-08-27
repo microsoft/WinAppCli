@@ -188,5 +188,192 @@ public class SingleFileManifestPlannerTests
     }
 
     #endregion
+
+    #region Authored manifest resolution
+
+    private static DirectoryInfo NewAppDirectory()
+    {
+        var directory = new DirectoryInfo(Path.Join(Path.GetTempPath(), $"sfmp_{Guid.NewGuid():N}"));
+        directory.Create();
+        return directory;
+    }
+
+    [TestMethod]
+    public void FindAuthoredManifest_NoneAuthored_ReturnsNull()
+    {
+        var directory = NewAppDirectory();
+        try
+        {
+            var singleFile = new FileInfo(Path.Join(directory.FullName, "counter.cs"));
+            Assert.IsNull(SingleFileManifestPlanner.FindAuthoredManifest(singleFile, Props()));
+        }
+        finally
+        {
+            directory.Delete(true);
+        }
+    }
+
+    [TestMethod]
+    public void FindAuthoredManifest_IgnoresDirectoryWideNames()
+    {
+        // foo.cs and bar.cs can share a directory, so adopting a shared Package.appxmanifest would run
+        // one app under another's identity.
+        var directory = NewAppDirectory();
+        try
+        {
+            var singleFile = new FileInfo(Path.Join(directory.FullName, "counter.cs"));
+            File.WriteAllText(Path.Join(directory.FullName, "Package.appxmanifest"), "<Package />");
+            File.WriteAllText(Path.Join(directory.FullName, "appxmanifest.xml"), "<Package />");
+
+            Assert.IsNull(SingleFileManifestPlanner.FindAuthoredManifest(singleFile, Props()));
+        }
+        finally
+        {
+            directory.Delete(true);
+        }
+    }
+
+    [TestMethod]
+    public void FindAuthoredManifest_PerFileName_IsDiscovered()
+    {
+        var directory = NewAppDirectory();
+        try
+        {
+            var singleFile = new FileInfo(Path.Join(directory.FullName, "counter.cs"));
+            var authoredPath = Path.Join(directory.FullName, "counter.appxmanifest");
+            File.WriteAllText(authoredPath, "<Package />");
+
+            var found = SingleFileManifestPlanner.FindAuthoredManifest(singleFile, Props());
+
+            Assert.IsNotNull(found);
+            Assert.AreEqual(authoredPath, found.File.FullName);
+        }
+        finally
+        {
+            directory.Delete(true);
+        }
+    }
+
+    [TestMethod]
+    public void FindAuthoredManifest_ManifestPathProperty_WinsOverPerFileName()
+    {
+        var directory = NewAppDirectory();
+        try
+        {
+            var singleFile = new FileInfo(Path.Join(directory.FullName, "counter.cs"));
+            File.WriteAllText(Path.Join(directory.FullName, "counter.appxmanifest"), "<Package />");
+            var declaredPath = Path.Join(directory.FullName, "Custom.appxmanifest");
+            File.WriteAllText(declaredPath, "<Package />");
+
+            var found = SingleFileManifestPlanner.FindAuthoredManifest(
+                singleFile,
+                Props((SingleFileManifestPlanner.ManifestPathProperty, "Custom.appxmanifest")));
+
+            Assert.IsNotNull(found);
+            Assert.AreEqual(declaredPath, found.File.FullName);
+        }
+        finally
+        {
+            directory.Delete(true);
+        }
+    }
+
+    [TestMethod]
+    public void FindAuthoredManifest_ManifestPathPointsNowhere_IsRejected()
+    {
+        var directory = NewAppDirectory();
+        try
+        {
+            var singleFile = new FileInfo(Path.Join(directory.FullName, "counter.cs"));
+
+            var ex = Assert.ThrowsExactly<ProjectRunException>(() =>
+                SingleFileManifestPlanner.FindAuthoredManifest(
+                    singleFile,
+                    Props((SingleFileManifestPlanner.ManifestPathProperty, "Missing.appxmanifest"))));
+
+            StringAssert.Contains(ex.Message, "no file exists there");
+        }
+        finally
+        {
+            directory.Delete(true);
+        }
+    }
+
+    [TestMethod]
+    public void ResolvePackageName_NoAuthoredManifest_UsesTheInferredIdentity()
+    {
+        var directory = NewAppDirectory();
+        try
+        {
+            var singleFile = new FileInfo(Path.Join(directory.FullName, "counter.cs"));
+
+            Assert.AreEqual(
+                "com.contoso.counter",
+                SingleFileManifestPlanner.ResolvePackageName(
+                    singleFile,
+                    Props((SingleFileManifestPlanner.PackageNameProperty, "com.contoso.counter"))));
+        }
+        finally
+        {
+            directory.Delete(true);
+        }
+    }
+
+    [TestMethod]
+    public void ResolvePackageName_AuthoredManifest_ReadsItsIdentityInsteadOfInferring()
+    {
+        // The authored manifest is what actually registers, so its Identity/@Name must win over any
+        // WinAppPackageName the file also declares.
+        var directory = NewAppDirectory();
+        try
+        {
+            var singleFile = new FileInfo(Path.Join(directory.FullName, "counter.cs"));
+            File.WriteAllText(
+                Path.Join(directory.FullName, "counter.appxmanifest"),
+                """
+                <?xml version="1.0" encoding="utf-8"?>
+                <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
+                  <Identity Name="Authored.Identity" Publisher="CN=Someone" Version="1.0.0.0" />
+                </Package>
+                """);
+
+            Assert.AreEqual(
+                "Authored.Identity",
+                SingleFileManifestPlanner.ResolvePackageName(
+                    singleFile,
+                    Props((SingleFileManifestPlanner.PackageNameProperty, "inferred.name"))));
+        }
+        finally
+        {
+            directory.Delete(true);
+        }
+    }
+
+    [TestMethod]
+    public void ResolvePackageName_AuthoredManifestWithoutIdentity_IsRejected()
+    {
+        var directory = NewAppDirectory();
+        try
+        {
+            var singleFile = new FileInfo(Path.Join(directory.FullName, "counter.cs"));
+            File.WriteAllText(
+                Path.Join(directory.FullName, "counter.appxmanifest"),
+                """
+                <?xml version="1.0" encoding="utf-8"?>
+                <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10" />
+                """);
+
+            var ex = Assert.ThrowsExactly<ProjectRunException>(() =>
+                SingleFileManifestPlanner.ResolvePackageName(singleFile, Props()));
+
+            StringAssert.Contains(ex.Message, "no Identity/@Name");
+        }
+        finally
+        {
+            directory.Delete(true);
+        }
+    }
+
+    #endregion
 }
 

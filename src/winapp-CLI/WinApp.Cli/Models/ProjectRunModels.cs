@@ -201,3 +201,15 @@ internal sealed record SingleFileRunResolution(
 /// <see cref="ExitCode"/> is 0; on a build failure dotnet already surfaced its diagnostics.
 /// </summary>
 internal sealed record SingleFileBuildOutcome(SingleFileRunResolution? Resolution, int ExitCode);
+
+/// <summary>
+/// The package identity a <c>.cs</c> file-based app registers under, resolved by evaluation alone so
+/// <c>winapp unregister app.cs</c> can name it without building the app.
+/// </summary>
+/// <param name="PackageName">The <c>Identity/@Name</c> the app registers under — read from an authored manifest when it has one, otherwise inferred exactly as <c>winapp run</c> infers it.</param>
+/// <param name="Packaging">Packaged vs unpackaged, from the effective <c>WindowsPackageType</c>. An unpackaged app never registers, so there is nothing to remove.</param>
+/// <param name="BuildRootDirectory">The SDK's per-file build root (<c>%TEMP%\dotnet\runfile\&lt;stem&gt;-&lt;hash&gt;</c>), used to confirm a registration belongs to this file; null when it could not be determined.</param>
+internal sealed record SingleFileIdentityResolution(
+    string PackageName,
+    ProjectPackaging Packaging,
+    string? BuildRootDirectory);

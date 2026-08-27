@@ -24,6 +24,7 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
     private FakeAppLauncherService _fakeAppLauncherService = null!;
     private FakeDebugOutputService _fakeDebugOutputService = null!;
     private FakeProjectRunService _fakeProjectRunService = null!;
+    private FakePackageRegistrationService _fakePackageRegistrationService = null!;
 
     private static readonly XNamespace Ns = "http://schemas.microsoft.com/appx/manifest/foundation/windows10";
     private static readonly XNamespace Uap = "http://schemas.microsoft.com/appx/manifest/uap/windows10";
@@ -34,11 +35,13 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
         _fakeAppLauncherService = new FakeAppLauncherService();
         _fakeDebugOutputService = new FakeDebugOutputService();
         _fakeProjectRunService = new FakeProjectRunService();
+        _fakePackageRegistrationService = new FakePackageRegistrationService();
         return services
             .AddSingleton<IMsixService>(_fakeMsixService)
             .AddSingleton<IAppLauncherService>(_fakeAppLauncherService)
             .AddSingleton<IDebugOutputService>(_fakeDebugOutputService)
             .AddSingleton<IProjectRunService>(_fakeProjectRunService)
+            .AddSingleton<IPackageRegistrationService>(_fakePackageRegistrationService)
             .AddSingleton<INugetService, FakeNugetService>();
     }
 
@@ -621,6 +624,83 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
 
         Assert.IsFalse(TestAnsiConsole.Output.Contains("gives it no console", StringComparison.Ordinal),
             "A windowed app should not be told about the console hint");
+    }
+
+    #endregion
+
+    #region Registration lifetime
+
+    [TestMethod]
+    public async Task SingleFileMode_FirstRegistration_SaysThePackageOutlivesTheRun()
+    {
+        // `winapp run app.cs` leaves a package registered, which is invisible unless we say so — and the
+        // generated manifest lives in the SDK's temp output, so the user has no path to point unregister at.
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir);
+        _fakePackageRegistrationService.FakeDevPackages = [];
+        var command = GetRequiredService<RunCommand>();
+
+        await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--detach"]);
+
+        var output = TestAnsiConsole.Output;
+        StringAssert.Contains(output, "stays registered");
+        StringAssert.Contains(output, "winapp unregister counter.cs");
+    }
+
+    [TestMethod]
+    public async Task SingleFileMode_AlreadyRegisteredFromTheSamePlace_StaysQuiet()
+    {
+        // Re-running REPLACES the app's own registration rather than accumulating another, so repeating
+        // the notice on every inner-loop run would be noise that trains users to stop reading output.
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir);
+        _fakePackageRegistrationService.FakeDevPackages =
+        [
+            new DevPackageInfo("counter_1.0.0.0_x64__abc", "counter", "1.0.0.0",
+                Path.Join(outputDir.FullName, "AppX"), IsDevelopmentMode: true)
+        ];
+        var command = GetRequiredService<RunCommand>();
+
+        await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--detach"]);
+
+        Assert.IsFalse(TestAnsiConsole.Output.Contains("stays registered", StringComparison.Ordinal),
+            "The persistence note should only fire on the run that first registers the identity");
+    }
+
+    [TestMethod]
+    public async Task SingleFileMode_UnregisterOnExit_SuppressesThePersistenceNote()
+    {
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir);
+        _fakePackageRegistrationService.FakeDevPackages = [];
+        var command = GetRequiredService<RunCommand>();
+
+        await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--unregister-on-exit"]);
+
+        Assert.IsFalse(TestAnsiConsole.Output.Contains("stays registered", StringComparison.Ordinal),
+            "The package does not outlive a run that already removes it");
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
+    public async Task SingleFileMode_RegisteredFromElsewhere_WarnsAboutReplacingIt()
+    {
+        // Two counter.cs files in different folders share the default identity, and the second silently
+        // replaces the first.
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir);
+        _fakePackageRegistrationService.FakeDevPackages =
+        [
+            new DevPackageInfo("counter_1.0.0.0_x64__abc", "counter", "1.0.0.0",
+                Path.Join(_tempDirectory.FullName, "some_other_app", "AppX"), IsDevelopmentMode: true)
+        ];
+        var command = GetRequiredService<RunCommand>();
+
+        var (_, ambientOutput) = await InvokeWithAmbientConsoleCaptureAsync(command, [singleFile.FullName, "--detach"]);
+
+        StringAssert.Contains(ambientOutput, "Replacing the existing registration");
+        Assert.IsFalse(TestAnsiConsole.Output.Contains("stays registered", StringComparison.Ordinal),
+            "The replacement warning already covers this run; a persistence note as well would be noise");
     }
 
     #endregion

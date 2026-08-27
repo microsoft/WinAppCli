@@ -121,4 +121,24 @@ internal sealed class FakeProjectRunService : IProjectRunService
         return Task.FromResult(SingleFileBuildOutcome
             ?? throw new InvalidOperationException("FakeProjectRunService.SingleFileBuildOutcome was not configured."));
     }
+
+    /// <summary>Returned from <see cref="ResolveSingleFileIdentityAsync"/> when no exception is configured.</summary>
+    public SingleFileIdentityResolution? SingleFileIdentity { get; set; }
+
+    /// <summary>When set, <see cref="ResolveSingleFileIdentityAsync"/> throws it.</summary>
+    public ProjectRunException? SingleFileIdentityThrows { get; set; }
+
+    public List<FileInfo> ResolveSingleFileIdentityCalls { get; } = [];
+
+    public Task<SingleFileIdentityResolution> ResolveSingleFileIdentityAsync(FileInfo singleFile, CancellationToken cancellationToken)
+    {
+        ResolveSingleFileIdentityCalls.Add(singleFile);
+        if (SingleFileIdentityThrows != null)
+        {
+            throw SingleFileIdentityThrows;
+        }
+
+        return Task.FromResult(SingleFileIdentity
+            ?? throw new InvalidOperationException("FakeProjectRunService.SingleFileIdentity was not configured."));
+    }
 }

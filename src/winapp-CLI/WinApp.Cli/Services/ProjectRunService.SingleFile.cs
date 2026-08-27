@@ -308,6 +308,85 @@ internal sealed partial class ProjectRunService
             0);
     }
 
+    /// <inheritdoc />
+    public async Task<SingleFileIdentityResolution> ResolveSingleFileIdentityAsync(
+        FileInfo singleFile,
+        CancellationToken cancellationToken)
+    {
+        // Deliberately evaluates rather than builds, and asks for NO RuntimeIdentifier or configuration
+        // of its own. `--getProperty` evaluates the virtual project without compiling anything, and the
+        // two things this needs are invariant across both: the identity is inferred from #:property
+        // values, and the build root is the SDK's per-file %TEMP%\dotnet\runfile\<stem>-<hash> directory,
+        // which sits ABOVE the bin\<config>[_<rid>] tail. So `winapp unregister app.cs` costs one ~1.5s
+        // evaluation and works without the app being buildable on this machine at all.
+        var options = new SingleFileRunOptions(
+            Configuration: "Debug",
+            Architecture: RunArchHelper.DefaultArchitecture(),
+            ArchitectureIsExplicit: false,
+            NoBuild: true,
+            NoRestore: false,
+            Properties: []);
+
+        // Same working directory the build pass uses: MSBuildProjectDirectory for a file-based app is the
+        // .cs file's OWN directory, so evaluating from there keeps any Directory.Build.props next to the
+        // file in scope and resolves the identity the build would have produced.
+        var workingDir = singleFile.Directory ?? new DirectoryInfo(Directory.GetCurrentDirectory());
+        var args = BuildSingleFileEvaluateArguments(singleFile, options);
+        logger.LogDebug("{UISymbol} dotnet {Arguments}", UiSymbols.Note, RedactSecretsForDisplay(args));
+
+        var (exitCode, stdout, stderr) = await dotNetService.RunDotnetCommandAsync(workingDir, args, cancellationToken);
+        if (exitCode != 0)
+        {
+            var detail = string.IsNullOrWhiteSpace(stderr) ? stdout : stderr;
+            throw new ProjectRunException(
+                $"Could not evaluate '{singleFile.Name}' to determine its package identity. {detail?.Trim()}".TrimEnd());
+        }
+
+        var props = MsBuildPropertyReader.Parse(stdout, SingleFileRequestedProperties);
+
+        var packaging = string.Equals(GetProp(props, "WindowsPackageType"), "None", StringComparison.OrdinalIgnoreCase)
+            ? ProjectPackaging.Unpackaged
+            : ProjectPackaging.Packaged;
+
+        return new SingleFileIdentityResolution(
+            SingleFileManifestPlanner.ResolvePackageName(singleFile, props),
+            packaging,
+            ResolveSingleFileBuildRoot(props));
+    }
+
+    /// <summary>
+    /// Reduces the evaluated output path to the SDK's per-file build root
+    /// (<c>%TEMP%\dotnet\runfile\&lt;stem&gt;-&lt;hash&gt;</c>), used to confirm a registration really
+    /// belongs to this <c>.cs</c> before removing it.
+    /// </summary>
+    /// <remarks>
+    /// Trimming the <c>bin\&lt;config&gt;[_&lt;rid&gt;]</c> tail is what makes the check independent of
+    /// configuration and architecture: <c>bin\debug</c> and <c>bin\release_win-arm64</c> share a root, so
+    /// a package registered by <c>winapp run app.cs -c Release</c> is still recognized here. Returns
+    /// <see langword="null"/> when the shape is unexpected, and the caller then falls back to identity
+    /// alone rather than refusing to unregister.
+    /// </remarks>
+    private static string? ResolveSingleFileBuildRoot(IReadOnlyDictionary<string, string> props)
+    {
+        var outputPath = GetProp(props, "OutputPath");
+        if (string.IsNullOrEmpty(outputPath))
+        {
+            outputPath = GetProp(props, "TargetDir");
+        }
+
+        if (string.IsNullOrEmpty(outputPath))
+        {
+            return null;
+        }
+
+        // <root>\bin\<config>\ → up two levels. TrimEnd first: the evaluated value carries a trailing
+        // separator, which would otherwise cost one level of the walk.
+        var current = Path.GetFullPath(outputPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var binDirectory = Path.GetDirectoryName(current);
+        var buildRoot = binDirectory is null ? null : Path.GetDirectoryName(binDirectory);
+        return string.IsNullOrEmpty(buildRoot) ? null : buildRoot;
+    }
+
     /// <summary>
     /// Resolves the architecture the app was actually built for, so the Windows App Runtime installed
     /// after registration matches it.

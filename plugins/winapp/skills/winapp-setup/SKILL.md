@@ -196,6 +196,9 @@ winapp run counter.cs
 # Register identity without launching, or run a Release build detached
 winapp run counter.cs --no-launch
 winapp run counter.cs -c Release --detach --json
+
+# Remove the package it registered
+winapp unregister counter.cs
 ```
 
 Describe the package with `#:property` directives in the file. All are optional:
@@ -212,6 +215,7 @@ Describe the package with `#:property` directives in the file. All are optional:
 - **Packaged and unpackaged both work**, from the effective `WindowsPackageType` — same as project mode. `None` builds, installs the Windows App Runtime, and launches the `.exe` directly; identity options apply to packaged apps only.
 - **Console apps need `--with-alias`** to show output — a packaged app launched by AUMID has no console. winapp adds the `uap5:ExecutionAlias` to the generated manifest when you pass the flag (it also puts the exe on PATH, so it is opt-in). An authored manifest must declare its own.
 - **Rejected options** (the file configures itself): `-f` ⇒ `#:property TargetFramework=…`; `--project` ⇒ not applicable. `--arch`/`-r` work as in project mode and default to the **machine architecture** — required for self-contained WinAppSDK apps, which fail as `AnyCPU`. Everything else works as usual.
+- **The package outlives the run.** winapp says so the first time it registers an app. Remove it with `winapp unregister counter.cs` (no manifest path needed — it resolves the same identity), or run with `--unregister-on-exit`.
 - Requires **.NET SDK 10.0.300+**.
 
 > Two `counter.cs` files in different folders share the default identity `counter`, so the second replaces the first (winapp warns). Set `WinAppPackageName` on one to keep both.
