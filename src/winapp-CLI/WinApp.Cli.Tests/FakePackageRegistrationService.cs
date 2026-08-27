@@ -191,4 +191,17 @@ internal class FakePackageRegistrationService : IPackageRegistrationService
         }
         return FakeDevPackages;
     }
+
+    /// <summary>
+    /// When set, <see cref="FindOrphanedDevPackages"/> returns these values. Defaults to empty list.
+    /// </summary>
+    public List<DevPackageInfo> FakeOrphanedDevPackages { get; set; } = [];
+
+    public int FindOrphanedDevPackagesCallCount { get; private set; }
+
+    public List<DevPackageInfo> FindOrphanedDevPackages()
+    {
+        FindOrphanedDevPackagesCallCount++;
+        return FakeOrphanedDevPackages;
+    }
 }

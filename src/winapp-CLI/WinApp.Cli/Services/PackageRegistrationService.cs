@@ -333,25 +333,72 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
                 continue;
             }
 
-            string? installLocation = null;
-            try
-            {
-                installLocation = pkg.InstalledLocationAccessor();
-            }
-            catch
-            {
-                // InstalledLocation can throw if the path no longer exists
-            }
-
-            results.Add(new DevPackageInfo(
-                FullName: pkg.FullName,
-                Name: pkg.Name,
-                Version: $"{pkg.VersionMajor}.{pkg.VersionMinor}.{pkg.VersionBuild}.{pkg.VersionRevision}",
-                InstallLocation: installLocation,
-                IsDevelopmentMode: pkg.IsDevelopmentMode));
+            results.Add(ToDevPackageInfo(pkg));
         }
 
         return results;
+    }
+
+    /// <inheritdoc />
+    public List<DevPackageInfo> FindOrphanedDevPackages()
+    {
+        var results = new List<DevPackageInfo>();
+
+        foreach (var pkg in EnumerateUserPackagesImpl())
+        {
+            if (!pkg.IsDevelopmentMode)
+            {
+                continue;
+            }
+
+            var info = ToDevPackageInfo(pkg);
+
+            // An empty install location means the accessor threw, which for a registered package means
+            // its files are no longer reachable. Treat a location that simply does not exist the same
+            // way; both leave a registration that can never launch.
+            if (string.IsNullOrEmpty(info.InstallLocation) || !DirectoryExists(info.InstallLocation))
+            {
+                results.Add(info);
+            }
+        }
+
+        return results;
+    }
+
+    private static DevPackageInfo ToDevPackageInfo(InstalledPackageView pkg)
+    {
+        string? installLocation = null;
+        try
+        {
+            installLocation = pkg.InstalledLocationAccessor();
+        }
+        catch
+        {
+            // InstalledLocation can throw if the path no longer exists
+        }
+
+        return new DevPackageInfo(
+            FullName: pkg.FullName,
+            Name: pkg.Name,
+            Version: $"{pkg.VersionMajor}.{pkg.VersionMinor}.{pkg.VersionBuild}.{pkg.VersionRevision}",
+            InstallLocation: installLocation,
+            IsDevelopmentMode: pkg.IsDevelopmentMode);
+    }
+
+    /// <summary>
+    /// Existence probe for an install location. A path that cannot even be evaluated (malformed, or on
+    /// a device that is gone) counts as missing rather than throwing out of the enumeration.
+    /// </summary>
+    private static bool DirectoryExists(string path)
+    {
+        try
+        {
+            return Directory.Exists(path);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException or IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     internal static bool IsSideloadPolicyError(Exception ex)

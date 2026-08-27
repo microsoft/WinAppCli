@@ -25,6 +25,7 @@ Use this skill when:
 | "Manifest already exists" | `Package.appxmanifest` already present | Use `winapp manifest generate --if-exists overwrite` or edit manifest directly |
 | `run` / `create-debug-identity` registration error `0x800704EC` | Developer Mode is disabled | Enable it in **Settings → Privacy & security → For developers**, or `Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock' -Name AllowDevelopmentWithoutDevLicense -Value 1`, then retry |
 | `run` / `create-debug-identity` registration error `0x80073CFB` | Package already registered with a conflicting identity | Run `winapp unregister` (or `winapp unregister --force` if the package was registered from a different project tree), then retry |
+| App's Start menu entry launches nothing, silently | Package still registered after its files were deleted | Run `winapp unregister --prune` to remove every dev registration whose files are gone |
 
 ## Command selection guide
 
@@ -80,6 +81,7 @@ Is the app a single .cs file (.NET file-based app)?
 | Run and auto-clean | `winapp run .\build\Debug --unregister-on-exit` | Unregisters the dev package after the app exits |
 | Launch and detach (CI) | `winapp run .\build\Debug --detach` | Returns immediately after launch; use `--json` to get PID for scripting |
 | Clean up stale registration | `winapp unregister` | Removes dev-mode packages for the current project (pass a `.cs` for a file-based app: `winapp unregister counter.cs`) |
+| Start menu entry does nothing when clicked | `winapp unregister --prune` | The package is registered but its files were deleted, so activation silently fails. Prune removes every dev registration whose files are gone |
 
 > **Visual Studio users:** If you have a packaging project, VS already handles identity and debugging from F5 — you likely don't need winapp for debugging. These workflows are for VS Code, terminal, and frameworks VS doesn't natively package.
 

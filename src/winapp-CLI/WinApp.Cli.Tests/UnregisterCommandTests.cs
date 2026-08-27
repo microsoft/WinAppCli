@@ -418,4 +418,109 @@ public class UnregisterCommandTests : BaseCommandTests
     }
 
     #endregion
+
+    #region Prune
+
+    [TestMethod]
+    public async Task UnregisterCommand_Prune_WithForce_RemovesEveryOrphanByFullName()
+    {
+        // Orphans are removed by FULL name, so a same-named package still installed from a live
+        // location is untouched.
+        var command = GetRequiredService<UnregisterCommand>();
+        _fakePackageRegistrationService.FakeOrphanedDevPackages =
+        [
+            new DevPackageInfo("dead.one_1.0.0.0_x64__abc", "dead.one", "1.0.0.0", null, IsDevelopmentMode: true),
+            new DevPackageInfo("dead.two_1.0.0.0_x64__abc", "dead.two", "1.0.0.0", @"C:\gone", IsDevelopmentMode: true)
+        ];
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--prune", "--force"]);
+
+        Assert.AreEqual(0, exitCode);
+        var removed = _fakePackageRegistrationService.UnregisterByFullNameCalls
+            .Select(c => c.PackageFullName)
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToList();
+        Assert.AreEqual(2, removed.Count);
+        Assert.AreEqual("dead.one_1.0.0.0_x64__abc", removed[0]);
+        Assert.AreEqual("dead.two_1.0.0.0_x64__abc", removed[1]);
+        Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterCalls.Count,
+            "Prune must not fall back to identity-name removal, which could catch a live package");
+    }
+
+    [TestMethod]
+    public async Task UnregisterCommand_Prune_NothingOrphaned_SaysSoAndRemovesNothing()
+    {
+        var command = GetRequiredService<UnregisterCommand>();
+        _fakePackageRegistrationService.FakeOrphanedDevPackages = [];
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--prune", "--force"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterByFullNameCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task UnregisterCommand_Prune_NonInteractiveWithoutForce_RefusesInsteadOfAssumingConsent()
+    {
+        // Removing packages without being able to ask is exactly the case that needs an explicit opt-in.
+        TestAnsiConsole.Profile.Width = 1000;
+        var command = GetRequiredService<UnregisterCommand>();
+        _fakePackageRegistrationService.FakeOrphanedDevPackages =
+        [
+            new DevPackageInfo("dead.one_1.0.0.0_x64__abc", "dead.one", "1.0.0.0", null, IsDevelopmentMode: true)
+        ];
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--prune", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterByFullNameCalls.Count);
+        var root = System.Text.Json.JsonDocument.Parse(TestAnsiConsole.Output.Trim()).RootElement;
+        Assert.IsTrue(root.TryGetProperty("Error", out var error));
+        StringAssert.Contains(error.GetString(), "--force");
+    }
+
+    [TestMethod]
+    public async Task UnregisterCommand_Prune_OneFailure_StillRemovesTheRest()
+    {
+        var command = GetRequiredService<UnregisterCommand>();
+        _fakePackageRegistrationService.FakeOrphanedDevPackages =
+        [
+            new DevPackageInfo("dead.one_1.0.0.0_x64__abc", "dead.one", "1.0.0.0", null, IsDevelopmentMode: true),
+            new DevPackageInfo("dead.two_1.0.0.0_x64__abc", "dead.two", "1.0.0.0", null, IsDevelopmentMode: true)
+        ];
+        _fakePackageRegistrationService.UnregisterByFullNameThrows = new InvalidOperationException("access denied");
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--prune", "--force"]);
+
+        // Every package was attempted even though each threw, and the sweep still reports success.
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakePackageRegistrationService.FindOrphanedDevPackagesCallCount);
+    }
+
+    [TestMethod]
+    public async Task UnregisterCommand_Prune_WithInput_IsRejected()
+    {
+        var singleFile = CreateSingleFile();
+        var command = GetRequiredService<UnregisterCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--prune", "--force"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePackageRegistrationService.FindOrphanedDevPackagesCallCount);
+        Assert.AreEqual(0, _fakeProjectRunService.ResolveSingleFileIdentityCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task UnregisterCommand_Prune_WithManifest_IsRejected()
+    {
+        var manifest = await CreateTestManifestAsync();
+        var command = GetRequiredService<UnregisterCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--manifest", manifest.FullName, "--prune", "--force"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePackageRegistrationService.FindOrphanedDevPackagesCallCount);
+    }
+
+    #endregion
 }

@@ -1456,12 +1456,14 @@ export async function uiWaitFor(options: UiWaitForOptions = {}): Promise<WinappR
 export interface UnregisterOptions extends CommonOptions {
   /** Path to a .NET file-based app (a single .cs) whose package should be unregistered. Its identity is resolved the same way 'winapp run' resolves it, so no manifest path is needed. Omit to use --manifest or auto-detect a manifest in the current directory. */
   input?: string;
-  /** Skip the install-location directory check and unregister even if the package was registered from a different project tree */
+  /** Skip the install-location directory check and unregister even if the package was registered from a different project tree. With --prune, also skips the confirmation prompt. */
   force?: boolean;
   /** Format output as JSON */
   json?: boolean;
   /** Path to the Package.appxmanifest (default: auto-detect from current directory) */
   manifest?: string;
+  /** Remove every development-mode registration whose files are gone. These can never launch — Windows keeps the identity and its Start menu entry, but activation silently does nothing. Lists what it found and asks before removing; pass --force to skip the prompt. Cannot be combined with an input or --manifest. */
+  prune?: boolean;
 }
 
 /**
@@ -1473,6 +1475,7 @@ export async function unregister(options: UnregisterOptions = {}): Promise<Winap
   if (options.force) args.push('--force');
   if (options.json) args.push('--json');
   if (options.manifest) args.push('--manifest', options.manifest);
+  if (options.prune) args.push('--prune');
   return execCommand(args, options);
 }
 

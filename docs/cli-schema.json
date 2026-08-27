@@ -4948,7 +4948,7 @@
       },
       "options": {
         "--force": {
-          "description": "Skip the install-location directory check and unregister even if the package was registered from a different project tree",
+          "description": "Skip the install-location directory check and unregister even if the package was registered from a different project tree. With --prune, also skips the confirmation prompt.",
           "hidden": false,
           "valueType": "System.Boolean",
           "hasDefaultValue": true,
@@ -4980,6 +4980,19 @@
           "hasDefaultValue": false,
           "arity": {
             "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--prune": {
+          "description": "Remove every development-mode registration whose files are gone. These can never launch — Windows keeps the identity and its Start menu entry, but activation silently does nothing. Lists what it found and asks before removing; pass --force to skip the prompt. Cannot be combined with an input or --manifest.",
+          "hidden": false,
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
             "maximum": 1
           },
           "required": false,

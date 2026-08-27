@@ -1027,7 +1027,8 @@ winapp unregister [input] [options]
 **Options:**
 
 - `--manifest <path>` - Path to Package.appxmanifest (default: auto-detect from current directory)
-- `--force` - Skip the install-location directory check and unregister even if the package was registered from a different project tree
+- `--force` - Skip the install-location directory check and unregister even if the package was registered from a different project tree. With `--prune`, also skips the confirmation prompt.
+- `--prune` - Remove every development-mode registration whose files are gone. Cannot be combined with an input or `--manifest`.
 - `--json` - Format output as JSON
 
 **What it does:**
@@ -1037,6 +1038,25 @@ winapp unregister [input] [options]
 - Verifies each package was registered in development mode (`IsDevelopmentMode == true`)
 - Verifies the package's install location belongs to the app you named (unless `--force`) — the `.cs` file's own build output, or the manifest's directory
 - Unregisters matching packages
+
+**Cleaning up dead registrations (`--prune`):**
+
+A registration outlives its files. Delete a build output, project tree, or (for a file-based app) let
+Windows clean `%LOCALAPPDATA%\Temp`, and the package stays registered: Windows keeps the identity and
+its Start menu entry, but activation **silently does nothing**. These accumulate invisibly.
+
+```bash
+# List dev registrations whose files are gone, then confirm before removing
+winapp unregister --prune
+
+# Skip the prompt (required for non-interactive/CI use)
+winapp unregister --prune --force
+```
+
+Only development-mode registrations are considered, and each is removed by its full package name, so a
+same-named package still installed from a live location is untouched. The prompt exists because a
+missing install location is *usually* a deleted folder but also describes a package registered from a
+disconnected network share or removable drive — review the list before confirming.
 
 **Examples:**
 
@@ -1052,6 +1072,9 @@ winapp unregister --manifest ./Package.appxmanifest
 
 # Force unregister even if registered from a different project tree
 winapp unregister --force
+
+# Remove every dev registration whose files are gone
+winapp unregister --prune
 
 # JSON output for scripting
 winapp unregister --json
