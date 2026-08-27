@@ -132,6 +132,7 @@ internal sealed class TargetStateStore(ITargetStateDirectoryProvider directoryPr
             PendingInstanceId = state.PendingInstanceId,
             PendingStartedUtc = state.PendingStartedUtc,
             InstanceOrigin = state.InstanceOrigin,
+            BootstrappedEpoch = state.BootstrappedEpoch,
             AgentVersion = state.AgentVersion,
             AgentBinaryHash = state.AgentBinaryHash,
             GuestAddress = state.GuestAddress,

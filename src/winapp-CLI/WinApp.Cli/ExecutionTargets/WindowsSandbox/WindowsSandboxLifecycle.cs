@@ -53,22 +53,25 @@ internal sealed record SandboxReconciliation(
 /// <param name="InstanceId">The managed instance.</param>
 /// <param name="Epoch">Its generation identity.</param>
 /// <param name="Origin">How winapp came to be using it.</param>
+/// <param name="IsWarm">Whether a previous command finished bootstrapping this exact epoch.</param>
 internal sealed record SandboxInstanceLease(
     string InstanceId,
     ExecutionTargetEpoch Epoch,
-    SandboxInstanceOrigin Origin)
+    SandboxInstanceOrigin Origin,
+    bool IsWarm = false)
 {
-    /// <summary>
-    /// Whether the guest behind this lease is already bootstrapped for this epoch.
-    /// </summary>
-    /// <remarks>
-    /// True only for <see cref="SandboxInstanceOrigin.Reused"/>. A recovered or adopted instance is
-    /// live, but nothing in it has been prepared under the epoch that now identifies it — no share,
-    /// no connection material, no agent — so it must go through a full bootstrap.
-    /// </remarks>
-    public bool IsWarm => Origin is SandboxInstanceOrigin.Reused;
-
     /// <summary>Whether winapp took over an instance it did not start.</summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="IsWarm"/> is deliberately not derived from <see cref="Origin"/>. Ownership is
+    /// committed before the guest is prepared, so a command killed part-way through its first
+    /// bootstrap leaves an instance that is owned and listed but has no connected client, no
+    /// Developer Mode, and no agent. Treating that as warm is what would make the next command skip
+    /// <c>wsb connect</c> and then launch the agent as <c>ExistingLogin</c> into a session no client
+    /// has established. The backend records the completed bootstrap only once an authenticated agent
+    /// connection has actually succeeded.
+    /// </para>
+    /// </remarks>
     public bool IsAdopted => Origin is SandboxInstanceOrigin.Adopted;
 }
 
@@ -178,10 +181,16 @@ internal sealed class WindowsSandboxLifecycle(
         if (state is { InstanceId: { } managedId, BootNonce: { } bootNonce }
             && running.Contains(managedId, StringComparer.OrdinalIgnoreCase))
         {
+            var epoch = ExecutionTargetEpoch.Create(managedId, bootNonce);
+
+            // Warm only when a previous command got all the way to an authenticated agent
+            // connection for this exact epoch. Ownership alone proves the instance is winapp's, not
+            // that anything inside it was ever prepared.
             return new SandboxInstanceLease(
                 managedId,
-                ExecutionTargetEpoch.Create(managedId, bootNonce),
-                SandboxInstanceOrigin.Reused);
+                epoch,
+                SandboxInstanceOrigin.Reused,
+                IsWarm: string.Equals(state.BootstrappedEpoch, epoch.Value, StringComparison.Ordinal));
         }
 
         // An unconfirmed start from this or an earlier process is resolved before anything new is

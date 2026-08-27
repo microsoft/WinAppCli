@@ -275,6 +275,56 @@ public class WindowsSandboxSetupTests
     }
 
     [TestMethod]
+    public async Task AliasResolvesButNeverAnswers_StillRunsSetup()
+    {
+        // Regression, and the reason the support probe no longer short-circuits on "a wsb.exe file
+        // resolves". The alias is a zero-byte APPEXECLINK, so it resolves on a host whose package
+        // never initialized -- exactly the state this whole change exists to fix. Only a version
+        // reply may end the probe early.
+        _probe.Enqueue(Facts(payload: true, package: true, alias: true, version: null));
+        _probe.Enqueue(Facts(payload: true, package: true, alias: true, version: "0.8.107.0"));
+
+        var facts = await NewSetup().EnsureReadyAsync(TestContext.CancellationToken);
+
+        Assert.AreEqual(WindowsSandboxSetupState.Ready, facts.State);
+        Assert.AreEqual(1, _bootstrapperLaunches, "A silent alias must still trigger client initialization.");
+    }
+
+    [TestMethod]
+    public async Task WindowsTooOldForTheSandboxCli_IsRefusedImmediately()
+    {
+        // Older Windows can have the Sandbox feature and its System32 payload but no `wsb.exe`, so
+        // the payload signal alone would send the user into a ten-minute wait for a client this
+        // build cannot deliver.
+        _probe.Enqueue(Facts(payload: true, package: true));
+
+        var setup = NewSetup();
+        setup.SupportsSandboxCli = () => false;
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
+            () => setup.EnsureReadyAsync(TestContext.CancellationToken));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.Unsupported, failure.Error.Code);
+        Assert.AreEqual(0, _bootstrapperLaunches);
+        Assert.AreEqual(0, _enabler.Attempts);
+    }
+
+    [TestMethod]
+    public async Task WindowsTooOldButWsbAlreadyAnswers_IsStillReady()
+    {
+        // A host where `wsb` works is usable whatever its build number says. The version gate must
+        // never refuse a machine that is demonstrably fine.
+        _probe.Enqueue(Facts(payload: true, package: true, alias: true, version: "0.8.107.0"));
+
+        var setup = NewSetup();
+        setup.SupportsSandboxCli = () => false;
+
+        var facts = await setup.EnsureReadyAsync(TestContext.CancellationToken);
+
+        Assert.AreEqual(WindowsSandboxSetupState.Ready, facts.State);
+    }
+
+    [TestMethod]
     public async Task NonWindowsHost_IsUnsupportedAndNothingIsAttempted()
     {
         _probe.Enqueue(Facts(isWindows: false));

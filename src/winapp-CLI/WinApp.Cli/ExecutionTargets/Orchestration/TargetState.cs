@@ -70,6 +70,18 @@ internal sealed record TargetState
     /// </remarks>
     public string? InstanceOrigin { get; init; }
 
+    /// <summary>
+    /// The epoch whose guest bootstrap ran all the way to an authenticated agent connection.
+    /// </summary>
+    /// <remarks>
+    /// Ownership is recorded before the guest is prepared, so "recorded and still listed" does not
+    /// mean "ready to talk to". This is the separate, later fact: a command killed between claiming
+    /// an instance and finishing its first bootstrap leaves one with no connected client, no
+    /// Developer Mode, and no agent, and only this marker tells the next command to bootstrap it
+    /// rather than reconnect to something that was never there.
+    /// </remarks>
+    public string? BootstrappedEpoch { get; init; }
+
     /// <summary>Version of the guest agent last known to be installed.</summary>
     public string? AgentVersion { get; init; }
 

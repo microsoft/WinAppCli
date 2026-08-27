@@ -124,6 +124,30 @@ public class SandboxUxRegressionTests
             "Reusing a running Sandbox for a read-only command must not reconnect its client.");
     }
 
+    /// <summary>
+    /// An interrupted first bootstrap must not make the next command think the guest is ready.
+    /// </summary>
+    /// <remarks>
+    /// Ownership is committed before the guest is prepared, so a command killed part-way through
+    /// leaves an instance that is owned and listed but has no connected client. Treating that as a
+    /// warm reuse made the next read-only command skip <c>wsb connect</c> and then launch the agent
+    /// as <c>ExistingLogin</c> into a session nothing had established.
+    /// </remarks>
+    [TestMethod]
+    public async Task ReadOnlyCommand_AfterAnInterruptedFirstBootstrap_StillConnectsTheClient()
+    {
+        using var harness = new BackendHarness();
+        harness.MarkInstanceOwnedButNeverBootstrapped();
+
+        await harness.RunUntilAgentLaunchAsync(
+            TestContext.CancellationToken,
+            requireInteractiveDesktop: false);
+
+        Assert.IsTrue(
+            harness.Cli.Operations.Any(op => op.StartsWith("connect", StringComparison.Ordinal)),
+            "A guest whose bootstrap never finished has no interactive session yet.");
+    }
+
     /// <summary>A first bootstrap still connects the client, because there is no session yet.</summary>
     [TestMethod]
     public async Task FirstBootstrap_StillConnectsTheClient()
@@ -480,7 +504,36 @@ public class SandboxUxRegressionTests
         public ExecutionTargetEpoch Epoch { get; private set; }
 
         /// <summary>Pretends a managed instance from a previous command is still running.</summary>
+        /// <remarks>
+        /// Records the completed-bootstrap marker as well as ownership, because that is what a
+        /// previous command that actually finished would have left. Ownership alone now means
+        /// "winapp's, but never prepared", which correctly is not a warm reuse.
+        /// </remarks>
         public void MarkInstanceAlreadyRunning()
+        {
+            const string InstanceId = "sandbox-existing";
+
+            Cli.SetRunning(InstanceId);
+            _stateStore.Commit(
+                ExecutionTargetRef.WindowsSandboxDefault,
+                new TargetState
+                {
+                    SchemaVersion = 0,
+                    Revision = 0,
+                    TargetKind = ExecutionTargetRef.WindowsSandboxDefault.Kind,
+                    TargetId = ExecutionTargetRef.WindowsSandboxDefault.Id,
+                    InstanceId = InstanceId,
+                    BootNonce = "nonce-existing",
+                    BootstrappedEpoch = ExecutionTargetEpoch.Create(InstanceId, "nonce-existing").Value,
+                },
+                expectedRevision: 0);
+        }
+
+        /// <summary>
+        /// Pretends a previous command claimed an instance but was killed before it finished
+        /// bootstrapping it.
+        /// </summary>
+        public void MarkInstanceOwnedButNeverBootstrapped()
         {
             const string InstanceId = "sandbox-existing";
 
