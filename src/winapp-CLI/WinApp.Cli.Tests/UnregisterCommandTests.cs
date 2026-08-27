@@ -156,7 +156,7 @@ public class UnregisterCommandTests : BaseCommandTests
         _fakePackageRegistrationService.FakeDevPackages =
         [
             new DevPackageInfo("TestPackage_1.0.0.0_x64__abc123", "TestPackage", "1.0.0.0",
-                Path.Combine(layoutRoot.FullName, "AppX"), IsDevelopmentMode: true)
+                Path.Join(layoutRoot.FullName, "AppX"), IsDevelopmentMode: true)
         ];
         _fakePackageRegistrationService.FakeUnregisterResult = true;
 
@@ -272,7 +272,7 @@ public class UnregisterCommandTests : BaseCommandTests
 
     private FileInfo CreateSingleFile(string name = "counter.cs")
     {
-        var path = Path.Combine(_tempDirectory.FullName, name);
+        var path = Path.Join(_tempDirectory.FullName, name);
         File.WriteAllText(path, "Console.WriteLine(\"hi\");");
         return new FileInfo(path);
     }
@@ -291,7 +291,7 @@ public class UnregisterCommandTests : BaseCommandTests
         _fakePackageRegistrationService.FakeDevPackages =
         [
             new DevPackageInfo("counter_1.0.0.0_x64__abc", "counter", "1.0.0.0",
-                Path.Combine(buildRoot.FullName, "bin", "debug_win-x64", "AppX"), IsDevelopmentMode: true)
+                Path.Join(buildRoot.FullName, "bin", "debug_win-x64", "AppX"), IsDevelopmentMode: true)
         ];
         _fakePackageRegistrationService.FakeUnregisterResult = true;
 
@@ -391,7 +391,7 @@ public class UnregisterCommandTests : BaseCommandTests
     [TestMethod]
     public async Task UnregisterCommand_NonCsFileInput_IsRejectedWithGuidance()
     {
-        var notAnApp = new FileInfo(Path.Combine(_tempDirectory.FullName, "Package.appxmanifest"));
+        var notAnApp = new FileInfo(Path.Join(_tempDirectory.FullName, "Package.appxmanifest"));
         await File.WriteAllTextAsync(notAnApp.FullName, TestManifestContent, TestContext.CancellationToken);
         var command = GetRequiredService<UnregisterCommand>();
 

@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.Logging;
+using System.Runtime.InteropServices;
 using WinApp.Cli.Helpers;
 using Windows.Management.Deployment;
 
@@ -372,9 +373,13 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
         {
             installLocation = pkg.InstalledLocationAccessor();
         }
-        catch
+        catch (Exception ex) when (ex is COMException or IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
-            // InstalledLocation can throw if the path no longer exists
+            // InstalledLocation legitimately throws for a registered package whose files are gone, which
+            // is the state FindOrphanedDevPackages exists to find — an unknown location is the answer
+            // here, not an error. COMException is listed because this is a WinRT accessor: an HRESULT
+            // with no framework mapping surfaces as COMException rather than an IO exception, and
+            // letting it escape would abort the enumeration of EVERY package over one bad entry.
         }
 
         return new DevPackageInfo(
