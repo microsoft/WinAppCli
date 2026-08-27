@@ -237,10 +237,13 @@ public class WindowsSandboxLifecycleTests
         var second = await _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
 
         Assert.AreEqual(SandboxInstanceOrigin.Reused, second.Origin);
-        Assert.IsTrue(second.IsWarm, "Only a reused instance may take the warm-reconnect path.");
         Assert.AreEqual(first.InstanceId, second.InstanceId);
         Assert.AreEqual(first.Epoch, second.Epoch, "Reuse must preserve the epoch so live handles stay valid.");
         Assert.AreEqual(1, _cli.StartCount);
+
+        // Warmth is a separate fact, recorded only once a bootstrap completes; nothing here did one.
+        // EnsureInstance_AfterACompletedBootstrap_IsWarm covers that half.
+        Assert.IsFalse(second.IsWarm);
     }
 
     [TestMethod]
@@ -667,6 +670,65 @@ public class WindowsSandboxLifecycleTests
         {
             otherRoot.Delete(recursive: true);
         }
+    }
+
+    [TestMethod]
+    public async Task EnsureInstance_OwnedButNeverBootstrapped_IsNotTreatedAsWarm()
+    {
+        // Ownership is committed before the guest is prepared. A command killed between claiming an
+        // instance and finishing its first bootstrap leaves one that is owned and listed but has no
+        // connected client, no Developer Mode, and no agent. Calling that warm is what makes the
+        // next command skip `wsb connect` and then launch the agent into a session no client has
+        // established.
+        _cli.SetRunning("someone-elses-sandbox");
+        var adopted = await _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
+
+        Assert.IsFalse(adopted.IsWarm);
+
+        var next = await NewLifecycle().EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
+
+        Assert.AreEqual(SandboxInstanceOrigin.Reused, next.Origin, "The instance is still winapp's.");
+        Assert.AreEqual(adopted.Epoch, next.Epoch);
+        Assert.IsFalse(
+            next.IsWarm,
+            "Nothing recorded a completed bootstrap, so the guest must be prepared rather than reconnected to.");
+    }
+
+    [TestMethod]
+    public async Task EnsureInstance_AfterACompletedBootstrap_IsWarm()
+    {
+        _lifecycle = NewLifecycle(new Queue<string>(["sandbox-a"]));
+        var created = await _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
+
+        // What the backend records once its authenticated agent connection succeeds.
+        var state = _stateStore.Read(ExecutionTargetRef.WindowsSandboxDefault)!;
+        _stateStore.Commit(
+            ExecutionTargetRef.WindowsSandboxDefault,
+            state with { BootstrappedEpoch = created.Epoch.Value },
+            state.Revision);
+
+        var next = await NewLifecycle().EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
+
+        Assert.AreEqual(SandboxInstanceOrigin.Reused, next.Origin);
+        Assert.IsTrue(next.IsWarm, "A bootstrap that completed for this exact epoch is what makes reuse warm.");
+    }
+
+    [TestMethod]
+    public async Task EnsureInstance_BootstrapMarkerFromAnotherEpoch_IsNotWarm()
+    {
+        // A marker left by a previous generation says nothing about this one.
+        _lifecycle = NewLifecycle(new Queue<string>(["sandbox-a"]));
+        await _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
+
+        var state = _stateStore.Read(ExecutionTargetRef.WindowsSandboxDefault)!;
+        _stateStore.Commit(
+            ExecutionTargetRef.WindowsSandboxDefault,
+            state with { BootstrappedEpoch = "sandbox-a:SOMEOTHERNONCE" },
+            state.Revision);
+
+        var next = await NewLifecycle().EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
+
+        Assert.IsFalse(next.IsWarm);
     }
 
     [TestMethod]

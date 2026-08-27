@@ -147,23 +147,25 @@ internal sealed class WindowsSandboxBackend(
             });
         }
 
-        // Probed before the application is built, so anything that cannot be resolved fails in
-        // seconds rather than after a long build. There is never a silent fallback to local
-        // execution.
-        if (cli.IsAvailable)
-        {
-            return TargetSupportResult.Supported;
-        }
-
+        // Probed before the application is built, so anything unusable fails in seconds rather than
+        // after a long build. There is never a silent fallback to local execution.
+        //
+        // Deliberately NOT short-circuited on `cli.IsAvailable`. That only proves a `wsb.exe` file
+        // resolves, and the alias is a zero-byte APPEXECLINK whose package may never have
+        // initialized -- which is precisely the host state that used to fail. The setup runner is
+        // the thing that asks `wsb --version`, and it returns immediately when the answer is yes, so
+        // routing through it costs one cheap probe and closes the hole.
         if (setup is null)
         {
-            return TargetSupportResult.Unsupported(new ExecutionTargetErrorInfo
-            {
-                Code = ExecutionTargetErrorCodes.Unsupported,
-                Message = "The Windows Sandbox command line (wsb.exe) was not found.",
-                UserAction = "Install Windows Sandbox on Windows 11 24H2 or newer, then retry.",
-                Example = "winapp run . --sandbox",
-            });
+            return cli.IsAvailable
+                ? TargetSupportResult.Supported
+                : TargetSupportResult.Unsupported(new ExecutionTargetErrorInfo
+                {
+                    Code = ExecutionTargetErrorCodes.Unsupported,
+                    Message = "The Windows Sandbox command line (wsb.exe) was not found.",
+                    UserAction = "Install Windows Sandbox on Windows 11 24H2 or newer, then retry.",
+                    Example = "winapp run . --sandbox",
+                });
         }
 
         // `--sandbox` is explicit consent to make Windows Sandbox usable, so missing prerequisites
@@ -465,7 +467,7 @@ internal sealed class WindowsSandboxBackend(
     /// </remarks>
     private void RememberConnection(SandboxInstanceLease lease, string address)
     {
-        if (stateStore is null || string.IsNullOrWhiteSpace(address))
+        if (stateStore is null)
         {
             return;
         }
@@ -475,17 +477,39 @@ internal sealed class WindowsSandboxBackend(
             var state = stateStore.Read(Target);
 
             if (state is null ||
-                !string.Equals(state.InstanceId, lease.InstanceId, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(state.GuestAddress, address, StringComparison.OrdinalIgnoreCase))
+                !string.Equals(state.InstanceId, lease.InstanceId, StringComparison.OrdinalIgnoreCase))
             {
                 return;
             }
 
-            stateStore.Commit(Target, state with { GuestAddress = address }, state.Revision);
+            var addressChanged = !string.IsNullOrWhiteSpace(address) &&
+                !string.Equals(state.GuestAddress, address, StringComparison.OrdinalIgnoreCase);
+
+            // The bootstrap marker is written here, and only here, because reaching this point is
+            // what proves the guest is actually talkable-to: the client is connected, the agent
+            // published a matching heartbeat, and the authenticated channel is open. Recording it
+            // when ownership was claimed instead would let a command killed mid-bootstrap leave an
+            // instance the next command treats as warm.
+            var bootstrapChanged = !string.Equals(
+                state.BootstrappedEpoch, lease.Epoch.Value, StringComparison.Ordinal);
+
+            if (!addressChanged && !bootstrapChanged)
+            {
+                return;
+            }
+
+            stateStore.Commit(
+                Target,
+                state with
+                {
+                    GuestAddress = addressChanged ? address : state.GuestAddress,
+                    BootstrappedEpoch = lease.Epoch.Value,
+                },
+                state.Revision);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ExecutionTargetException)
         {
-            // A stale or contended state file costs a re-query next time, nothing more.
+            // A stale or contended state file costs a re-bootstrap next time, nothing more.
         }
     }
 

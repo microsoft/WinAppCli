@@ -86,6 +86,18 @@ internal sealed class WindowsSandboxSetup(
     /// <summary>Whether the OS client bootstrapper is already running.</summary>
     internal Func<bool> IsBootstrapperRunning { get; set; } = DefaultIsBootstrapperRunning;
 
+    /// <summary>
+    /// Whether this build of Windows ships the Sandbox command line winapp drives.
+    /// </summary>
+    /// <remarks>
+    /// <c>wsb.exe</c> arrived in Windows 11 24H2 (build 26100). Earlier builds can still have the
+    /// Sandbox <em>feature</em> and its System32 payload, so the payload signal alone would send
+    /// such a host into a client installation that can never finish. Seamed so the refusal can be
+    /// exercised from any machine.
+    /// </remarks>
+    internal Func<bool> SupportsSandboxCli { get; set; } =
+        () => OperatingSystem.IsWindowsVersionAtLeast(10, 0, 26100);
+
     /// <inheritdoc/>
     public async Task<WindowsSandboxHostFacts> EnsureReadyAsync(CancellationToken cancellationToken)
     {
@@ -102,6 +114,23 @@ internal sealed class WindowsSandboxSetup(
                 ExecutionTargetErrorCodes.Unsupported,
                 "Windows Sandbox execution requires Windows.",
                 userAction: "Run this command on a Windows 11 machine.");
+        }
+
+        // Checked only after readiness, never before it: a host where `wsb` answers is usable
+        // whatever its build number says, and refusing that would break a working machine over a
+        // version check. It matters here because the alternative is a ten-minute wait for a client
+        // this build of Windows cannot deliver.
+        if (!SupportsSandboxCli())
+        {
+            throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.Unsupported,
+                "This version of Windows does not provide the Windows Sandbox command line.",
+                userAction: "Run this command on Windows 11 24H2 or newer.",
+                context: new Dictionary<string, string>
+                {
+                    ["osVersion"] = Environment.OSVersion.Version.ToString(),
+                },
+                example: "winapp run . --sandbox");
         }
 
         if (facts.State is WindowsSandboxSetupState.FeaturePayloadMissing)
