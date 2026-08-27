@@ -90,9 +90,11 @@ Everything else, for real:
 - The full stable build for x64 and ARM64 with telemetry unstubbed (`Unstub.ps1`), plus every test
   suite, under the same `Permissive,CFSClean` isolation the release uses.
 - MSIX, NuGet and npm packaging.
-- Release-notes generation against the live GitHub and GitHub Models APIs. The real release runs
-  this with `continueOnError`; the rehearsal makes it a **hard gate**, because a silently degraded
-  changelog is exactly the kind of thing nobody notices.
+- Release-notes generation. This step cannot fail: `generate-release-notes.ps1` catches its own
+  API failures and falls back to a git-log changelog. **GitHub Models was retired on 2026-07-30
+  and now returns 410 for every token**, so the AI-summarised path is permanently dead and every
+  release ships the git-log fallback. There is deliberately no credential check for it — a probe
+  that can never pass would just turn the Monday build red forever.
 - The real `Release_GitHub` job — artifact download, zip archiving, asset renaming — right up to
   the `GitHubRelease@1` call.
 - **WinGet:** installs `wingetcreate`, verifies fork access, downloads the installers and generates
@@ -108,7 +110,7 @@ Everything else, for real:
   `Release_GitHub`, which has no checkout and so cannot run the verifier — doing it here means a
   naming regression fails the build instead of silently publishing wrong URLs (#568).
 - Credential and service-connection checks via `scripts/check-release-credentials.ps1` — PAT scopes
-  and expiry, fork push permission, GitHub Models reachability, connection readiness.
+  and expiry, fork push permission, and service-connection readiness.
 
 ### Limitations
 
@@ -142,7 +144,7 @@ week is exactly when an external policy change slips in unnoticed.
 |---|---|
 | Build CLI | An internal feed, package or SDK dependency changed, or a real code break. Compare against the last green CI run. |
 | Replace Stubbed Files | The internal telemetry package or its feed permissions changed. CI does not run this. |
-| Generate Release Notes | `GITHUB_TOKEN_2` or `GH_MODELS_TOKEN` expired or lost access. |
+| Generate Release Notes | `GITHUB_TOKEN_2` expired or lost access. Cannot fail the build — it falls back to a git-log changelog. |
 | `Preflight - assert asset name contract` | Package naming changed, or an architecture stopped building. Fix `templates/release-assets.yaml` — `Release_GitHub` uses the same copy. Note this gate is **not** rehearsal-only; it fails real releases too, by design. |
 | `[Rehearsal] Check release credentials` | Read the PASS/WARN/FAIL summary. `FAIL` is definitive; `WARN` means the check could not determine an answer. |
 | WinGet (rehearsal path) | `wingetcreate`, the installer downloads, or the manifest schema changed. A real submission would fail the same way. |
@@ -158,14 +160,12 @@ The two scripts also run locally:
 
 ```powershell
 $env:GH_TOKEN = 'ghp_...'
-$env:GH_MODELS_TOKEN = 'ghp_...'
 .\scripts\check-release-credentials.ps1 `
     -WingetPkgsFork '<owner>/winget-pkgs' `
     -MSLearnDocsFork '<owner>/windows-dev-docs-pr'
 ```
 
-Service connection checks are skipped outside Azure Pipelines; add `-SkipModelsCheck` to run fully
-offline.
+Service connection checks are skipped outside Azure Pipelines, so this runs fine offline.
 
 ### Related
 

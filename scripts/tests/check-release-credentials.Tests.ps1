@@ -10,7 +10,7 @@
     These tests must stay OFFLINE. build-cli.ps1 runs scripts/tests during CI *and during the
     real release build*, so a test that reaches api.github.com would let a GitHub outage block
     a release. Every case below exercises a path that returns before any network call: no
-    GitHub token, no models token, no ADO collection URI.
+    GitHub token and no ADO collection URI.
 #>
 
 BeforeAll {
@@ -22,11 +22,11 @@ BeforeAll {
         param([string[]]$ScriptArgs = @())
 
         $envPrefix = ''
-        foreach ($key in @('GH_TOKEN', 'GITHUB_TOKEN', 'GH_MODELS_TOKEN', 'SYSTEM_ACCESSTOKEN', 'SYSTEM_COLLECTIONURI', 'SYSTEM_TEAMPROJECT')) {
+        foreach ($key in @('GH_TOKEN', 'GITHUB_TOKEN', 'SYSTEM_ACCESSTOKEN', 'SYSTEM_COLLECTIONURI', 'SYSTEM_TEAMPROJECT')) {
             $envPrefix += "`$env:$key = ''; "
         }
 
-        # Parameter names must stay UNQUOTED. Quoting '-SkipModelsCheck' makes PowerShell treat
+        # Parameter names must stay UNQUOTED. Quoting a switch makes PowerShell treat
         # it as a positional value rather than a switch, which silently shifts every later
         # argument by one and binds a junk value to -GitHubToken.
         $rendered = $ScriptArgs | ForEach-Object {
@@ -46,7 +46,7 @@ Describe 'check-release-credentials.ps1' {
 
     Context 'no credentials available' {
         BeforeAll {
-            $script:result = Invoke-Checker -ScriptArgs @('-SkipModelsCheck')
+            $script:result = Invoke-Checker -ScriptArgs @()
         }
 
         It 'fails the run' {
@@ -74,42 +74,27 @@ Describe 'check-release-credentials.ps1' {
         It 'fails a fork value that is not owner/repo, even without a token' {
             # Format is token-independent, so a bad variable group value must not be masked
             # by an unrelated token failure.
-            $result = Invoke-Checker -ScriptArgs @('-SkipModelsCheck', '-WingetPkgsFork', 'not-a-repo')
+            $result = Invoke-Checker -ScriptArgs @('-WingetPkgsFork', 'not-a-repo')
 
             $result.Output | Should -Match "not in owner/repo form"
         }
 
         It 'warns rather than fails for a well-formed fork it cannot check' {
-            $result = Invoke-Checker -ScriptArgs @('-SkipModelsCheck', '-MSLearnDocsFork', 'owner/repo')
+            $result = Invoke-Checker -ScriptArgs @('-MSLearnDocsFork', 'owner/repo')
 
             $result.Output | Should -Match '\[WARN\] MS Learn docs fork push access'
         }
 
         It 'warns when a fork is not configured at all' {
-            $result = Invoke-Checker -ScriptArgs @('-SkipModelsCheck')
+            $result = Invoke-Checker -ScriptArgs @()
 
             $result.Output | Should -Match '\[WARN\] winget-pkgs fork push access'
         }
     }
 
-    Context 'GitHub Models probe' {
-        It 'fails when no models token is configured' {
-            # Release notes degrade silently without it, so absence must be loud.
-            $result = Invoke-Checker
-
-            $result.Output | Should -Match '\[FAIL\] GitHub Models token'
-        }
-
-        It 'can be skipped for offline runs' {
-            $result = Invoke-Checker -ScriptArgs @('-SkipModelsCheck')
-
-            $result.Output | Should -Match '\[WARN\] GitHub Models token'
-        }
-    }
-
     Context 'service connection checks outside Azure Pipelines' {
         BeforeAll {
-            $script:result = Invoke-Checker -ScriptArgs @('-SkipModelsCheck', '-ServiceConnections', 'some-connection')
+            $script:result = Invoke-Checker -ScriptArgs @('-ServiceConnections', 'some-connection')
         }
 
         It 'warns rather than fails when there is no collection URI' {
@@ -124,10 +109,10 @@ Describe 'check-release-credentials.ps1' {
 
     Context 'offline safety' {
         It 'completes without any network access when every probe is skippable' {
-            # Guards the property this whole file depends on: with no tokens and -SkipModelsCheck,
+            # Guards the property this whole file depends on: with no tokens,
             # the script must reach its summary without calling out. If this file ever starts
             # making live requests, a GitHub outage can block a release build.
-            $result = Invoke-Checker -ScriptArgs @('-SkipModelsCheck')
+            $result = Invoke-Checker -ScriptArgs @()
 
             $result.Output | Should -Match '=== Summary ==='
             $result.Output | Should -Not -Match 'status 401'

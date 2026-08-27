@@ -40,29 +40,13 @@
 .PARAMETER ServiceConnections
     Names of the service connections the release requires.
 
-.PARAMETER ModelsToken
-    Token for the GitHub Models API used by release-notes generation (GH_MODELS_TOKEN).
-    Falls back to $env:GH_MODELS_TOKEN.
-
-.PARAMETER ModelsModel
-    Model to probe with. Must match the model generate-release-notes.ps1 uses.
-
-.PARAMETER SkipModelsCheck
-    Skip the GitHub Models probe. Use when running offline.
-
 .PARAMETER MinimumTokenLifetimeDays
     Warn when the PAT expires within this many days. Default: 21, so a warning shows up at
     least three weekly runs before the token actually dies.
 
 .EXAMPLE
     $env:GH_TOKEN = 'ghp_...'
-    $env:GH_MODELS_TOKEN = 'ghp_...'
     .\scripts\check-release-credentials.ps1 -WingetPkgsFork me/winget-pkgs -MSLearnDocsFork me/windows-dev-docs-pr
-
-.EXAMPLE
-    # Offline: skips the GitHub Models probe, which would otherwise FAIL without a token.
-    $env:GH_TOKEN = 'ghp_...'
-    .\scripts\check-release-credentials.ps1 -WingetPkgsFork me/winget-pkgs -SkipModelsCheck
 #>
 
 param(
@@ -73,9 +57,6 @@ param(
     [string]$AdoProject = '',
     [string]$AdoAccessToken = '',
     [string[]]$ServiceConnections = @(),
-    [string]$ModelsToken = '',
-    [string]$ModelsModel = 'openai/gpt-4o-mini',
-    [switch]$SkipModelsCheck,
     [int]$MinimumTokenLifetimeDays = 21
 )
 
@@ -187,8 +168,14 @@ else {
         if ($user.StatusCode -eq 401) {
             Add-Result -Status 'FAIL' -Check 'GitHub token' -Detail 'Token was rejected (401). It has expired or been revoked - regenerate it and update the variable group.'
         }
+        elseif ($user.StatusCode -eq 403) {
+            Add-Result -Status 'FAIL' -Check 'GitHub token' -Detail 'Token was forbidden (403). It is likely SSO-unauthorized for the org, or its scopes were reduced.'
+        }
         else {
-            Add-Result -Status 'FAIL' -Check 'GitHub token' -Detail "GET /user failed with status $($user.StatusCode): $($user.Message)"
+            # DNS failure, timeout, proxy, or a GitHub 5xx all land here with StatusCode 0 or 5xx.
+            # None of those say anything about the credential, and reporting them as FAIL would
+            # turn a GitHub blip into a red weekly build that sends someone rotating a live token.
+            Add-Result -Status 'WARN' -Check 'GitHub token' -Detail "Could not reach GET /user (status $($user.StatusCode)): $($user.Message). This is inconclusive - the token was not proven bad."
         }
     }
     else {
@@ -301,68 +288,6 @@ function Test-RepoAccess {
 # not checked - the job checked it out minutes earlier, so a failure there is not reachable here.
 Test-RepoAccess -Repo $WingetPkgsFork -Label 'winget-pkgs fork push access' -RequirePush
 Test-RepoAccess -Repo $MSLearnDocsFork -Label 'MS Learn docs fork push access' -RequirePush
-
-# ---------------------------------------------------------------------------
-# GitHub Models
-# ---------------------------------------------------------------------------
-
-Write-Host ''
-Write-Host '=== GitHub Models ===' -ForegroundColor Cyan
-
-if (-not $ModelsToken) {
-    $ModelsToken = if ($env:GH_MODELS_TOKEN) { $env:GH_MODELS_TOKEN } else { '' }
-}
-
-if ($SkipModelsCheck) {
-    Add-Result -Status 'WARN' -Check 'GitHub Models token' -Detail 'Skipped by -SkipModelsCheck.'
-}
-elseif (-not $ModelsToken) {
-    # generate-release-notes.ps1 silently falls back to non-AI notes when this is missing, and
-    # release.yml runs it with continueOnError, so nothing else would ever surface this.
-    Add-Result -Status 'FAIL' -Check 'GitHub Models token' -Detail 'No models token supplied. Set GH_MODELS_TOKEN, or pass -SkipModelsCheck to run offline. Release notes would silently fall back to a raw commit list.'
-}
-else {
-    # Smallest possible inference call: it is the only way to prove the token carries the
-    # models permission, and it creates no persistent state.
-    $body = @{
-        model      = $ModelsModel
-        messages   = @(@{ role = 'user'; content = 'ping' })
-        max_tokens = 1
-    } | ConvertTo-Json -Depth 5 -Compress
-
-    try {
-        Invoke-RestMethod -Uri 'https://models.github.ai/inference/chat/completions' `
-            -Method Post `
-            -Headers @{ Authorization = "Bearer $ModelsToken"; 'Content-Type' = 'application/json' } `
-            -Body $body | Out-Null
-        Add-Result -Status 'PASS' -Check 'GitHub Models token' -Detail "Inference succeeded against '$ModelsModel'."
-    }
-    catch {
-        $status = 0
-        if ($_.Exception.PSObject.Properties.Name -contains 'Response' -and $_.Exception.Response) {
-            $status = [int]$_.Exception.Response.StatusCode
-        }
-
-        if ($status -eq 401 -or $status -eq 403) {
-            Add-Result -Status 'FAIL' -Check 'GitHub Models token' -Detail "Rejected with status $status. AI release notes would silently degrade to a raw commit list."
-        }
-        elseif ($status -eq 410) {
-            # Observed with a classic PAT: models.github.ai returns 410 for both /catalog and
-            # /inference. It is not transient - either the token type is no longer accepted or
-            # the model was retired. Either way release notes are already degrading silently.
-            Add-Result -Status 'FAIL' -Check 'GitHub Models token' -Detail "Endpoint returned 410 Gone for model '$ModelsModel'. The token type may no longer be accepted (GitHub Models needs a fine-grained PAT with the Models permission) or the model was retired. AI release notes are silently falling back to a raw commit list."
-        }
-        elseif ($status -eq 404) {
-            Add-Result -Status 'FAIL' -Check 'GitHub Models token' -Detail "Model '$ModelsModel' was not found. Update the -Model default in scripts/generate-release-notes.ps1."
-        }
-        elseif ($status -eq 429) {
-            Add-Result -Status 'WARN' -Check 'GitHub Models token' -Detail 'Rate limited (429). The token is valid but quota is exhausted right now.'
-        }
-        else {
-            Add-Result -Status 'WARN' -Check 'GitHub Models token' -Detail "Inference call failed (status $status): $($_.Exception.Message)"
-        }
-    }
-}
 
 # ---------------------------------------------------------------------------
 # ADO service connections
