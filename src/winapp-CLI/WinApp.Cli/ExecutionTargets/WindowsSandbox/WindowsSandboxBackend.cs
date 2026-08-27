@@ -35,22 +35,37 @@ internal sealed class WindowsSandboxBackend(
     ITargetStateDirectoryProvider directoryProvider,
     IHostWinappBinaryProvider hostBinaryProvider,
     IWindowsSandboxWindowController windowController,
+    IWindowsSandboxSetup? setup = null,
     ITargetStateStore? stateStore = null,
     ITargetProgress? progress = null) : IExecutionTargetBackend
 {
     private readonly ITargetProgress _progress = progress ?? NullTargetProgress.Instance;
 
-    /// <summary>Guest path the read-only bootstrap folder is mapped to.</summary>
-    internal const string GuestBootstrapPath = @"C:\WinAppBootstrap";
+    /// <summary>Guest path prefix the read-only bootstrap folder is mapped under.</summary>
+    /// <remarks>
+    /// A per-epoch suffix is appended. Reusing one fixed path would mean an adopted guest — which
+    /// may already have a mapped folder of that name from a previous manager, or an agent still
+    /// running out of it — could not be told apart from a folder this host just mapped. Each
+    /// generation gets its own name so nothing stale can be mistaken for the current one.
+    /// </remarks>
+    internal const string GuestBootstrapPathPrefix = @"C:\WinAppBootstrap-";
 
-    /// <summary>Guest path the writable bootstrap-result folder is mapped to.</summary>
-    internal const string GuestResultPath = @"C:\WinAppBootstrapResult";
+    /// <summary>Guest path prefix the writable bootstrap-result folder is mapped under.</summary>
+    internal const string GuestResultPathPrefix = @"C:\WinAppBootstrapResult-";
 
-    /// <summary>Host folder name for the read-only bootstrap share.</summary>
-    private const string BootstrapFolder = "bootstrap";
+    /// <summary>Host folder name prefix for the read-only bootstrap share.</summary>
+    private const string BootstrapFolderPrefix = "bootstrap-";
 
-    /// <summary>Host folder name for the writable bootstrap-result share.</summary>
-    private const string ResultFolder = "bootstrap-result";
+    /// <summary>Host folder name prefix for the writable bootstrap-result share.</summary>
+    private const string ResultFolderPrefix = "bootstrap-result-";
+
+    /// <summary>How many previous generations' bootstrap folders are kept before pruning.</summary>
+    /// <remarks>
+    /// Old folders stay mapped for the life of the Sandbox that mapped them, so they cannot always
+    /// be deleted. Keeping a small number and best-effort deleting the rest bounds the growth
+    /// without ever failing a command over a folder Windows still holds open.
+    /// </remarks>
+    internal const int MaxRetainedBootstrapGenerations = 4;
 
     /// <summary>Native image encoder shipped beside the AOT CLI.</summary>
     private const string SkiaCompanionName = "libSkiaSharp.dll";
@@ -92,7 +107,19 @@ internal sealed class WindowsSandboxBackend(
 
     private string? _instanceId;
     private string? _guestAddress;
+    private bool _adopted;
     private GuestBootstrapMaterial? _activeMaterial;
+
+    /// <summary>The host and guest paths one generation's bootstrap share is mapped through.</summary>
+    /// <param name="HostBootstrap">Host folder published read-only into the guest.</param>
+    /// <param name="HostResult">Host folder the guest may write its handshake results into.</param>
+    /// <param name="GuestBootstrap">Guest path the read-only folder appears at.</param>
+    /// <param name="GuestResult">Guest path the writable folder appears at.</param>
+    internal sealed record BootstrapShare(
+        string HostBootstrap,
+        string HostResult,
+        string GuestBootstrap,
+        string GuestResult);
 
     /// <summary>Picks a listening port for the guest agent from the dynamic range.</summary>
     /// <remarks>
@@ -108,41 +135,56 @@ internal sealed class WindowsSandboxBackend(
     public ExecutionTargetRef Target => ExecutionTargetRef.WindowsSandboxDefault;
 
     /// <inheritdoc/>
-    public Task<TargetSupportResult> ProbeSupportAsync(CancellationToken cancellationToken)
+    public async Task<TargetSupportResult> ProbeSupportAsync(CancellationToken cancellationToken)
     {
         if (!OperatingSystem.IsWindows())
         {
-            return Task.FromResult(TargetSupportResult.Unsupported(new ExecutionTargetErrorInfo
+            return TargetSupportResult.Unsupported(new ExecutionTargetErrorInfo
             {
                 Code = ExecutionTargetErrorCodes.Unsupported,
                 Message = "Windows Sandbox execution requires Windows.",
                 UserAction = "Run this command on a Windows 11 machine with Windows Sandbox installed.",
-            }));
+            });
         }
 
-        // Probed before the application is built, so a missing prerequisite fails in seconds rather
-        // than after a long build. There is never a silent fallback to local execution.
-        if (!cli.IsAvailable)
+        // Probed before the application is built, so anything that cannot be resolved fails in
+        // seconds rather than after a long build. There is never a silent fallback to local
+        // execution.
+        if (cli.IsAvailable)
         {
-            return Task.FromResult(TargetSupportResult.Unsupported(new ExecutionTargetErrorInfo
+            return TargetSupportResult.Supported;
+        }
+
+        if (setup is null)
+        {
+            return TargetSupportResult.Unsupported(new ExecutionTargetErrorInfo
             {
                 Code = ExecutionTargetErrorCodes.Unsupported,
                 Message = "The Windows Sandbox command line (wsb.exe) was not found.",
-                UserAction =
-                    "Install the Windows Sandbox optional feature on Windows 11 24H2 or newer, then retry.",
-                NextCommand = new ExecutionTargetNextCommand
-                {
-                    Command = "Enable-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM",
-
-                    // Enabling a Windows feature needs elevation and a reboot, so it is the user's
-                    // decision, never something winapp performs.
-                    Advisory = true,
-                },
+                UserAction = "Install Windows Sandbox on Windows 11 24H2 or newer, then retry.",
                 Example = "winapp run . --sandbox",
-            }));
+            });
         }
 
-        return Task.FromResult(TargetSupportResult.Supported);
+        // `--sandbox` is explicit consent to make Windows Sandbox usable, so missing prerequisites
+        // are installed rather than reported. Only what winapp genuinely cannot do -- elevation the
+        // user declined, a restart, an unsupported edition, a Store or policy failure -- comes back
+        // as an error, and it says exactly which of those it was.
+        try
+        {
+            var facts = await setup.EnsureReadyAsync(cancellationToken).ConfigureAwait(false);
+
+            if (facts.ExecutablePath is { } executable)
+            {
+                cli.UseExecutable(executable);
+            }
+
+            return TargetSupportResult.Supported;
+        }
+        catch (ExecutionTargetException ex)
+        {
+            return TargetSupportResult.Unsupported(ex.Error);
+        }
     }
 
     /// <inheritdoc/>
@@ -154,20 +196,29 @@ internal sealed class WindowsSandboxBackend(
 
         var lease = await lifecycle.EnsureInstanceAsync(cancellationToken).ConfigureAwait(false);
         _instanceId = lease.InstanceId;
+        _adopted = lease.IsAdopted;
 
         // Reconnecting to an agent that is already serving is the whole point of a persistent
         // Sandbox: it costs one TCP connect instead of a client reconnect, an agent relaunch, and a
         // runtime re-verification. It is attempted before anything else touches the instance.
-        if (lease.Reused &&
+        //
+        // Only a genuinely warm lease qualifies. A recovered or adopted instance is running, but
+        // nothing in it was prepared under the epoch that now identifies it, so its "persisted"
+        // material describes a generation that no longer exists.
+        if (lease.IsWarm &&
             await TryReconnectAsync(lease, cancellationToken).ConfigureAwait(false) is { } reused)
         {
             _progress.Report("Reusing the running Windows Sandbox agent...");
             return reused;
         }
 
-        _progress.Report(lease.Reused
-            ? "Repairing the Windows Sandbox agent..."
-            : "Starting Windows Sandbox...");
+        _progress.Report(lease.Origin switch
+        {
+            SandboxInstanceOrigin.Reused => "Repairing the Windows Sandbox agent...",
+            SandboxInstanceOrigin.Adopted => "Preparing the running Windows Sandbox...",
+            SandboxInstanceOrigin.RecoveredStart => "Preparing the recovered Windows Sandbox...",
+            _ => "Starting Windows Sandbox...",
+        });
 
         var bootstrap = PrepareBootstrapDirectories(lease.Epoch);
         var agentHash = await StageBootstrapBinaryAsync(bootstrap.HostBootstrap, cancellationToken)
@@ -188,11 +239,11 @@ internal sealed class WindowsSandboxBackend(
         // own agent. The result folder is the only writable path, and it is bounded and treated as
         // untrusted input.
         await cli.ShareFolderAsync(
-            lease.InstanceId, bootstrap.HostBootstrap, GuestBootstrapPath, allowWrite: false, cancellationToken)
+            lease.InstanceId, bootstrap.HostBootstrap, bootstrap.GuestBootstrap, allowWrite: false, cancellationToken)
             .ConfigureAwait(false);
 
         await cli.ShareFolderAsync(
-            lease.InstanceId, bootstrap.HostResult, GuestResultPath, allowWrite: true, cancellationToken)
+            lease.InstanceId, bootstrap.HostResult, bootstrap.GuestResult, allowWrite: true, cancellationToken)
             .ConfigureAwait(false);
 
         // Real input and Windows Graphics Capture need a connected client. Connecting is also what
@@ -202,7 +253,7 @@ internal sealed class WindowsSandboxBackend(
         // Only ever on a bootstrap. Calling this against an instance whose client is already up
         // tears that client's session down and shows the user "the connection was lost, reconnect?",
         // which is why the reuse path above must be tried first.
-        if (options.RequireInteractiveDesktop || !lease.Reused)
+        if (options.RequireInteractiveDesktop || !lease.IsWarm)
         {
             _progress.Report("Connecting the Windows Sandbox window...");
             var windowSnapshot = windowController.Capture();
@@ -216,7 +267,10 @@ internal sealed class WindowsSandboxBackend(
         // layout needs Developer Mode, and it is a machine-wide setting a guest process running as
         // the interactive user cannot set — so it is done here, as one fixed privileged operation
         // with a constant command, rather than by exposing SYSTEM execution.
-        if (!lease.Reused)
+        //
+        // An adopted guest gets it too: winapp did not start that Sandbox, so nothing has set it
+        // there either.
+        if (!lease.IsWarm)
         {
             await EnableGuestDevelopmentModeAsync(lease.InstanceId, cancellationToken).ConfigureAwait(false);
         }
@@ -225,6 +279,7 @@ internal sealed class WindowsSandboxBackend(
         // prompt: the rule has to be in place when the socket opens, or Windows asks the user.
         await AllowGuestAgentConnectionAsync(
             lease.InstanceId,
+            bootstrap.GuestBootstrap,
             agentPort,
             cancellationToken).ConfigureAwait(false);
 
@@ -232,7 +287,7 @@ internal sealed class WindowsSandboxBackend(
 
         var heartbeat = await LaunchReadyAgentAsync(
             lease.InstanceId,
-            bootstrap.HostResult,
+            bootstrap,
             lease.Epoch,
             cancellationToken).ConfigureAwait(false);
 
@@ -278,7 +333,7 @@ internal sealed class WindowsSandboxBackend(
         // handshake it was created for.
         TryClearResultFolder(bootstrap.HostResult);
 
-        return new TargetConnection(lease.Epoch, transport, lease.Reused);
+        return new TargetConnection(lease.Epoch, transport, lease.IsWarm);
     }
 
     /// <summary>
@@ -303,7 +358,7 @@ internal sealed class WindowsSandboxBackend(
         SandboxInstanceLease lease,
         CancellationToken cancellationToken)
     {
-        var material = _activeMaterial ?? TryReadPersistedMaterial();
+        var material = _activeMaterial ?? TryReadPersistedMaterial(lease.Epoch);
 
         // Port 0 is what an older build wrote before the host assigned ports, and it is also what
         // "bind anywhere" means — never a port anything is listening on. Treated as no material at
@@ -367,14 +422,18 @@ internal sealed class WindowsSandboxBackend(
         }
     }
 
-    /// <summary>Reads the connection material this target last bootstrapped with.</summary>
-    private GuestBootstrapMaterial? TryReadPersistedMaterial()
+    /// <summary>Reads the connection material this target last bootstrapped for one epoch.</summary>
+    /// <remarks>
+    /// Scoped to the epoch's own folder, so material written for a previous generation is not even
+    /// a candidate — the file cannot be there to be mistakenly matched.
+    /// </remarks>
+    private GuestBootstrapMaterial? TryReadPersistedMaterial(ExecutionTargetEpoch epoch)
     {
         try
         {
             var path = Path.Join(
                 directoryProvider.GetTargetRoot(Target, create: false).FullName,
-                BootstrapFolder,
+                BootstrapFolderPrefix + EpochToken(epoch),
                 GuestBootstrapMaterial.FileName);
 
             return File.Exists(path) ? GuestBootstrapMaterial.TryParse(File.ReadAllText(path)) : null;
@@ -445,25 +504,100 @@ internal sealed class WindowsSandboxBackend(
             description["guestAddress"] = address;
         }
 
+        if (_adopted)
+        {
+            // Reported so a failure envelope says plainly that the Sandbox in play is one winapp
+            // took over rather than one it started -- and therefore one it will not stop.
+            description["sandboxAdopted"] = "true";
+        }
+
         return description;
     }
 
-    /// <summary>Creates this generation's bootstrap folders without replacing mapped roots.</summary>
-    private (string HostBootstrap, string HostResult) PrepareBootstrapDirectories(ExecutionTargetEpoch epoch)
+    /// <summary>
+    /// A short, path-safe, per-generation name derived from the epoch.
+    /// </summary>
+    /// <remarks>
+    /// Hashed rather than used directly because the epoch contains a colon and an instance ID, and
+    /// this value becomes both a host folder name and a guest path. Sixteen hexadecimal characters
+    /// of SHA-256 is far more than enough to keep generations distinct while keeping the guest path
+    /// short enough to read in a log.
+    /// </remarks>
+    internal static string EpochToken(ExecutionTargetEpoch epoch)
     {
-        var root = directoryProvider.GetTargetRoot(Target, create: true).FullName;
-        var bootstrap = TargetPathSafety.CombineInsideRoot(root, BootstrapFolder);
-        var result = TargetPathSafety.CombineInsideRoot(root, ResultFolder);
+        var hash = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(epoch.Value));
 
-        // WSB holds mapped folder roots open for the lifetime of the Sandbox. Keep those exact roots
-        // and replace their bounded contents instead; deleting a mapped root makes warm reuse fail
-        // with ERROR_SHARING_VIOLATION before it can reconnect to the live agent.
+        return Convert.ToHexString(hash)[..16].ToLowerInvariant();
+    }
+
+    /// <summary>Creates this generation's bootstrap folders without touching another's.</summary>
+    /// <remarks>
+    /// <para>
+    /// Each generation gets its own host folders and its own guest paths. WSB holds a mapped folder
+    /// root open for the lifetime of the Sandbox that mapped it, so reusing one fixed pair of names
+    /// meant a new generation had to write into the folders an older one might still have mapped —
+    /// which is unsafe the moment winapp adopts a guest whose previous manager mapped a folder of
+    /// that same name and may still be running an agent out of it.
+    /// </para>
+    /// <para>
+    /// Older generations are pruned on a best-effort basis. One that is still mapped cannot be
+    /// deleted, and failing a command over that would trade a working Sandbox for an error.
+    /// </para>
+    /// </remarks>
+    private BootstrapShare PrepareBootstrapDirectories(ExecutionTargetEpoch epoch)
+    {
+        var token = EpochToken(epoch);
+        var root = directoryProvider.GetTargetRoot(Target, create: true).FullName;
+        var bootstrap = TargetPathSafety.CombineInsideRoot(root, BootstrapFolderPrefix + token);
+        var result = TargetPathSafety.CombineInsideRoot(root, ResultFolderPrefix + token);
+
         Directory.CreateDirectory(bootstrap);
         Directory.CreateDirectory(result);
         ClearDirectoryContents(result);
 
-        _ = epoch;
-        return (bootstrap, result);
+        PruneOldGenerations(root, token);
+
+        return new BootstrapShare(
+            bootstrap,
+            result,
+            GuestBootstrapPathPrefix + token,
+            GuestResultPathPrefix + token);
+    }
+
+    /// <summary>Best-effort removal of bootstrap folders from generations that are long gone.</summary>
+    private static void PruneOldGenerations(string root, string currentToken)
+    {
+        try
+        {
+            foreach (var prefix in (string[])[BootstrapFolderPrefix, ResultFolderPrefix])
+            {
+                var stale = new DirectoryInfo(root)
+                    .GetDirectories(prefix + "*")
+                    .Where(directory => !string.Equals(
+                        directory.Name,
+                        prefix + currentToken,
+                        StringComparison.OrdinalIgnoreCase))
+                    .OrderByDescending(directory => directory.LastWriteTimeUtc)
+                    .Skip(MaxRetainedBootstrapGenerations);
+
+                foreach (var directory in stale)
+                {
+                    try
+                    {
+                        directory.Delete(recursive: true);
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        // Still mapped by a live Sandbox, or otherwise held open. It will be
+                        // collected on a later run once that instance is gone.
+                    }
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Housekeeping never fails a command.
+        }
     }
 
     private static void ClearDirectoryContents(string path)
@@ -689,6 +823,7 @@ internal sealed class WindowsSandboxBackend(
     /// </remarks>
     private async Task AllowGuestAgentConnectionAsync(
         string instanceId,
+        string guestBootstrapPath,
         int port,
         CancellationToken cancellationToken)
     {
@@ -705,7 +840,7 @@ internal sealed class WindowsSandboxBackend(
         }
 
         var portText = port.ToString(CultureInfo.InvariantCulture);
-        var agentPath = $@"{GuestBootstrapPath}\{GuestAgentInstaller.BinaryName}";
+        var agentPath = $@"{guestBootstrapPath}\{GuestAgentInstaller.BinaryName}";
         var command =
             @"powershell.exe -NoProfile -NonInteractive -Command " +
             $@"""$agent='{agentPath}'; " +
@@ -750,11 +885,14 @@ internal sealed class WindowsSandboxBackend(
     /// The agent runs from the read-only share on first launch. It copies itself into guest-local
     /// storage before serving, so the host share is not held open for the life of the Sandbox.
     /// </remarks>
-    private async Task LaunchAgentAsync(string instanceId, CancellationToken cancellationToken)
+    private async Task LaunchAgentAsync(
+        string instanceId,
+        BootstrapShare bootstrap,
+        CancellationToken cancellationToken)
     {
         var command =
-            $"\"{GuestBootstrapPath}\\{GuestAgentInstaller.BinaryName}\" {GuestAgentCommandNames.Verb} " +
-            $"--bootstrap-dir \"{GuestBootstrapPath}\" --result-dir \"{GuestResultPath}\"";
+            $"\"{bootstrap.GuestBootstrap}\\{GuestAgentInstaller.BinaryName}\" {GuestAgentCommandNames.Verb} " +
+            $"--bootstrap-dir \"{bootstrap.GuestBootstrap}\" --result-dir \"{bootstrap.GuestResult}\"";
 
         await cli.LaunchAgentAsync(instanceId, command, cancellationToken).ConfigureAwait(false);
     }
@@ -771,7 +909,7 @@ internal sealed class WindowsSandboxBackend(
     /// </remarks>
     private async Task<GuestAgentHeartbeat> LaunchReadyAgentAsync(
         string instanceId,
-        string resultDirectory,
+        BootstrapShare bootstrap,
         ExecutionTargetEpoch epoch,
         CancellationToken cancellationToken)
     {
@@ -779,11 +917,11 @@ internal sealed class WindowsSandboxBackend(
 
         while (true)
         {
-            TryClearResultFolder(resultDirectory);
+            TryClearResultFolder(bootstrap.HostResult);
 
             try
             {
-                await LaunchAgentAsync(instanceId, cancellationToken).ConfigureAwait(false);
+                await LaunchAgentAsync(instanceId, bootstrap, cancellationToken).ConfigureAwait(false);
             }
             catch (ExecutionTargetException ex) when (
                 ex.Error.Code == ExecutionTargetErrorCodes.TransportFailed &&
@@ -795,7 +933,7 @@ internal sealed class WindowsSandboxBackend(
 
             try
             {
-                return await WaitForHeartbeatAsync(resultDirectory, epoch, cancellationToken)
+                return await WaitForHeartbeatAsync(bootstrap.HostResult, epoch, cancellationToken)
                     .ConfigureAwait(false);
             }
             catch (ExecutionTargetException ex) when (

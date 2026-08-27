@@ -148,8 +148,9 @@ This is a property of what the launched process is a child of, not of how the ru
 Preparing a Sandbox is a chain of multi-second operations, and a terminal that prints nothing for
 that long is indistinguishable from a hang — which usually ends with the user killing the command
 part-way through a deployment. Every slow phase therefore announces itself *before* it starts:
-checking availability, starting or reusing the Sandbox, repairing or preparing the agent, connecting
-to it, checking runtimes, deploying the application, and starting it.
+installing prerequisites, checking availability, starting, reusing, recovering, or taking over the
+Sandbox, repairing or preparing the agent, connecting to it, checking runtimes, deploying the
+application, and starting it.
 
 All of that goes to **standard error**, never standard output. That is what keeps `--json` honest: a
 scripted caller still gets exactly one machine-readable document on stdout, and a terminal user still
@@ -280,22 +281,53 @@ staging path it was actually written to.
 
 - Windows 11 24H2 or newer, on a supported edition
 - Hardware virtualization enabled
-- The Windows Sandbox optional feature installed
-- A compatible `wsb.exe`
-- An unlocked interactive host session, while a command needs real input or screen capture
 
-winapp does not enable Windows features, change firmware settings, or reboot. Missing prerequisites
-fail **before** your application is built, and there is no silent fallback to running locally — a
-command that asked for Sandbox either runs there or fails.
+`--sandbox` is your consent for winapp to install what it needs. If Windows Sandbox is not set up
+yet, winapp enables the optional feature and installs the Store-delivered Sandbox client for you, in
+the same command. Two things you should expect while that happens:
+
+- **Windows asks for permission.** Enabling the feature raises the standard UAC prompt. winapp never
+  restarts your machine — if Windows says a restart is required, the command stops and tells you.
+- **Windows shows its own UI.** Installing the client is the OS's "Downloading and installing
+  updates" flow, so a window can appear and take focus. That window belongs to Windows, not to
+  winapp, so winapp cannot keep it in the background.
+
+Setup can take several minutes, and winapp keeps saying so on standard error while it waits. If it
+gives up waiting, the installation usually keeps running in the background — **run the command again
+and it continues where it left off** rather than starting over.
+
+Only these need you:
+
+| What you see | What it means | What to do |
+|---|---|---|
+| `sandbox_setup_requires_elevation` | You declined the UAC prompt, or there was no interactive session to show one in | Run the `dism.exe` command in the error from an elevated terminal, then retry |
+| `sandbox_setup_requires_restart` | The feature is enabled; Windows needs a restart | Restart, then run the command again |
+| `sandbox_setup_incomplete` | Windows is still installing the client | Wait, then run the command again |
+| `sandbox_setup_failed` | Servicing refused | Check the edition, that virtualization is on in firmware, and that policy allows optional features |
+| `sandbox_unsupported` | This host cannot run Windows Sandbox | Use a Windows 11 machine on a supported edition |
+
+Missing prerequisites are handled **before** your application is built, and there is no silent
+fallback to running locally — a command that asked for Sandbox either runs there or fails.
+
+Real input and screen capture additionally need an unlocked interactive host session.
 
 ## Lifecycle
 
-Windows permits one Sandbox at a time, and winapp is deliberately conservative about it.
+Windows permits one Sandbox at a time, so `--sandbox` uses that one.
 
-winapp records the exact instance it created plus a random per-boot value. If a Sandbox is running
-that winapp cannot prove it created, the command reports the running ID and stops. It is never
-adopted and never terminated, because it may hold work you care about. A `wsb stop --id ...` command
-is offered as advisory guidance only.
+If a Sandbox is already running when you run a winapp command — because you started it yourself,
+because a previous command left it up, or because the client installer opened one — winapp uses it
+instead of asking you to close it.
+
+**Using an existing Sandbox changes it.** winapp maps its bootstrap folders into that guest, connects
+its client, turns on Developer Mode, and adds an inbound firewall rule for its agent. Whatever is
+already running in that guest shares the session with what winapp deploys, which is the same trust
+boundary [described above](#what---sandbox-does-and-does-not-protect). Nothing already in the guest is
+removed, and **winapp never stops a Sandbox** — not on success, not on failure, and not for one it
+took over.
+
+Each command that prepares a guest gets its own bootstrap folders, named per generation, so a folder
+or agent left by an earlier generation is never mistaken for the current one.
 
 You manage the Sandbox with the Windows Sandbox CLI:
 
@@ -305,11 +337,34 @@ wsb connect --id <id>
 wsb stop --id <id>
 ```
 
-winapp does not shut the Sandbox down automatically.
+If more than one Sandbox is somehow running, winapp stops and reports the IDs rather than guessing
+which one you meant.
 
 If you close the Sandbox or run `wsb stop` while commands are running, they fail with
 `sandbox_terminated`. Process IDs, window handles, deployments, and package records from the old
 generation are invalidated rather than resolved against whatever is created next.
+
+### When a start half-succeeds
+
+winapp picks a random instance ID and records it *before* asking Windows to start the Sandbox. If the
+start reports an error but has in fact created the instance — which `wsb start` does on some hosts,
+with `0x80070002` — winapp recognises that exact instance and takes ownership of it.
+
+The record survives the command, so if winapp is killed mid-start, the next command finishes the job
+instead of trying to start a second Sandbox. Recovery always matches the ID winapp asked for, never
+"whichever Sandbox appeared", so a Sandbox somebody else started is never claimed as winapp's.
+
+### Two winapp state roots on one machine
+
+`WINAPP_TARGET_STATE_ROOT` gives a winapp process its own ownership record. Two processes pointed at
+different roots cannot see each other's, so the second one treats the running Sandbox as one nobody
+is managing and prepares it for itself.
+
+That is additive, not destructive: the second manager gets a fresh generation with its own bootstrap
+folders, its own agent port, and its own connection material, and it neither stops the Sandbox nor
+removes the first manager's firewall rule or shares. What it cannot do is coordinate — the locks that
+serialize two winapp commands live in the state root, so redirecting the root opts out of them. Use
+one state root per machine unless you specifically want independent managers.
 
 ### The Sandbox window must stay connected
 
@@ -528,11 +583,10 @@ never mix into machine-readable output.
 ```json
 {
   "error": {
-    "code": "sandbox_unmanaged_instance",
-    "message": "Another Windows Sandbox instance is already running.",
-    "context": { "sandboxId": "..." },
-    "userAction": "Close the existing Sandbox if it is safe to do so, then retry.",
-    "nextCommand": { "command": "wsb stop --id ...", "advisory": true },
+    "code": "sandbox_setup_requires_restart",
+    "message": "The Windows Sandbox feature was enabled and Windows needs a restart to finish.",
+    "context": { "setupState": "FeaturePayloadMissing", "featurePayloadPresent": "false" },
+    "userAction": "Restart Windows, then run the command again.",
     "example": "winapp run . --sandbox"
   }
 }
@@ -546,7 +600,7 @@ run your app" is always distinguishable from "your app failed".
 | Code | Meaning |
 |---|---|
 | `sandbox_unsupported` | This host cannot run Sandbox at all |
-| `sandbox_unmanaged_instance` | A Sandbox winapp does not own is running |
+| `sandbox_unmanaged_instance` | A running Sandbox could not be prepared, or more than one is running |
 | `sandbox_start_failed` | Creating or starting the managed Sandbox failed |
 | `sandbox_no_interactive_session` | No interactive guest session |
 | `sandbox_input_not_ready` | Input could not be delivered; nothing was reported as delivered |
@@ -564,6 +618,10 @@ run your app" is always distinguishable from "your app failed".
 | `sandbox_target_stale` | State refers to a Sandbox that no longer exists |
 | `sandbox_stale_handle` | A process ID or window handle from a previous generation |
 | `sandbox_artifact_failed` | Producing, verifying, or publishing an output failed |
+| `sandbox_setup_requires_elevation` | Enabling the Sandbox feature needs permission you declined |
+| `sandbox_setup_requires_restart` | The feature is enabled; Windows needs a restart |
+| `sandbox_setup_failed` | Windows refused to enable the feature or start the client |
+| `sandbox_setup_incomplete` | Windows is still installing the client; retrying resumes it |
 
 ## Architecture
 Windows Sandbox is the only public target. Internally it sits behind a narrow boundary so a future

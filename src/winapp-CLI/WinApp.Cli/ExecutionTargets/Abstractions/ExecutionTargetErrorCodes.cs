@@ -22,7 +22,15 @@ internal static class ExecutionTargetErrorCodes
     /// <summary>The host cannot run Sandbox at all: unsupported OS build, edition, or feature state.</summary>
     public const string Unsupported = "sandbox_unsupported";
 
-    /// <summary>A Sandbox is running that winapp cannot prove it owns. Never adopted, never stopped.</summary>
+    /// <summary>
+    /// A Sandbox is running that winapp could neither prove it owns nor prepare for use. Never
+    /// stopped.
+    /// </summary>
+    /// <remarks>
+    /// <c>--sandbox</c> adopts a running instance rather than refusing one, so this now reports the
+    /// narrower case where adoption itself was not possible — several instances are listed, or the
+    /// candidate could not be resolved or prepared.
+    /// </remarks>
     public const string UnmanagedInstance = "sandbox_unmanaged_instance";
 
     /// <summary>Creating the managed Sandbox failed.</summary>
@@ -77,6 +85,23 @@ internal static class ExecutionTargetErrorCodes
     public const string ArtifactFailed = "sandbox_artifact_failed";
 
     /// <summary>
+    /// Enabling the Windows Sandbox optional feature needs elevation that was denied or unavailable.
+    /// </summary>
+    public const string SetupRequiresElevation = "sandbox_setup_requires_elevation";
+
+    /// <summary>The optional feature was enabled and Windows requires a restart to finish.</summary>
+    public const string SetupRequiresRestart = "sandbox_setup_requires_restart";
+
+    /// <summary>Prerequisite setup failed outright: servicing error, policy, or an offline Store.</summary>
+    public const string SetupFailed = "sandbox_setup_failed";
+
+    /// <summary>
+    /// Setup was still in progress when winapp stopped waiting. Retrying resumes it rather than
+    /// starting it again.
+    /// </summary>
+    public const string SetupIncomplete = "sandbox_setup_incomplete";
+
+    /// <summary>
     /// Every released code, in the order the spec lists them. Used by the snapshot test and by
     /// diagnostics that need to present the full set.
     /// </summary>
@@ -101,5 +126,9 @@ internal static class ExecutionTargetErrorCodes
         TargetStale,
         StaleHandle,
         ArtifactFailed,
+        SetupRequiresElevation,
+        SetupRequiresRestart,
+        SetupFailed,
+        SetupIncomplete,
     ];
 }

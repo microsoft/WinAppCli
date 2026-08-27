@@ -14,12 +14,18 @@ Builds still happen on the host and stay fast. Only running, debugging, and auto
 ## Prerequisites
 
 - Windows 11 24H2 or newer, on a supported edition, with hardware virtualization enabled
-- The Windows Sandbox optional feature installed, and a working `wsb.exe`
 - An unlocked interactive host session while a command needs real input or screen recording
 
-winapp does not enable Windows features or reboot. Missing prerequisites fail **before** the app is
-built, and there is **no silent fallback to running locally** — a command that asked for Sandbox
-either runs there or fails.
+`--sandbox` is consent for winapp to install what it needs. On a machine where Windows Sandbox is not
+set up, winapp enables the optional feature and installs the Store-delivered client during the same
+command. Expect a UAC prompt for the feature, and expect Windows to show its own update UI — which
+can take focus — while the client installs. winapp never restarts the machine.
+
+Setup can take minutes. If winapp stops waiting, run the command again: it continues the installation
+rather than restarting it.
+
+Missing prerequisites are handled **before** the app is built, and there is **no silent fallback to
+running locally** — a command that asked for Sandbox either runs there or fails.
 
 ## Common patterns
 
@@ -153,9 +159,12 @@ verified before every launch, because
 with `sandbox_runtime_provision_failed` naming it, before launch. Publishing self-contained avoids
 the requirement entirely.
 
-**winapp never touches a Sandbox it did not create.** If one is already running, the command reports
-its ID and stops; stopping it is the user's decision. winapp also never shuts a Sandbox down on its
-own — use `wsb list`, `wsb connect --id <id>`, `wsb stop --id <id>`.
+**A Sandbox that is already running is used, not refused.** Windows allows one at a time, so if one is
+up — started by hand, left by an earlier command, or opened by the client installer — winapp prepares
+that one. Preparing it maps winapp's bootstrap folders into the guest, connects its client, turns on
+Developer Mode, and adds an inbound firewall rule for the agent, so anything already running there
+shares the session with what winapp deploys. Nothing existing is removed, and **winapp never stops a
+Sandbox** — use `wsb list`, `wsb connect --id <id>`, `wsb stop --id <id>`.
 
 **The Sandbox window must stay connected** for real input and screen recording. Closing it leaves
 inspection working while input and recording stop; winapp reports `sandbox_input_not_ready` rather
@@ -166,8 +175,12 @@ capabilities.
 
 | Error code | What it means | What to do |
 |---|---|---|
-| `sandbox_unsupported` | This machine cannot run Windows Sandbox | Check the edition, virtualization, and that the optional feature is installed |
-| `sandbox_unmanaged_instance` | A Sandbox winapp did not create is running | Close it if it is safe, then retry. winapp will not stop it for you |
+| `sandbox_unsupported` | This machine cannot run Windows Sandbox | Check the edition and that virtualization is enabled in firmware |
+| `sandbox_setup_requires_elevation` | The UAC prompt was declined, or there was no session to show one in | Run the `dism.exe` command in the error from an elevated terminal, then retry |
+| `sandbox_setup_requires_restart` | The feature is enabled; Windows needs a restart | Restart, then run the command again |
+| `sandbox_setup_incomplete` | Windows is still installing the Sandbox client | Wait, then run the command again — retrying resumes it |
+| `sandbox_setup_failed` | Windows refused to enable the feature or start the client | Check edition, firmware virtualization, and optional-feature policy |
+| `sandbox_unmanaged_instance` | A running Sandbox could not be prepared, or more than one is running | Wait for it to finish starting and retry, or close the ones you do not need |
 | `sandbox_no_interactive_session` | No interactive guest session | Reconnect the Sandbox window with `wsb connect` |
 | `sandbox_input_not_ready` | Input could not be delivered — and none was reported as delivered | Reconnect and un-minimize the Sandbox window |
 | `sandbox_terminated` | The Sandbox went away mid-command | Retry; the next command recreates and redeploys |

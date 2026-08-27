@@ -40,6 +40,10 @@ public class ExecutionTargetErrorTests
         "sandbox_target_stale",
         "sandbox_stale_handle",
         "sandbox_artifact_failed",
+        "sandbox_setup_requires_elevation",
+        "sandbox_setup_requires_restart",
+        "sandbox_setup_failed",
+        "sandbox_setup_incomplete",
     ];
 
     [TestMethod]

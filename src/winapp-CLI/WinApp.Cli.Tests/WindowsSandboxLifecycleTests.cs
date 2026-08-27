@@ -18,8 +18,11 @@ internal sealed class FakeWindowsSandboxCli : IWindowsSandboxCli
 
     public bool IsAvailable { get; set; } = true;
 
-    /// <summary>IDs <see cref="StartAsync"/> hands out, in order.</summary>
-    public Queue<string> StartIds { get; } = new();
+    /// <summary>The absolute path <see cref="UseExecutable"/> was told to use, if any.</summary>
+    public string? BoundExecutable { get; private set; }
+
+    /// <summary>Every instance ID <see cref="StartAsync"/> was asked to create, in order.</summary>
+    public List<string> RequestedStartIds { get; } = [];
 
     /// <summary>Every instance ID <see cref="StopAsync"/> was called with.</summary>
     public List<string> Stopped { get; } = [];
@@ -29,6 +32,27 @@ internal sealed class FakeWindowsSandboxCli : IWindowsSandboxCli
 
     /// <summary>Invoked before each <see cref="ListAsync"/>, to simulate teardown completing.</summary>
     public Action? OnList { get; set; }
+
+    /// <summary>
+    /// When set, <see cref="StartAsync"/> throws it. The instance is still created first when
+    /// <see cref="StartCreatesInstanceBeforeFailing"/> is set, modelling the observed
+    /// <c>0x80070002</c> behaviour.
+    /// </summary>
+    public ExecutionTargetException? StartFailure { get; set; }
+
+    /// <summary>Whether a failing start still leaves its instance listed.</summary>
+    public bool StartCreatesInstanceBeforeFailing { get; set; }
+
+    /// <summary>When set, <see cref="StartAsync"/> reports this ID instead of the requested one.</summary>
+    public string? StartReportsId { get; set; }
+
+    /// <summary>IDs that are listed but refuse to resolve, modelling an instance still coming up.</summary>
+    public HashSet<string> Unresolvable { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Every ID <see cref="IsResolvableAsync"/> was asked about, in order.</summary>
+    public List<string> ResolveProbes { get; } = [];
+
+    public void UseExecutable(string executablePath) => BoundExecutable = executablePath;
 
     public void SetRunning(params string[] ids)
     {
@@ -42,12 +66,23 @@ internal sealed class FakeWindowsSandboxCli : IWindowsSandboxCli
         return Task.FromResult<IReadOnlyList<string>>([.. _running]);
     }
 
-    public Task<string> StartAsync(string? configuration, CancellationToken cancellationToken)
+    public Task<string> StartAsync(string instanceId, string? configuration, CancellationToken cancellationToken)
     {
         StartCount++;
-        var id = StartIds.Count > 0 ? StartIds.Dequeue() : $"instance-{StartCount}";
-        _running.Add(id);
-        return Task.FromResult(id);
+        RequestedStartIds.Add(instanceId);
+
+        if (StartFailure is { } failure)
+        {
+            if (StartCreatesInstanceBeforeFailing)
+            {
+                _running.Add(instanceId);
+            }
+
+            throw failure;
+        }
+
+        _running.Add(instanceId);
+        return Task.FromResult(StartReportsId ?? instanceId);
     }
 
     /// <summary>When true, <see cref="StopAsync"/> fails, exercising compensation failure paths.</summary>
@@ -65,6 +100,14 @@ internal sealed class FakeWindowsSandboxCli : IWindowsSandboxCli
         Stopped.Add(id);
         _running.Remove(id);
         return Task.CompletedTask;
+    }
+
+    public Task<bool> IsResolvableAsync(string id, CancellationToken cancellationToken)
+    {
+        ResolveProbes.Add(id);
+
+        return Task.FromResult(
+            _running.Contains(id, StringComparer.OrdinalIgnoreCase) && !Unresolvable.Contains(id));
     }
 
     public Task<string> GetIpAddressAsync(string id, CancellationToken cancellationToken) =>
@@ -92,9 +135,11 @@ internal sealed class FakeWindowsSandboxCli : IWindowsSandboxCli
         CancellationToken cancellationToken) => Task.CompletedTask;
 }
 
+
 /// <summary>
-/// Tests for <see cref="WindowsSandboxLifecycle"/>: singleton ownership, refusal to touch anything
-/// winapp did not create, warm reuse, external termination, and teardown waiting.
+/// Tests for <see cref="WindowsSandboxLifecycle"/>: singleton ownership, caller-assigned start IDs,
+/// recovery from a start that half-succeeded, and automatic take-over of a Sandbox winapp did not
+/// start.
 /// </summary>
 [TestClass]
 public class WindowsSandboxLifecycleTests
@@ -103,6 +148,7 @@ public class WindowsSandboxLifecycleTests
     private FakeWindowsSandboxCli _cli = null!;
     private TargetStateStore _stateStore = null!;
     private WindowsSandboxLifecycle _lifecycle = null!;
+    private DateTimeOffset _now;
 
     [TestInitialize]
     public void Setup()
@@ -112,7 +158,37 @@ public class WindowsSandboxLifecycleTests
 
         _cli = new FakeWindowsSandboxCli();
         _stateStore = new TargetStateStore(new TargetStateDirectoryProvider(_tempRoot.FullName));
-        _lifecycle = new WindowsSandboxLifecycle(_cli, _stateStore);
+        _lifecycle = NewLifecycle();
+    }
+
+    /// <summary>
+    /// A lifecycle whose clock and delays are driven by the test rather than by real time.
+    /// </summary>
+    /// <remarks>
+    /// Reconciliation polls for up to 45 seconds. Advancing a fake clock inside the delay is what
+    /// lets a timeout be asserted in milliseconds instead of making the suite wait it out.
+    /// </remarks>
+    private WindowsSandboxLifecycle NewLifecycle(Queue<string>? instanceIds = null)
+    {
+        _now = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+        var lifecycle = new WindowsSandboxLifecycle(_cli, _stateStore)
+        {
+            UtcNow = () => _now,
+        };
+
+        lifecycle.Delay = (delay, _) =>
+        {
+            _now += delay;
+            return Task.CompletedTask;
+        };
+
+        if (instanceIds is not null)
+        {
+            lifecycle.NewInstanceId = instanceIds.Dequeue;
+        }
+
+        return lifecycle;
     }
 
     [TestCleanup]
@@ -137,55 +213,283 @@ public class WindowsSandboxLifecycleTests
     [TestMethod]
     public async Task EnsureInstance_ColdStart_CreatesAndPersistsOwnership()
     {
-        _cli.StartIds.Enqueue("sandbox-a");
+        _lifecycle = NewLifecycle(new Queue<string>(["sandbox-a"]));
 
         var lease = await _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
 
         Assert.AreEqual("sandbox-a", lease.InstanceId);
-        Assert.IsFalse(lease.Reused);
+        Assert.AreEqual(SandboxInstanceOrigin.Created, lease.Origin);
+        Assert.IsFalse(lease.IsWarm);
         Assert.IsFalse(lease.Epoch.IsNone);
 
         var persisted = _stateStore.Read(ExecutionTargetRef.WindowsSandboxDefault);
         Assert.AreEqual("sandbox-a", persisted!.InstanceId);
         Assert.IsFalse(string.IsNullOrWhiteSpace(persisted.BootNonce), "A boot nonce is required to form an epoch.");
+        Assert.IsNull(persisted.PendingInstanceId, "A confirmed start must clear its pending marker.");
     }
 
     [TestMethod]
     public async Task EnsureInstance_WarmReuse_DoesNotStartASecondSandbox()
     {
-        _cli.StartIds.Enqueue("sandbox-a");
+        _lifecycle = NewLifecycle(new Queue<string>(["sandbox-a"]));
         var first = await _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
 
         var second = await _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
 
-        Assert.IsTrue(second.Reused, "A healthy managed Sandbox must be reused, not recreated.");
+        Assert.AreEqual(SandboxInstanceOrigin.Reused, second.Origin);
+        Assert.IsTrue(second.IsWarm, "Only a reused instance may take the warm-reconnect path.");
         Assert.AreEqual(first.InstanceId, second.InstanceId);
         Assert.AreEqual(first.Epoch, second.Epoch, "Reuse must preserve the epoch so live handles stay valid.");
         Assert.AreEqual(1, _cli.StartCount);
     }
 
     [TestMethod]
-    public async Task EnsureInstance_UnmanagedSandboxRunning_RefusesWithAdvisoryGuidance()
+    public async Task EnsureInstance_AssignsTheIdItPersistedBeforeStarting()
+    {
+        // The ID is winapp's claim on the instance. It has to be chosen and written down first, or a
+        // start that fails after creating something leaves nothing that identifies it.
+        _lifecycle = NewLifecycle(new Queue<string>(["assigned-id"]));
+        _cli.StartFailure = StartFailure(WsbHResult.FileNotFound);
+        _cli.StartCreatesInstanceBeforeFailing = true;
+
+        await _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
+
+        CollectionAssert.AreEqual(
+            new[] { "assigned-id" },
+            _cli.RequestedStartIds,
+            "wsb start must be given the ID winapp assigned.");
+    }
+
+    [TestMethod]
+    public async Task EnsureInstance_StartFailsAfterCreatingTheInstance_RecoversThatExactInstance()
+    {
+        // The live 0x80070002 failure: wsb reports an error but the instance it was asked to create
+        // is listed and usable. Recovering it is what stops the next command from asking a singleton
+        // to become two.
+        _lifecycle = NewLifecycle(new Queue<string>(["assigned-id"]));
+        _cli.StartFailure = StartFailure(WsbHResult.FileNotFound);
+        _cli.StartCreatesInstanceBeforeFailing = true;
+
+        var lease = await _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
+
+        Assert.AreEqual("assigned-id", lease.InstanceId);
+        Assert.AreEqual(SandboxInstanceOrigin.RecoveredStart, lease.Origin);
+        Assert.IsFalse(lease.IsWarm, "A recovered instance has nothing bootstrapped under its new epoch.");
+
+        var persisted = _stateStore.Read(ExecutionTargetRef.WindowsSandboxDefault);
+        Assert.AreEqual("assigned-id", persisted!.InstanceId);
+        Assert.IsNull(persisted.PendingInstanceId);
+    }
+
+    [TestMethod]
+    public async Task EnsureInstance_StartFailsAndProcessDies_NextProcessRecoversTheSameInstance()
+    {
+        // Modelled as two lifecycles over one state store, which is exactly what two winapp
+        // invocations are. The second must find the first one's assigned ID rather than start again.
+        _lifecycle = NewLifecycle(new Queue<string>(["assigned-id"]));
+        _cli.StartFailure = StartFailure(WsbHResult.FileNotFound);
+        _cli.StartCreatesInstanceBeforeFailing = true;
+        _cli.Unresolvable.Add("assigned-id");
+
+        await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
+            () => _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token));
+
+        var pending = _stateStore.Read(ExecutionTargetRef.WindowsSandboxDefault);
+        Assert.AreEqual(
+            "assigned-id",
+            pending!.PendingInstanceId,
+            "The pending marker must survive so the next process can finish the job.");
+
+        // The guest finished coming up in the meantime.
+        _cli.Unresolvable.Clear();
+        _cli.StartFailure = null;
+
+        var second = NewLifecycle(new Queue<string>(["would-be-second-start"]));
+        var lease = await second.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
+
+        Assert.AreEqual("assigned-id", lease.InstanceId);
+        Assert.AreEqual(SandboxInstanceOrigin.RecoveredStart, lease.Origin);
+        Assert.AreEqual(1, _cli.StartCount, "The recovered instance must not be joined by a second one.");
+    }
+
+    [TestMethod]
+    public async Task EnsureInstance_ListLagsTheNewInstance_StillRecoversIt()
+    {
+        // wsb list can report nothing for a moment after creating an instance. A single check would
+        // conclude the start produced nothing.
+        _lifecycle = NewLifecycle(new Queue<string>(["assigned-id"]));
+        _cli.StartFailure = StartFailure(WsbHResult.FileNotFound);
+        _cli.StartCreatesInstanceBeforeFailing = false;
+
+        var appearAfter = 2;
+        _cli.OnList = () =>
+        {
+            if (--appearAfter == 0)
+            {
+                _cli.SetRunning("assigned-id");
+            }
+        };
+
+        var lease = await _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
+
+        Assert.AreEqual("assigned-id", lease.InstanceId);
+        Assert.AreEqual(SandboxInstanceOrigin.RecoveredStart, lease.Origin);
+    }
+
+    [TestMethod]
+    public async Task EnsureInstance_StartFailsAndNothingWasCreated_ReportsTheOriginalFailure()
+    {
+        _lifecycle = NewLifecycle(new Queue<string>(["assigned-id"]));
+        _cli.StartFailure = StartFailure(WsbHResult.FileNotFound);
+        _cli.StartCreatesInstanceBeforeFailing = false;
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
+            () => _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.StartFailed, failure.Error.Code);
+        Assert.AreEqual(
+            WsbHResult.Format(WsbHResult.FileNotFound),
+            failure.Error.Context![WsbHResult.ContextKey],
+            "The HRESULT context must survive so the failure stays diagnosable.");
+    }
+
+    [TestMethod]
+    public async Task EnsureInstance_AnotherProcessCreatedOneDuringOurStart_IsNeverAttributedToUs()
+    {
+        // The unattributable case: our start failed without creating anything, and a Sandbox that is
+        // not the ID we asked for appeared while we were failing. Recovery must key on the assigned
+        // ID, never on "one new item in the list".
+        _lifecycle = NewLifecycle(new Queue<string>(["assigned-id"]));
+        _cli.StartFailure = StartFailure(WsbHResult.FileNotFound);
+        _cli.StartCreatesInstanceBeforeFailing = false;
+
+        // Appears only after our start has already failed, so it cannot be confused with a Sandbox
+        // that was there before winapp tried.
+        var listCalls = 0;
+        _cli.OnList = () =>
+        {
+            if (++listCalls == 2)
+            {
+                _cli.SetRunning("someone-elses-sandbox");
+            }
+        };
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
+            () => _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.StartFailed, failure.Error.Code);
+
+        var persisted = _stateStore.Read(ExecutionTargetRef.WindowsSandboxDefault);
+        Assert.AreNotEqual(
+            "someone-elses-sandbox",
+            persisted!.InstanceId,
+            "A Sandbox winapp did not ask for must never be recorded as the one it started.");
+        Assert.AreEqual(
+            "assigned-id",
+            persisted.PendingInstanceId,
+            "The unconfirmed start stays claimed by its own ID, not by whatever appeared.");
+    }
+
+    [TestMethod]
+    public async Task EnsureInstance_StartReportsADifferentId_IsRefused()
+    {
+        _lifecycle = NewLifecycle(new Queue<string>(["assigned-id"]));
+        _cli.StartReportsId = "something-else";
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
+            () => _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.StartFailed, failure.Error.Code);
+        Assert.AreEqual("assigned-id", failure.Error.Context!["requestedId"]);
+        Assert.AreEqual("something-else", failure.Error.Context["reportedId"]);
+        CollectionAssert.AreEqual(Array.Empty<string>(), _cli.Stopped, "Nothing may be stopped over a mismatch.");
+    }
+
+    [TestMethod]
+    public async Task EnsureInstance_ManualSandboxAlreadyRunning_IsAdoptedAutomatically()
+    {
+        // --sandbox is explicit consent to make the one Sandbox Windows allows usable. Refusing
+        // would make the flag unusable exactly when a Sandbox is available.
+        _cli.SetRunning("someone-elses-sandbox");
+
+        var lease = await _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
+
+        Assert.AreEqual("someone-elses-sandbox", lease.InstanceId);
+        Assert.AreEqual(SandboxInstanceOrigin.Adopted, lease.Origin);
+        Assert.IsTrue(lease.IsAdopted);
+        Assert.IsFalse(lease.IsWarm, "An adopted guest has nothing prepared under this epoch.");
+        Assert.AreEqual(0, _cli.StartCount, "A running Sandbox must be used, not joined by another.");
+        CollectionAssert.AreEqual(Array.Empty<string>(), _cli.Stopped, "An adopted Sandbox is never stopped.");
+    }
+
+    [TestMethod]
+    public async Task EnsureInstance_AdoptedSandbox_IsReusedByTheNextCommand()
     {
         _cli.SetRunning("someone-elses-sandbox");
+        var first = await _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
+
+        var second = await NewLifecycle().EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
+
+        Assert.AreEqual(first.InstanceId, second.InstanceId);
+        Assert.AreEqual(SandboxInstanceOrigin.Reused, second.Origin);
+        Assert.AreEqual(first.Epoch, second.Epoch);
+        Assert.AreEqual(0, _cli.StartCount);
+    }
+
+    [TestMethod]
+    public async Task EnsureInstance_RunningSandboxNeverResolves_IsRefusedWithoutTouchingIt()
+    {
+        // Capability before mutation: an instance that cannot be resolved must not be claimed and
+        // then bootstrapped into, and must not be stopped either.
+        _cli.SetRunning("half-dead-sandbox");
+        _cli.Unresolvable.Add("half-dead-sandbox");
 
         var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
             () => _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token));
 
         Assert.AreEqual(ExecutionTargetErrorCodes.UnmanagedInstance, failure.Error.Code);
-        Assert.AreEqual("someone-elses-sandbox", failure.Error.Context!["sandboxId"]);
-        Assert.AreEqual("wsb stop --id someone-elses-sandbox", failure.Error.NextCommand!.Command);
+        Assert.AreEqual("half-dead-sandbox", failure.Error.Context!["sandboxId"]);
+        Assert.IsTrue(failure.Error.NextCommand!.Advisory, "Stopping an unowned Sandbox must be advisory.");
+        CollectionAssert.AreEqual(Array.Empty<string>(), _cli.Stopped);
+        Assert.IsNull(
+            _stateStore.Read(ExecutionTargetRef.WindowsSandboxDefault)?.InstanceId,
+            "An unusable instance must not be recorded as owned.");
+    }
 
-        // The instance may hold the user's work, so stopping it needs a human decision.
-        Assert.IsTrue(failure.Error.NextCommand.Advisory, "Stopping an unowned Sandbox must be advisory.");
-        Assert.AreEqual(0, _cli.StartCount, "An unmanaged Sandbox must never be replaced.");
-        CollectionAssert.AreEqual(Array.Empty<string>(), _cli.Stopped, "An unmanaged Sandbox must never be stopped.");
+    [TestMethod]
+    public async Task EnsureInstance_SeveralSandboxesRunning_RefusesRatherThanGuessing()
+    {
+        _cli.SetRunning("sandbox-one", "sandbox-two");
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
+            () => _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.UnmanagedInstance, failure.Error.Code);
+        Assert.AreEqual("2", failure.Error.Context!["count"]);
+        Assert.AreEqual(0, _cli.StartCount);
+        CollectionAssert.AreEqual(Array.Empty<string>(), _cli.Stopped);
+    }
+
+    [TestMethod]
+    public async Task EnsureInstance_SingletonInUse_ReusesTheRunningInstanceInsteadOfFailing()
+    {
+        // CO_E_APPSINGLEUSE says a Sandbox already exists. Reporting "restart the host" would send
+        // the user somewhere useless.
+        _lifecycle = NewLifecycle(new Queue<string>(["assigned-id"]));
+        _cli.StartFailure = StartFailure(WsbHResult.AppSingleUse);
+        _cli.StartCreatesInstanceBeforeFailing = false;
+        _cli.SetRunning("the-existing-one");
+
+        var lease = await _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
+
+        Assert.AreEqual("the-existing-one", lease.InstanceId);
+        Assert.AreEqual(SandboxInstanceOrigin.Adopted, lease.Origin);
     }
 
     [TestMethod]
     public async Task EnsureInstance_ExternallyStopped_RecoversWithANewEpoch()
     {
-        _cli.StartIds.Enqueue("sandbox-a");
+        _lifecycle = NewLifecycle(new Queue<string>(["sandbox-a"]));
         var first = await _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
 
         // The user closed the Sandbox or ran `wsb stop`.
@@ -194,11 +498,11 @@ public class WindowsSandboxLifecycleTests
         var reconciled = await _lifecycle.ReconcileAsync(TestContext.CancellationTokenSource.Token);
         Assert.AreEqual(TargetLifecycleState.Terminated, reconciled.State);
 
-        _cli.StartIds.Enqueue("sandbox-b");
-        var second = await _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
+        var second = await NewLifecycle(new Queue<string>(["sandbox-b"]))
+            .EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
 
         Assert.AreEqual("sandbox-b", second.InstanceId);
-        Assert.IsFalse(second.Reused);
+        Assert.AreEqual(SandboxInstanceOrigin.Created, second.Origin);
 
         // Handles captured against the old generation must not resolve against the new guest.
         Assert.AreNotEqual(first.Epoch, second.Epoch);
@@ -207,15 +511,15 @@ public class WindowsSandboxLifecycleTests
     [TestMethod]
     public async Task EnsureInstance_SameIdReusedAfterReboot_StillProducesANewEpoch()
     {
-        _cli.StartIds.Enqueue("sandbox-a");
+        _lifecycle = NewLifecycle(new Queue<string>(["sandbox-a"]));
         var first = await _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
 
         _cli.SetRunning();
         _lifecycle.InvalidateManagedInstance();
 
         // Windows could hand back an identical ID; the boot nonce is what guarantees a fresh epoch.
-        _cli.StartIds.Enqueue("sandbox-a");
-        var second = await _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
+        var second = await NewLifecycle(new Queue<string>(["sandbox-a"]))
+            .EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
 
         Assert.AreEqual(first.InstanceId, second.InstanceId);
         Assert.AreNotEqual(first.Epoch, second.Epoch);
@@ -224,21 +528,20 @@ public class WindowsSandboxLifecycleTests
     [TestMethod]
     public async Task EnsureInstance_OwnRecordedInstance_IsNotMisreportedAsUnmanaged()
     {
-        _cli.StartIds.Enqueue("sandbox-a");
+        _lifecycle = NewLifecycle(new Queue<string>(["sandbox-a"]));
         await _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
 
-        // A second, foreign instance appearing alongside ours is what must be refused — not our own.
         _cli.SetRunning("sandbox-a");
         var reused = await _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
 
-        Assert.IsTrue(reused.Reused);
+        Assert.AreEqual(SandboxInstanceOrigin.Reused, reused.Origin);
         CollectionAssert.AreEqual(Array.Empty<string>(), _cli.Stopped);
     }
 
     [TestMethod]
     public async Task InvalidateManagedInstance_ClearsOwnership()
     {
-        _cli.StartIds.Enqueue("sandbox-a");
+        _lifecycle = NewLifecycle(new Queue<string>(["sandbox-a"]));
         await _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
 
         _lifecycle.InvalidateManagedInstance();
@@ -247,46 +550,146 @@ public class WindowsSandboxLifecycleTests
     }
 
     [TestMethod]
-    public async Task EnsureInstance_CommitFails_StopsTheInstanceItJustCreated()
+    public async Task EnsureInstance_CommitFails_LeavesTheInstanceRunningForTheNextCommand()
     {
-        // Regression: if ownership is never recorded, the new Sandbox keeps running but is
-        // unowned, so every later command refuses it as unmanaged -- permanently wedging the target
-        // through no fault of the user. The one thing this call created must be undone.
-        _cli.StartIds.Enqueue("sandbox-orphan");
-        var failingStore = new FailingCommitStateStore(_stateStore);
-        var lifecycle = new WindowsSandboxLifecycle(_cli, failingStore);
+        // Regression, inverted from the old behaviour on purpose. Stopping the instance used to be
+        // the only way to avoid wedging the target, because an unrecorded Sandbox could never be
+        // claimed. The pending marker is that proof now, so stopping would destroy a usable Sandbox
+        // -- and whatever the user had running in it -- for nothing.
+        var failingStore = new FailingCommitStateStore(_stateStore, failAfter: 1);
+        var lifecycle = new WindowsSandboxLifecycle(_cli, failingStore)
+        {
+            NewInstanceId = () => "sandbox-orphan",
+            UtcNow = () => _now,
+        };
+        lifecycle.Delay = (delay, _) =>
+        {
+            _now += delay;
+            return Task.CompletedTask;
+        };
 
         await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
             () => lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token));
 
-        CollectionAssert.Contains(_cli.Stopped, "sandbox-orphan", "The unowned instance must be stopped.");
-        Assert.IsNull(_stateStore.Read(ExecutionTargetRef.WindowsSandboxDefault));
+        CollectionAssert.AreEqual(Array.Empty<string>(), _cli.Stopped, "A live Sandbox must never be stopped.");
+
+        var persisted = _stateStore.Read(ExecutionTargetRef.WindowsSandboxDefault);
+        Assert.AreEqual(
+            "sandbox-orphan",
+            persisted!.PendingInstanceId,
+            "The pending marker is what lets the next command claim the instance that was created.");
     }
 
     [TestMethod]
-    public async Task EnsureInstance_CommitFailsAndCompensationAlsoFails_ReportsTheOriginalFailure()
+    public async Task EnsureInstance_AfterAFailedCommit_TheNextCommandClaimsTheSameInstance()
     {
-        // Compensation is best effort. If it cannot stop the instance either, the original, more
-        // informative failure is still what surfaces.
-        _cli.StartIds.Enqueue("sandbox-orphan");
-        _cli.FailStop = true;
-        var lifecycle = new WindowsSandboxLifecycle(_cli, new FailingCommitStateStore(_stateStore));
+        var failingStore = new FailingCommitStateStore(_stateStore, failAfter: 1);
+        var lifecycle = new WindowsSandboxLifecycle(_cli, failingStore) { NewInstanceId = () => "sandbox-orphan" };
 
-        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
+        await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
             () => lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token));
 
-        Assert.AreEqual(ExecutionTargetErrorCodes.TargetAmbiguous, failure.Error.Code);
+        var lease = await NewLifecycle(new Queue<string>(["would-be-second-start"]))
+            .EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
+
+        Assert.AreEqual("sandbox-orphan", lease.InstanceId);
+        Assert.AreEqual(SandboxInstanceOrigin.RecoveredStart, lease.Origin);
+        Assert.AreEqual(1, _cli.StartCount);
     }
 
-    /// <summary>A store whose commits always fail, to exercise the compensation path.</summary>
-    private sealed class FailingCommitStateStore(ITargetStateStore inner) : ITargetStateStore
+    [TestMethod]
+    public async Task RedirectedStateRoot_AdoptsWithoutDisturbingTheOtherManagersGeneration()
     {
+        // WINAPP_TARGET_STATE_ROOT gives a second winapp process its own ownership record, so it
+        // cannot see that this one already owns the running Sandbox and will take it over. That
+        // take-over must be additive: a fresh epoch, its own bootstrap folders, its own port and
+        // material. Nothing belonging to the other generation may be reused or removed.
+        _lifecycle = NewLifecycle(new Queue<string>(["sandbox-a"]));
+        var owned = await _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
+
+        var otherRoot = new DirectoryInfo(TestPaths.TempRoot("SandboxLifecycleRedirected"));
+        otherRoot.Create();
+
+        try
+        {
+            var otherStore = new TargetStateStore(new TargetStateDirectoryProvider(otherRoot.FullName));
+            var otherLifecycle = new WindowsSandboxLifecycle(_cli, otherStore);
+
+            var adopted = await otherLifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
+
+            Assert.AreEqual(owned.InstanceId, adopted.InstanceId, "Windows allows only one Sandbox to take over.");
+            Assert.AreEqual(SandboxInstanceOrigin.Adopted, adopted.Origin);
+            Assert.AreNotEqual(
+                owned.Epoch,
+                adopted.Epoch,
+                "A separate manager must get its own epoch, so neither reuses the other's material or paths.");
+            CollectionAssert.AreEqual(
+                Array.Empty<string>(),
+                _cli.Stopped,
+                "The other manager's live Sandbox must not be stopped.");
+
+            // The first manager's own record is untouched, so its handles stay fenced on its epoch.
+            var stillOwned = _stateStore.Read(ExecutionTargetRef.WindowsSandboxDefault);
+            Assert.AreEqual(owned.InstanceId, stillOwned!.InstanceId);
+            Assert.AreEqual(
+                ExecutionTargetEpoch.Create(stillOwned.InstanceId!, stillOwned.BootNonce!),
+                owned.Epoch);
+        }
+        finally
+        {
+            otherRoot.Delete(recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public void GenerateInstanceId_IsAUniqueVersion4Uuid()
+    {
+        var ids = Enumerable.Range(0, 64).Select(_ => WindowsSandboxLifecycle.GenerateInstanceId()).ToList();
+
+        Assert.AreEqual(ids.Count, ids.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+
+        foreach (var id in ids)
+        {
+            Assert.IsTrue(Guid.TryParse(id, out var parsed), $"'{id}' must be a GUID.");
+            Assert.AreEqual('4', id[14], "The ID must be shaped as a version-4 UUID.");
+            Assert.AreNotEqual(Guid.Empty, parsed);
+        }
+    }
+
+    /// <summary>A start failure carrying the HRESULT wsb reported.</summary>
+    private static ExecutionTargetException StartFailure(int hresult) =>
+        ExecutionTargetException.Create(
+            ExecutionTargetErrorCodes.StartFailed,
+            "The Windows Sandbox command line failed.",
+            context: new Dictionary<string, string>
+            {
+                ["wsbVerb"] = "start",
+                [WsbHResult.ContextKey] = WsbHResult.Format(hresult),
+            });
+
+    /// <summary>A store whose commits start failing after a given number of successes.</summary>
+    /// <remarks>
+    /// The pending-start commit has to succeed for the failure under test to be the one that
+    /// matters: it is the ownership commit, after the instance already exists, that used to trigger
+    /// compensation.
+    /// </remarks>
+    private sealed class FailingCommitStateStore(ITargetStateStore inner, int failAfter) : ITargetStateStore
+    {
+        private int _commits;
+
         public TargetState? Read(ExecutionTargetRef target) => inner.Read(target);
 
-        public TargetState Commit(ExecutionTargetRef target, TargetState state, long expectedRevision) =>
-            throw ExecutionTargetException.Create(
-                ExecutionTargetErrorCodes.TargetAmbiguous,
-                "Windows Sandbox state changed while this command was running.");
+        public TargetState Commit(ExecutionTargetRef target, TargetState state, long expectedRevision)
+        {
+            if (++_commits > failAfter)
+            {
+                throw ExecutionTargetException.Create(
+                    ExecutionTargetErrorCodes.TargetAmbiguous,
+                    "Windows Sandbox state changed while this command was running.");
+            }
+
+            return inner.Commit(target, state, expectedRevision);
+        }
 
         public void Clear(ExecutionTargetRef target) => inner.Clear(target);
     }
