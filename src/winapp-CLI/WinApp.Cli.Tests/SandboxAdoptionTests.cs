@@ -332,39 +332,149 @@ public class SandboxAdoptionTests
     }
 
     /// <summary>
-    /// A guest with a login session but no attached client fails fast, not after three minutes.
+    /// A closed Sandbox window is reconnected once, from the agent's own evidence.
     /// </summary>
     /// <remarks>
-    /// A closed Sandbox window leaves <c>ExistingLogin</c> working, so the session probe reports
-    /// ready and no client is launched. The agent then refuses with <c>NoInputDesktop</c>. Retrying
-    /// that is only sensible while a client winapp just launched is still coming up; with no client
-    /// launched it would spin to the heartbeat deadline and then blame the wrong thing.
+    /// A closed client leaves <c>ExistingLogin</c> working, so the session probe reports ready and
+    /// nothing is connected; the agent then refuses with <c>NoInputDesktop</c>. That refusal is
+    /// evidence rather than a guess, which is what makes reconnecting safe here and unsafe from the
+    /// probe alone — a guest whose client is healthy never produces it.
     /// </remarks>
     [TestMethod]
-    public async Task ClosedClient_ReportsInputNotReadyImmediatelyInsteadOfRetryingForMinutes()
+    public async Task ClosedClient_IsReconnectedOnceAndThenWorks()
     {
         using var harness = new AdoptionHarness();
         harness.Cli.SetRunning(ManualInstanceId);
         harness.Cli.Session = GuestSessionAvailability.Ready;
         harness.Cli.AgentRefusesWithNoInputDesktop = true;
-        harness.Cli.CurrentTargetRoot = harness.TargetRoot;
+        harness.Cli.AgentReadyAfterReconnect = true;
 
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        // Reaching the agent launch means the guest became usable without the user doing anything.
+        await harness.RunUntilAgentLaunchAsync(TestContext.CancellationToken);
+
+        Assert.AreEqual(
+            1,
+            harness.Cli.Operations.Count(op => op.StartsWith("connect:", StringComparison.Ordinal)),
+            "Exactly one reconnect: --sandbox fixes what it can, but never stacks clients.");
+    }
+
+    [TestMethod]
+    public async Task ClosedClient_ThatStaysUnusable_FailsBoundedWithOneReconnect()
+    {
+        using var harness = new AdoptionHarness();
+        harness.Cli.SetRunning(ManualInstanceId);
+        harness.Cli.Session = GuestSessionAvailability.Ready;
+        harness.Cli.AgentRefusesWithNoInputDesktop = true;
 
         var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
             () => harness.Backend.EnsureConnectedAsync(
                 new EnsureTargetOptions(true), TestContext.CancellationToken));
 
-        stopwatch.Stop();
-
         Assert.AreEqual(ExecutionTargetErrorCodes.InputNotReady, failure.Error.Code);
         StringAssert.Contains(failure.Error.NextCommand!.Command, "wsb connect", StringComparison.Ordinal);
         Assert.IsTrue(failure.Error.NextCommand.Advisory);
+        Assert.AreEqual(
+            1,
+            harness.Cli.Operations.Count(op => op.StartsWith("connect:", StringComparison.Ordinal)),
+            "Recovery is one-shot: it must never reconnect repeatedly while spinning.");
         Assert.IsLessThan(
             WindowsSandboxBackend.HeartbeatTimeout,
-            stopwatch.Elapsed,
-            "The refusal must not wait out the heartbeat deadline.");
+            harness.Elapsed,
+            "A reconnected client that never becomes ready must fail on the short bound, not the long one.");
     }
+
+    [TestMethod]
+    public async Task ClosedClient_WhoseReconnectFails_SurfacesThatFailure()
+    {
+        using var harness = new AdoptionHarness();
+        harness.Cli.SetRunning(ManualInstanceId);
+        harness.Cli.Session = GuestSessionAvailability.Ready;
+        harness.Cli.AgentRefusesWithNoInputDesktop = true;
+        harness.Cli.FailConnect = true;
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
+            () => harness.Backend.EnsureConnectedAsync(
+                new EnsureTargetOptions(true), TestContext.CancellationToken));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.NoInteractiveSession, failure.Error.Code);
+    }
+
+    [TestMethod]
+    public async Task AdoptedInstance_WithAHealthyClient_IsNeverReconnected()
+    {
+        // The agent works, so no recovery is triggered and the user's own window is untouched.
+        using var harness = new AdoptionHarness();
+        harness.Cli.SetRunning(ManualInstanceId);
+        harness.Cli.Session = GuestSessionAvailability.Ready;
+
+        await harness.RunUntilAgentLaunchAsync(TestContext.CancellationToken);
+
+        Assert.IsFalse(
+            harness.Cli.Operations.Any(op => op.StartsWith("connect:", StringComparison.Ordinal)),
+            "A healthy attached client must never be duplicated.");
+    }
+
+    /// <summary>
+    /// An instance winapp started itself connects unless the guest positively says it has a session.
+    /// </summary>
+    /// <remarks>
+    /// <c>wsb start</c> attaches no client, so for a Created or RecoveredStart instance the absence
+    /// of one is known, not guessed. Skipping the connect on an inconclusive probe would leave the
+    /// agent — which runs as <c>ExistingLogin</c> — with no session to launch into, and the whole
+    /// heartbeat window would be spent discovering that.
+    /// </remarks>
+    [TestMethod]
+    [DataRow((int)GuestSessionAvailability.Unknown, DisplayName = "probe could not answer")]
+    [DataRow((int)GuestSessionAvailability.NoLoginSession, DisplayName = "probe confirmed no session")]
+    public async Task CreatedInstance_ConnectsUnlessTheGuestSaysItHasASession(int session)
+    {
+        using var harness = new AdoptionHarness();
+        harness.Cli.Session = (GuestSessionAvailability)session;
+
+        await harness.RunUntilAgentLaunchAsync(TestContext.CancellationToken);
+
+        Assert.AreEqual(
+            1,
+            harness.Cli.Operations.Count(op => op.StartsWith("connect:", StringComparison.Ordinal)),
+            "A Sandbox winapp started headless needs exactly one client.");
+    }
+
+    [TestMethod]
+    public async Task CreatedInstance_WhoseGuestAlreadyHasASession_IsNotConnected()
+    {
+        // The client installer can open a Sandbox that winapp then recovers; if a session already
+        // exists, adding another client would duplicate it.
+        using var harness = new AdoptionHarness();
+        harness.Cli.Session = GuestSessionAvailability.Ready;
+
+        await harness.RunUntilAgentLaunchAsync(TestContext.CancellationToken);
+
+        Assert.IsFalse(
+            harness.Cli.Operations.Any(op => op.StartsWith("connect:", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public async Task RecoveredInstance_WithAnInconclusiveProbe_IsConnected()
+    {
+        // Recovered from winapp's own unconfirmed start, so it was started headless too.
+        using var harness = new AdoptionHarness();
+        harness.Cli.SetRunning(RecoveredInstanceId);
+        harness.MarkPendingStart(RecoveredInstanceId);
+        harness.Cli.Session = GuestSessionAvailability.Unknown;
+
+        await harness.RunUntilAgentLaunchAsync(TestContext.CancellationToken);
+
+        Assert.AreEqual(
+            nameof(SandboxInstanceOrigin.RecoveredStart),
+            harness.ReadState()!.InstanceOrigin,
+            "This test is only meaningful if the instance really was recovered.");
+        Assert.AreEqual(
+            1,
+            harness.Cli.Operations.Count(op => op.StartsWith("connect:", StringComparison.Ordinal)));
+    }
+
+    /// <summary>The instance ID a recovered-start test claims.</summary>
+    private const string RecoveredInstanceId = "winapp-started-this-one";
 
     private static List<string> GuestSharePaths(AdoptionHarness harness) =>
         [.. harness.Cli.Operations
@@ -385,6 +495,7 @@ public class SandboxAdoptionTests
     {
         private readonly DirectoryInfo _root;
         private readonly TargetStateStore _stateStore;
+        private DateTimeOffset _now = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
         public AdoptionHarness()
         {
@@ -400,6 +511,8 @@ public class SandboxAdoptionTests
                 .GetTargetRoot(ExecutionTargetRef.WindowsSandboxDefault, create: true)
                 .FullName;
 
+            Cli.CurrentTargetRoot = TargetRoot;
+
             var binary = new FileInfo(Path.Join(_root.FullName, "winapp.exe"));
             File.WriteAllText(binary.FullName, "agent");
 
@@ -411,7 +524,18 @@ public class SandboxAdoptionTests
                 new NoOpWindowController(),
                 setup: null,
                 stateStore,
-                NullTargetProgress.Instance);
+                NullTargetProgress.Instance)
+            {
+                UtcNow = () => _now,
+            };
+
+            // Agent-readiness bounds are minutes long. Advancing a fake clock inside the delay is
+            // what lets them be asserted in milliseconds.
+            Backend.Delay = (delay, _) =>
+            {
+                _now += delay;
+                return Task.CompletedTask;
+            };
         }
 
         public AdoptionSandboxCli Cli { get; }
@@ -423,6 +547,24 @@ public class SandboxAdoptionTests
 
         /// <summary>The ownership record as another winapp process would read it.</summary>
         public TargetState? ReadState() => _stateStore.Read(ExecutionTargetRef.WindowsSandboxDefault);
+
+        /// <summary>How much fake time the run consumed, for asserting which bound was hit.</summary>
+        public TimeSpan Elapsed => _now - new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+        /// <summary>Records an unconfirmed start, so the next prepare recovers rather than creates.</summary>
+        public void MarkPendingStart(string instanceId) =>
+            _stateStore.Commit(
+                ExecutionTargetRef.WindowsSandboxDefault,
+                new TargetState
+                {
+                    SchemaVersion = 0,
+                    Revision = 0,
+                    TargetKind = ExecutionTargetRef.WindowsSandboxDefault.Kind,
+                    TargetId = ExecutionTargetRef.WindowsSandboxDefault.Id,
+                    PendingInstanceId = instanceId,
+                    PendingStartedUtc = _now,
+                },
+                expectedRevision: 0);
 
         public async Task RunUntilAgentLaunchAsync(CancellationToken cancellationToken)
         {
@@ -515,7 +657,12 @@ public class SandboxAdoptionTests
         public Task ConnectAsync(string id, CancellationToken cancellationToken)
         {
             Operations.Add($"connect:{id}");
-            return Task.CompletedTask;
+
+            return FailConnect
+                ? throw ExecutionTargetException.Create(
+                    ExecutionTargetErrorCodes.NoInteractiveSession,
+                    "The Windows Sandbox client could not connect to the Sandbox.")
+                : Task.CompletedTask;
         }
 
         public Task<int> ExecuteAsync(
@@ -556,7 +703,9 @@ public class SandboxAdoptionTests
         {
             Operations.Add($"launch-agent:{command}");
 
-            if (AgentRefusesWithNoInputDesktop)
+            var connects = Operations.Count(op => op.StartsWith("connect:", StringComparison.Ordinal));
+
+            if (AgentRefusesWithNoInputDesktop && !(AgentReadyAfterReconnect && connects > 0))
             {
                 PublishNoInputDesktopHeartbeat(command);
                 return Task.CompletedTask;
@@ -565,6 +714,15 @@ public class SandboxAdoptionTests
             // Everything after this point needs a guest that does not exist in a unit test.
             throw new AgentLaunchReached();
         }
+
+        /// <summary>
+        /// When set alongside <see cref="AgentRefusesWithNoInputDesktop"/>, the agent starts working
+        /// once a client has been connected — which is what reconnecting a closed window achieves.
+        /// </summary>
+        public bool AgentReadyAfterReconnect { get; set; }
+
+        /// <summary>When set, <see cref="ConnectAsync"/> fails the way a refused client would.</summary>
+        public bool FailConnect { get; set; }
 
         /// <summary>Writes the refusal the real agent would publish into the result share.</summary>
         /// <remarks>

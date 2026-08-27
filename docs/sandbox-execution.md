@@ -376,10 +376,11 @@ winapp connects a client only when the guest does not already have an interactiv
 already had the Sandbox open, that window keeps being the one you see: connecting again would start
 a **second** client rather than reuse yours, and the extra one outlives `wsb stop`.
 
-One consequence: if you close the Sandbox window, the guest session survives, so winapp will not
-connect a replacement on your behalf. Inspection keeps working; input and recording do not, and
-winapp reports that as `sandbox_input_not_ready` rather than reporting input it never delivered.
-Reconnect with `wsb connect` to restore both.
+If you closed the Sandbox window, the guest session survives it — so winapp cannot tell from the
+session alone that the window is gone. It finds out when the guest agent reports it has no input
+desktop, and at that point it reconnects for you, **once**, placing the new window off-screen and
+without taking your foreground. If the guest still has no input desktop after that, winapp stops and
+reports `sandbox_input_not_ready` with a `wsb connect` command rather than reconnecting again.
 
 Closing that window has a specific and initially surprising effect, established by measurement on
 Windows 11 ARM64:
