@@ -83,6 +83,9 @@ internal sealed class WindowsSandboxBackend(
     /// Much shorter than the heartbeat timeout on purpose. A client that has just been attached to
     /// an already-running guest becomes input-ready in seconds, so continuing to the full deadline
     /// would turn a recoverable condition into minutes of silence before reporting the same thing.
+    /// It bounds the retry loop, not a single wait: a guest that stops publishing anything at all is
+    /// still held by <see cref="HeartbeatTimeout"/> inside one <see cref="WaitForHeartbeatAsync"/>
+    /// call.
     /// </remarks>
     internal static readonly TimeSpan ClientReconnectReadyTimeout = TimeSpan.FromSeconds(30);
 
@@ -1043,9 +1046,12 @@ internal sealed class WindowsSandboxBackend(
     /// from ever being duplicated: a guest whose client is working does not produce this report.
     /// </para>
     /// <para>
-    /// After that one reconnect the wait is deliberately short. A client that has just been attached
-    /// becomes input-ready in seconds, and continuing to the full heartbeat deadline would turn a
-    /// recoverable condition into a three-minute silence before saying the same thing.
+    /// After that one reconnect the wait between attempts is deliberately short. A client that has
+    /// just been attached becomes input-ready in seconds, and continuing to the full heartbeat
+    /// deadline would turn a recoverable condition into a three-minute silence before saying the
+    /// same thing. That bound governs the retry loop only: a guest that goes completely silent
+    /// rather than repeating its refusal is still held by
+    /// <see cref="WaitForHeartbeatAsync"/>'s own deadline, which this cannot cut short.
     /// </para>
     /// </remarks>
     private async Task<GuestAgentHeartbeat> LaunchReadyAgentAsync(
