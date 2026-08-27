@@ -551,7 +551,12 @@ extends:
           steps:
             - task: 1ES.PublishNuget@1
               displayName: 'NuGet push to nuget.org'
+              retryCountOnTaskFailure: 2
               inputs:
+                # nuget.exe rather than DotNetCoreCLI@2, which cannot use the encrypted API key
+                # from the NuGet-WinAppCLI service connection. Lost when #795 reverted the split
+                # pipeline back into this file; without it the push fails to authenticate.
+                useDotNetTask: false
                 packagesToPush: '$(Pipeline.Workspace)/nuget-packages/*.nupkg'
                 packageParentPath: '$(Pipeline.Workspace)/nuget-packages'
                 nuGetFeedType: external

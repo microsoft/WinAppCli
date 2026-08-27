@@ -259,8 +259,13 @@ function Test-RepoAccess {
         if ($result.StatusCode -eq 404) {
             Add-Result -Status 'FAIL' -Check $Label -Detail "'$Repo' was not found, or the token cannot see it. If the fork was deleted, recreate it - wingetcreate and the docs PR both depend on it."
         }
+        elseif ($result.StatusCode -eq 403) {
+            Add-Result -Status 'FAIL' -Check $Label -Detail "Access to '$Repo' was forbidden (403). The token is likely SSO-unauthorized for the org."
+        }
         else {
-            Add-Result -Status 'FAIL' -Check $Label -Detail "GET /repos/$Repo failed with status $($result.StatusCode)."
+            # Transport failure, rate limit, or a GitHub 5xx. None of those disprove push access,
+            # and reporting them as FAIL would turn a GitHub blip into a red weekly build.
+            Add-Result -Status 'WARN' -Check $Label -Detail "Could not reach '$Repo' (status $($result.StatusCode)). Inconclusive - access was not disproved."
         }
         return
     }

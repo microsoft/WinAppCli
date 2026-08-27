@@ -152,11 +152,19 @@ week is exactly when an external policy change slips in unnoticed.
 
 ### Running it on demand
 
-Queue **WinDevCLI - Release** against any non-`rel/v*` branch and you get a rehearsal — the
-publishing gates are branch-derived, so this is safe by construction. Queueing against `rel/v*` is
-a real release.
+Queue **WinDevCLI - Release** against `main` for a full rehearsal. Queueing against `rel/v*` is a
+real release.
 
-The two scripts also run locally:
+Any other branch gets **only** the build and the asset preflight — `Release_WinGet`,
+`Release_MSLearn` and `Verify_Release_Credentials` are all restricted to `main`, and no step is
+handed `GITHUB_TOKEN_2`. That is deliberate, but it means a green run on a feature branch is *not*
+evidence the release path works. Use `main` for that.
+
+The branch conditions are defense in depth, not a security boundary — the branch being run could
+edit them. The authoritative control is the Branch control check on the service connections
+described above.
+
+The script also runs locally:
 
 ```powershell
 $env:GH_TOKEN = 'ghp_...'
