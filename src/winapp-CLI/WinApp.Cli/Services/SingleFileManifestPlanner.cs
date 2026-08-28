@@ -91,10 +91,7 @@ internal static partial class SingleFileManifestPlanner
     {
         var stem = Path.GetFileNameWithoutExtension(singleFile.Name);
 
-        // Identity/@Name must match [-.A-Za-z0-9]+, so a stem like "my counter" needs sanitizing. A declared
-        // WinAppPackageName is sanitized identically, so a value that can't be an Identity name (rather than
-        // silently producing an unpackable manifest) is corrected the same way `manifest generate` does.
-        var packageName = ManifestService.CleanPackageName(Read(properties, PackageNameProperty) ?? stem);
+        var packageName = InferPackageName(singleFile, properties);
 
         // The display name is free text, so the RAW stem is the better default than the sanitized identity.
         var displayName = Read(properties, DisplayNameProperty) ?? stem;
@@ -268,7 +265,12 @@ internal static partial class SingleFileManifestPlanner
         var authored = FindAuthoredManifest(singleFile, properties);
         if (authored is null)
         {
-            return Plan(singleFile, properties).PackageName;
+            // Deliberately InferPackageName rather than Plan: Plan also validates the version, publisher
+            // and description, none of which affect which package is registered. Going through it would
+            // mean an unrelated invalid edit — say adding '#:property WinAppVersion=70000.0' — made an
+            // ALREADY-REGISTERED app impossible to unregister, stranding the registration precisely when
+            // the user is trying to clean it up.
+            return InferPackageName(singleFile, properties);
         }
 
         string? identityName;
@@ -290,6 +292,25 @@ internal static partial class SingleFileManifestPlanner
 
         return identityName;
     }
+
+    /// <summary>
+    /// Infers <c>Identity/@Name</c> from <c>WinAppPackageName</c>, else the file stem.
+    /// </summary>
+    /// <remarks>
+    /// Split out from <see cref="Plan"/> so the identity can be resolved on its own. Deciding WHICH
+    /// package an app registers under must not depend on metadata that only affects what the manifest
+    /// CONTAINS — otherwise an invalid version or publisher would make an already-registered app
+    /// impossible to unregister.
+    /// <para>
+    /// <c>Identity/@Name</c> must match <c>[-.A-Za-z0-9]+</c>, so a stem like <c>my counter</c> needs
+    /// sanitizing. A declared <c>WinAppPackageName</c> is sanitized identically — a value that cannot be
+    /// an Identity name is corrected exactly as <c>manifest generate</c> does, rather than silently
+    /// producing an unpackable manifest.
+    /// </para>
+    /// </remarks>
+    private static string InferPackageName(FileInfo singleFile, IReadOnlyDictionary<string, string> properties)
+        => ManifestService.CleanPackageName(
+            Read(properties, PackageNameProperty) ?? Path.GetFileNameWithoutExtension(singleFile.Name));
 
     /// <summary>One to four dot-separated numeric components, and nothing else.</summary>
     [GeneratedRegex(@"^\d+(\.\d+){0,3}$")]

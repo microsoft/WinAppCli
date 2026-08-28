@@ -182,6 +182,10 @@ internal class UnregisterCommand : Command, IShortDescription
             var unregistered = new List<string>();
             var skipped = new List<string>();
 
+            // Tracked apart from `skipped`: a safety skip is the command working as intended, but a
+            // removal Windows refused is a failure the caller must see in the exit code.
+            var removalFailed = false;
+
             foreach (var name in namesToCheck)
             {
                 var packages = packageRegistrationService.FindDevPackages(name);
@@ -226,7 +230,9 @@ internal class UnregisterCommand : Command, IShortDescription
                     {
                         // Windows reports a refused removal as error text rather than an exception, so
                         // reporting it as unregistered would tell the user a still-registered package is gone.
+                        logger.LogWarning("{UISymbol} {FullName}: Windows refused to remove this package.", UiSymbols.Warning, pkg.FullName);
                         skipped.Add(pkg.FullName);
+                        removalFailed = true;
                         continue;
                     }
 
@@ -247,7 +253,11 @@ internal class UnregisterCommand : Command, IShortDescription
                 logger.LogInformation("{UISymbol} No dev-registered package found for '{PackageName}'.", UiSymbols.Note, packageName);
             }
 
-            return 0;
+            // A package the user explicitly named and that Windows then refused to remove is a failure,
+            // even though other packages may have been removed: automation must not read success and
+            // carry on as though the registration were gone. A safety skip is NOT a failure — that is the
+            // guard doing its job, and it already tells the user to pass --force.
+            return removalFailed ? 1 : 0;
 
             int FailWith(string message, bool json)
             {
@@ -338,8 +348,16 @@ internal class UnregisterCommand : Command, IShortDescription
                 {
                     // By full name, not identity name: prune targets exactly the registrations it listed,
                     // so a same-named package that IS still installed from a live location is untouched.
-                    // The files are already gone, so there is no app data worth preserving.
-                    var removed = await packageRegistrationService.UnregisterByFullNameAsync(orphan.FullName, preserveAppData: false, cancellationToken);
+                    //
+                    // Application data is PRESERVED, unlike the explicit single-package path above.
+                    // LocalState lives in %LOCALAPPDATA%\Packages\<family>, not in the install location,
+                    // so "the install files are gone" is no evidence at all that the data is unwanted —
+                    // and prune is a bulk, often unattended (--force) sweep over packages the user never
+                    // named individually. For a file-based app the identity is stable across rebuilds, so
+                    // re-running `winapp run counter.cs` reuses this family name and the app finds its
+                    // settings again. Deleting a package's own explicitly-named registration is a
+                    // deliberate act; deleting data for a package caught in a sweep is not.
+                    var removed = await packageRegistrationService.UnregisterByFullNameAsync(orphan.FullName, preserveAppData: true, cancellationToken);
                     if (!removed)
                     {
                         // Windows reports a refused removal as error text rather than an exception, so

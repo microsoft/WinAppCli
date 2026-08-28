@@ -514,6 +514,46 @@ public class UnregisterCommandTests : BaseCommandTests
         Assert.IsTrue(root.TryGetProperty("Skipped", out var s) && s.ValueKind != System.Text.Json.JsonValueKind.Null);
     }
 
+    [TestMethod]
+    public async Task UnregisterCommand_WindowsRefusesRemoval_ReturnsNonZero()
+    {
+        // A package the user explicitly named, that Windows then refused to remove, must not report
+        // success — automation would carry on believing the registration is gone.
+        var manifest = await CreateTestManifestAsync();
+        var command = GetRequiredService<UnregisterCommand>();
+
+        _fakePackageRegistrationService.FakeDevPackages =
+        [
+            new DevPackageInfo("TestPackage_1.0.0.0_x64__abc123", "TestPackage", "1.0.0.0",
+                _tempDirectory.FullName, IsDevelopmentMode: true)
+        ];
+        _fakePackageRegistrationService.FakeUnregisterByFullNameResult = false;
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--manifest", manifest.FullName]);
+
+        Assert.AreEqual(1, exitCode);
+    }
+
+    [TestMethod]
+    public async Task UnregisterCommand_SafetySkip_IsNotAFailure()
+    {
+        // The out-of-tree guard doing its job is the command working as intended, not an error — it
+        // already tells the user to pass --force.
+        var manifest = await CreateTestManifestAsync();
+        var command = GetRequiredService<UnregisterCommand>();
+
+        _fakePackageRegistrationService.FakeDevPackages =
+        [
+            new DevPackageInfo("TestPackage_1.0.0.0_x64__abc123", "TestPackage", "1.0.0.0",
+                @"C:\OtherProject\bin\Debug\AppX", IsDevelopmentMode: true)
+        ];
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--manifest", manifest.FullName]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterByFullNameCalls.Count);
+    }
+
     #endregion
 
     #region Prune
@@ -638,6 +678,45 @@ public class UnregisterCommandTests : BaseCommandTests
 
         Assert.AreEqual(1, exitCode);
         Assert.AreEqual(0, _fakePackageRegistrationService.FindOrphanedDevPackagesCallCount);
+    }
+
+    [TestMethod]
+    public async Task UnregisterCommand_Prune_PreservesApplicationData()
+    {
+        // LocalState lives in %LOCALAPPDATA%\Packages, not the install location, so missing install
+        // files are no evidence the data is unwanted — and for a file-based app the identity is stable,
+        // so re-running restores the app and finds its settings again.
+        var command = GetRequiredService<UnregisterCommand>();
+        _fakePackageRegistrationService.FakeOrphanedDevPackages =
+        [
+            new DevPackageInfo("dead.one_1.0.0.0_x64__abc", "dead.one", "1.0.0.0", null, IsDevelopmentMode: true)
+        ];
+
+        await ParseAndInvokeWithCaptureAsync(command, ["--prune", "--force"]);
+
+        var call = _fakePackageRegistrationService.UnregisterByFullNameCalls.Single();
+        Assert.IsTrue(call.PreserveAppData, "A bulk sweep must not delete data for packages the user never named");
+    }
+
+    [TestMethod]
+    public async Task UnregisterCommand_ExplicitRemoval_StillDeletesApplicationData()
+    {
+        // The contrast with prune: naming one package explicitly IS a deliberate act, so its data goes.
+        var manifest = await CreateTestManifestAsync();
+        var command = GetRequiredService<UnregisterCommand>();
+        _fakePackageRegistrationService.FakeDevPackages =
+        [
+            new DevPackageInfo("TestPackage_1.0.0.0_x64__abc123", "TestPackage", "1.0.0.0",
+                _tempDirectory.FullName, IsDevelopmentMode: true)
+        ];
+
+        await ParseAndInvokeWithCaptureAsync(command, ["--manifest", manifest.FullName]);
+
+        // The fake returns the same list for both the name and the `.debug` lookup, so assert on the
+        // flag every call carried rather than on a single call.
+        var calls = _fakePackageRegistrationService.UnregisterByFullNameCalls;
+        Assert.IsGreaterThan(0, calls.Count);
+        Assert.IsTrue(calls.All(c => !c.PreserveAppData));
     }
 
     #endregion

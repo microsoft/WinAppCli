@@ -374,6 +374,28 @@ public class SingleFileManifestPlannerTests
         }
     }
 
+    [TestMethod]
+    public void ResolvePackageName_InvalidVersion_DoesNotBlockIdentityResolution()
+    {
+        // An app registered earlier, then edited to add a bad version, must still be unregisterable:
+        // the version does not affect WHICH package is registered, only what a generated manifest would
+        // contain. Plan still rejects it — this is scoped to identity resolution.
+        var directory = NewAppDirectory();
+        try
+        {
+            var singleFile = new FileInfo(Path.Join(directory.FullName, "counter.cs"));
+            var props = Props((SingleFileManifestPlanner.VersionProperty, "70000.0"));
+
+            Assert.AreEqual("counter", SingleFileManifestPlanner.ResolvePackageName(singleFile, props));
+            Assert.ThrowsExactly<ProjectRunException>(() => SingleFileManifestPlanner.Plan(singleFile, props),
+                "Generating a manifest with that version must still fail");
+        }
+        finally
+        {
+            directory.Delete(true);
+        }
+    }
+
     #endregion
 }
 

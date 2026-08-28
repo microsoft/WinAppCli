@@ -1184,11 +1184,13 @@ internal partial class MsixService
             // Using the per-FullName API ensures one iteration cannot wipe packages the
             // first pass approved or rejected separately.
             var anyRemoved = false;
+            var anyFailed = false;
             foreach (var pkg in installed)
             {
+                bool removed;
                 if (pkg.IsDevelopmentMode)
                 {
-                    await packageRegistrationService.UnregisterByFullNameAsync(pkg.FullName, preserveAppData, cancellationToken);
+                    removed = await packageRegistrationService.UnregisterByFullNameAsync(pkg.FullName, preserveAppData, cancellationToken);
                 }
                 else
                 {
@@ -1197,9 +1199,26 @@ internal partial class MsixService
                     taskContext.AddDebugMessage(
                         $"{UiSymbols.Warning} Existing non-dev-mode package {pkg.FullName} is rooted in the current " +
                         $"project tree ({pkg.InstallLocation}); removing it (application data will be deleted).");
-                    await packageRegistrationService.UnregisterByFullNameAsync(pkg.FullName, preserveAppData: false, cancellationToken);
+                    removed = await packageRegistrationService.UnregisterByFullNameAsync(pkg.FullName, preserveAppData: false, cancellationToken);
                 }
-                anyRemoved = true;
+
+                // Windows reports a refused removal as error text rather than an exception. Reporting
+                // success here would let `run --clean` continue believing the old registration and its
+                // application data were cleared when they are still there.
+                if (removed)
+                {
+                    anyRemoved = true;
+                }
+                else
+                {
+                    anyFailed = true;
+                    taskContext.AddDebugMessage($"{UiSymbols.Warning} Windows refused to remove {pkg.FullName}.");
+                }
+            }
+
+            if (anyFailed)
+            {
+                return false;
             }
 
             if (anyRemoved)
