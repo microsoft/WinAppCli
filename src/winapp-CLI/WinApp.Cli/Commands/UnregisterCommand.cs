@@ -23,6 +23,7 @@ internal class UnregisterCommand : Command, IShortDescription
     public static Option<bool> ForceOption { get; }
     public static Option<bool> PruneOption { get; }
     public static Option<string[]> PropertyOption { get; }
+    public static Option<DirectoryInfo> OutputAppXDirectoryOption { get; }
 
     static UnregisterCommand()
     {
@@ -55,6 +56,11 @@ internal class UnregisterCommand : Command, IShortDescription
             Arity = ArgumentArity.OneOrMore,
             AllowMultipleArgumentsPerToken = false
         };
+
+        OutputAppXDirectoryOption = new Option<DirectoryInfo>("--output-appx-directory")
+        {
+            Description = "The AppX layout directory the package was registered from. Only needed when the run used --output-appx-directory, since nothing on the package records which run option produced its layout; without it the registration looks like it came from a different tree and is skipped."
+        };
     }
 
     public UnregisterCommand() : base("unregister", "Unregisters a sideloaded development package. Only removes packages registered in development mode (e.g., via 'winapp run' or 'create-debug-identity').")
@@ -64,6 +70,7 @@ internal class UnregisterCommand : Command, IShortDescription
         Options.Add(ForceOption);
         Options.Add(PruneOption);
         Options.Add(PropertyOption);
+        Options.Add(OutputAppXDirectoryOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -81,6 +88,7 @@ internal class UnregisterCommand : Command, IShortDescription
             var force = parseResult.GetValue(ForceOption);
             var prune = parseResult.GetValue(PruneOption);
             var properties = parseResult.GetValue(PropertyOption) ?? [];
+            var outputAppXDirectory = parseResult.GetValue(OutputAppXDirectoryOption);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
             if (prune)
@@ -92,10 +100,10 @@ internal class UnregisterCommand : Command, IShortDescription
                         isJson);
                 }
 
-                if (properties.Length > 0)
+                if (properties.Length > 0 || outputAppXDirectory != null)
                 {
                     return FailWith(
-                        "--property resolves a .cs file-based app's identity, so it cannot be combined with --prune, which sweeps by registration state rather than by identity.",
+                        "--prune sweeps by registration state rather than by identity or layout, so it cannot be combined with --property or --output-appx-directory.",
                         isJson);
                 }
 
@@ -126,7 +134,12 @@ internal class UnregisterCommand : Command, IShortDescription
             }
 
             string packageName;
-            string trustedRoot;
+
+            // A registration legitimately belongs to more than one directory: `run` copies an explicit
+            // --manifest into the input's own AppX layout, and --output-appx-directory puts that layout
+            // somewhere else entirely. Collecting every directory the caller has named — rather than
+            // picking one — is what keeps the guard strict without rejecting valid registrations.
+            var trustedRoots = new List<string>();
 
             if (input != null)
             {
@@ -168,11 +181,13 @@ internal class UnregisterCommand : Command, IShortDescription
                 packageName = resolved.PackageName;
 
                 // A file-based app's layout lives in the SDK's own %TEMP%\dotnet\runfile\<stem>-<hash>
-                // directory, never under the user's working directory, so the guard is scoped to that
-                // per-file build root instead. That is strictly more precise than a directory-tree
-                // heuristic: it confirms the registration came from THIS .cs rather than a same-named
-                // app elsewhere — the collision `winapp run` warns about.
-                trustedRoot = resolved.BuildRootDirectory ?? string.Empty;
+                // directory, never under the user's working directory. That is strictly more precise than
+                // a directory-tree heuristic: it confirms the registration came from THIS .cs rather than
+                // a same-named app elsewhere — the collision `winapp run` warns about.
+                if (!string.IsNullOrEmpty(resolved.BuildRootDirectory))
+                {
+                    trustedRoots.Add(resolved.BuildRootDirectory);
+                }
             }
             else
             {
@@ -198,12 +213,25 @@ internal class UnregisterCommand : Command, IShortDescription
                 var identity = MsixService.ParseAppxManifestAsync(manifestContent);
                 packageName = identity.PackageName;
 
-                // Scope the "different project tree" guard to the resolved manifest's directory, not the
-                // current directory. When the manifest is auto-detected these are the same folder, so this
-                // is unchanged for the common case; they diverge for an explicit --manifest, where the tree
-                // the caller means is the one their manifest describes.
-                trustedRoot = Path.GetFullPath(
-                    resolvedManifest.DirectoryName ?? currentDirectoryProvider.GetCurrentDirectory());
+                // Trust BOTH the manifest's own directory and the current directory. They are the same
+                // folder for an auto-detected manifest, and diverge for an explicit --manifest — where
+                // either can legitimately hold the registered layout, because `run` copies an explicit
+                // manifest into the INPUT's AppX directory rather than registering from the manifest's
+                // own folder. Trusting only the manifest directory would refuse to clean up
+                // `run . --manifest C:\shared\custom.appxmanifest`, whose layout is under the project.
+                if (resolvedManifest.DirectoryName is { Length: > 0 } manifestDirectory)
+                {
+                    trustedRoots.Add(manifestDirectory);
+                }
+
+                trustedRoots.Add(currentDirectoryProvider.GetCurrentDirectory());
+            }
+
+            // --output-appx-directory relocates the registered layout, so the caller has to be able to
+            // name it here too; nothing on the package records which run option produced it.
+            if (outputAppXDirectory != null)
+            {
+                trustedRoots.Add(outputAppXDirectory.FullName);
             }
 
             // Search for both the exact name and the .debug variant
@@ -246,7 +274,7 @@ internal class UnregisterCommand : Command, IShortDescription
                     // are gone, and it preserves that data.
                     if (!force)
                     {
-                        if (string.IsNullOrEmpty(pkg.InstallLocation) || trustedRoot.Length == 0)
+                        if (string.IsNullOrEmpty(pkg.InstallLocation) || trustedRoots.Count == 0)
                         {
                             if (!isJson)
                             {
@@ -257,11 +285,11 @@ internal class UnregisterCommand : Command, IShortDescription
                             continue;
                         }
 
-                        if (!MsixService.IsPathInsideDirectory(pkg.InstallLocation, trustedRoot))
+                        if (!trustedRoots.Any(root => MsixService.IsPathInsideDirectory(pkg.InstallLocation, root)))
                         {
                             if (!isJson)
                             {
-                                logger.LogWarning("{UISymbol} {FullName}: registered from a different project tree ({Location}). Use --force to override.",
+                                logger.LogWarning("{UISymbol} {FullName}: registered from a different project tree ({Location}). Use --force to override, or --output-appx-directory to name the layout it was registered from.",
                                     UiSymbols.Warning, pkg.FullName, pkg.InstallLocation);
                             }
                             skipped.Add(pkg.FullName);

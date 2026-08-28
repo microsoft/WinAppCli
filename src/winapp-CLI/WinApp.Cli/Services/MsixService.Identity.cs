@@ -1218,7 +1218,16 @@ internal partial class MsixService
 
             if (anyFailed)
             {
-                return false;
+                // THROWN, not returned false. Every caller awaits this method to clear the way before
+                // registering, and `false` is also the ordinary "nothing was registered" answer — so
+                // returning it here would let `run --clean` carry on and re-register over a package
+                // Windows refused to remove, silently keeping the application data --clean promises to
+                // delete. InvalidOperationException is already the established signal for an actionable
+                // conflict on this path and propagates through the catch below.
+                throw new InvalidOperationException(
+                    $"Windows refused to remove the existing registration of '{packageName}'. " +
+                    "Close the app if it is running, then retry; or remove it manually with " +
+                    $"'Get-AppxPackage {packageName} | Remove-AppxPackage'.");
             }
 
             if (anyRemoved)

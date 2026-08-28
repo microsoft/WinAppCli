@@ -1462,6 +1462,8 @@ export interface UnregisterOptions extends CommonOptions {
   json?: boolean;
   /** Path to the Package.appxmanifest (default: auto-detect from current directory) */
   manifest?: string;
+  /** The AppX layout directory the package was registered from. Only needed when the run used --output-appx-directory, since nothing on the package records which run option produced its layout; without it the registration looks like it came from a different tree and is skipped. */
+  outputAppxDirectory?: string;
   /** MSBuild property (Name=Value) used when resolving a .cs file-based app's identity. Repeatable. Pass the same identity-affecting properties the run used (e.g. -p WinAppPackageName=...), since a command-line property overrides the file's own #:property directives. Only applies to a .cs input. */
   property?: string | string[];
   /** Remove every development-mode registration whose files are gone. These can never launch — Windows keeps the identity and its Start menu entry, but activation silently does nothing. Lists what it found and asks before removing; pass --force to skip the prompt. Cannot be combined with an input or --manifest. */
@@ -1477,6 +1479,7 @@ export async function unregister(options: UnregisterOptions = {}): Promise<Winap
   if (options.force) args.push('--force');
   if (options.json) args.push('--json');
   if (options.manifest) args.push('--manifest', options.manifest);
+  if (options.outputAppxDirectory) args.push('--output-appx-directory', options.outputAppxDirectory);
   if (options.property) {
     const propertyArr = Array.isArray(options.property) ? options.property : [options.property];
     for (const v of propertyArr) args.push('--property', v);

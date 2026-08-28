@@ -933,7 +933,8 @@ winapp unregister counter.cs -p WinAppPackageName=com.contoso.alt
 
 Once the SDK's temp output has been cleaned, `winapp unregister counter.cs` can no longer confirm the
 registration came from that file and will skip it — use `winapp unregister --prune` to clear
-registrations whose files are gone, or `--force` to remove a specific one anyway.
+registrations whose files are gone, or `--force` to remove a specific one anyway. If the run used
+`--output-appx-directory`, pass the same directory to `unregister` so it can recognize the layout.
 
 **Single-file examples:**
 
@@ -1039,8 +1040,9 @@ winapp unregister [input] [options]
 
 - `--manifest <path>` - Path to Package.appxmanifest (default: auto-detect from current directory)
 - `--force` - Skip the ownership check and unregister even if the package was registered from a different project tree, or if its install location cannot be resolved. With `--prune`, also skips the confirmation prompt.
-- `--prune` - Remove every development-mode registration whose files are gone. Cannot be combined with an input or `--manifest`.
+- `--prune` - Remove every development-mode registration whose files are gone. Cannot be combined with an input, `--manifest`, `--property`, or `--output-appx-directory`.
 - `-p, --property <Name=Value>` - MSBuild property used when resolving a `.cs` file-based app's identity. Repeatable. Pass the same identity-affecting properties the run used (e.g. `-p WinAppPackageName=...`), since a command-line property overrides the file's own `#:property` directives. Only applies to a `.cs` input.
+- `--output-appx-directory <path>` - The AppX layout directory the package was registered from. Only needed when the run used `--output-appx-directory`, since nothing on the package records which run option produced its layout.
 - `--json` - Format output as JSON
 
 **What it does:**
@@ -1048,7 +1050,7 @@ winapp unregister [input] [options]
 - Determines the package name — from the `.cs` file's resolved identity, or by reading the manifest
 - Searches for both `{name}` and `{name}.debug` packages (the debug variant is created by `create-debug-identity`)
 - Verifies each package was registered in development mode (`IsDevelopmentMode == true`)
-- Verifies the package belongs to the app you named (unless `--force`) — its install location must sit under the `.cs` file's own build output, or the manifest's directory. A package whose install location cannot be resolved (its files were deleted) is **skipped**, because identity alone is not proof of ownership: two `counter.cs` files in different folders both register `counter`. Use `--prune` to clear registrations whose files are gone.
+- Verifies the package belongs to the app you named (unless `--force`) — its install location must sit under a directory you identified: the `.cs` file's own build output, the manifest's directory, the current directory, or an explicit `--output-appx-directory`. A package whose install location cannot be resolved (its files were deleted) is **skipped**, because identity alone is not proof of ownership: two `counter.cs` files in different folders both register `counter`. Use `--prune` to clear registrations whose files are gone.
 - Unregisters matching packages
 
 **Cleaning up dead registrations (`--prune`):**

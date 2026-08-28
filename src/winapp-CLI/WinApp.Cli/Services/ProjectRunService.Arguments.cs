@@ -244,13 +244,13 @@ internal sealed partial class ProjectRunService
             tokens.Add("-tl:off");
         }
 
-        // Reserve ONLY Configuration, which winapp owns via -c. Unlike project mode, single-file mode
-        // injects neither a RuntimeIdentifier nor a TargetFramework, and both passes receive this same
-        // token set — so forwarding those two keeps the passes in agreement AND honors --property's
-        // promise. They are in fact the only way to express them here, since --arch/--runtime/--framework
-        // are rejected for a .cs. Reusing project mode's wider filter would drop them from both passes and
-        // silently ignore what the user asked for.
-        foreach (var property in SingleFileForwardableProperties(options.Properties))
+        // Reserve Configuration, which winapp owns via -c, plus RuntimeIdentifier whenever a RID is being
+        // injected — MSBuild is last-wins and these -p tokens are emitted AFTER -r, so forwarding a
+        // conflicting RuntimeIdentifier would silently override the architecture winapp resolved.
+        // TargetFramework is deliberately NOT reserved: single-file mode rejects --framework, so -p is the
+        // only way to express it, and reusing project mode's wider filter would drop it from both passes
+        // and silently ignore what the user asked for.
+        foreach (var property in SingleFileForwardableProperties(options.Properties, options.InjectedRuntimeIdentifier is not null))
         {
             tokens.Add($"-p:{property}");
         }
@@ -282,7 +282,8 @@ internal sealed partial class ProjectRunService
 
         AppendSingleFileRuntimeIdentifier(tokens, options);
 
-        foreach (var property in SingleFileForwardableProperties(options.Properties))
+        // Same reservation as the build pass, so both passes agree on the RID.
+        foreach (var property in SingleFileForwardableProperties(options.Properties, options.InjectedRuntimeIdentifier is not null))
         {
             tokens.Add($"-p:{property}");
         }
@@ -310,6 +311,8 @@ internal sealed partial class ProjectRunService
             options.Configuration,
         };
 
+        // No ridInjected filter here on purpose: the probe omits -r entirely, so a user
+        // -p:RuntimeIdentifier is exactly what it needs to see to answer "does the app declare one?".
         foreach (var property in SingleFileForwardableProperties(options.Properties))
         {
             tokens.Add($"-p:{property}");
@@ -343,10 +346,25 @@ internal sealed partial class ProjectRunService
     /// <c>TargetFramework</c> and <c>RuntimeIdentifier</c>, which project mode reserves for its dedicated
     /// switches — is the user's to set, and passing it identically to both passes keeps them in agreement.
     /// </summary>
-    private static IEnumerable<string> SingleFileForwardableProperties(IReadOnlyList<string> properties) =>
+    /// <summary>
+    /// The user <c>-p</c> properties a single-file pass forwards.
+    /// </summary>
+    /// <remarks>
+    /// <c>Configuration</c> is always filtered because <c>-c</c> already sets it.
+    /// <para>
+    /// <c>RuntimeIdentifier</c> is filtered ONLY when a RID is being injected. MSBuild is last-wins and
+    /// the forwarded <c>-p</c> is emitted after <c>-r</c>, so leaving it in would let
+    /// <c>--arch x64 -p RuntimeIdentifier=win-arm64</c> build arm64 while winapp provisions an x64
+    /// Windows App Runtime — a silently mismatched app. This mirrors project mode's dedicated-flag
+    /// precedence. When NO RID is injected the property is forwarded untouched, because that is exactly
+    /// the case where the user owns the choice (see <c>ResolveSingleFileRuntimeIdentifierAsync</c>).
+    /// </para>
+    /// </remarks>
+    private static IEnumerable<string> SingleFileForwardableProperties(IReadOnlyList<string> properties, bool ridInjected = false) =>
         properties.Where(p => !p.Split(';')
             .Select(segment => segment.Split('=', 2)[0].Trim())
-            .Any(name => name.Equals("Configuration", StringComparison.OrdinalIgnoreCase)));
+            .Any(name => name.Equals("Configuration", StringComparison.OrdinalIgnoreCase)
+                || (ridInjected && name.Equals("RuntimeIdentifier", StringComparison.OrdinalIgnoreCase))));
 
     /// <summary>
     /// Appends the <c>Solution*</c> MSBuild properties a solution build normally sets — most importantly

@@ -442,19 +442,21 @@ public class UnregisterCommandTests : BaseCommandTests
     [TestMethod]
     public async Task UnregisterCommand_SiblingDirectorySharingAPrefix_IsSkipped()
     {
-        // 'C:\...\counter-old' string-starts-with 'C:\...\counter' but is a different tree. A plain
-        // prefix check would remove that package and delete its app data.
-        var appDir = _tempDirectory.CreateSubdirectory("counter");
-        var manifest = await CreateTestManifestAsync(appDir.FullName);
+        // 'C:\apps\counter-old' string-starts-with 'C:\apps\counter' but is a different tree. A plain
+        // prefix check would remove that package and delete its app data. Both paths sit outside the
+        // working directory so only the resolved build root is under test.
+        var singleFile = CreateSingleFile();
         var command = GetRequiredService<UnregisterCommand>();
 
+        _fakeProjectRunService.SingleFileIdentity =
+            new SingleFileIdentityResolution("counter", ProjectPackaging.Packaged, @"C:\apps\counter");
         _fakePackageRegistrationService.FakeDevPackages =
         [
-            new DevPackageInfo("TestPackage_1.0.0.0_x64__abc123", "TestPackage", "1.0.0.0",
-                Path.Join(_tempDirectory.FullName, "counter-old", "AppX"), IsDevelopmentMode: true)
+            new DevPackageInfo("counter_1.0.0.0_x64__abc", "counter", "1.0.0.0",
+                @"C:\apps\counter-old\AppX", IsDevelopmentMode: true)
         ];
 
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--manifest", manifest.FullName]);
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName]);
 
         Assert.AreEqual(0, exitCode);
         Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterByFullNameCalls.Count,
@@ -466,17 +468,17 @@ public class UnregisterCommandTests : BaseCommandTests
     {
         // The per-package checks are meaningless if removal is name-wide: a same-named package this loop
         // deliberately skipped would be deleted anyway, along with its application data.
-        var appDir = _tempDirectory.CreateSubdirectory("mine");
-        var manifest = await CreateTestManifestAsync(appDir.FullName);
+        var manifest = await CreateTestManifestAsync();
         var command = GetRequiredService<UnregisterCommand>();
 
         _fakePackageRegistrationService.FakeDevPackages =
         [
             new DevPackageInfo("TestPackage_1.0.0.0_x64__theirs", "TestPackage", "1.0.0.0",
-                Path.Join(_tempDirectory.FullName, "someone-else", "AppX"), IsDevelopmentMode: true),
+                @"C:\OtherProject\bin\Debug\AppX", IsDevelopmentMode: true),
             new DevPackageInfo("TestPackage_1.0.0.0_x64__mine", "TestPackage", "1.0.0.0",
-                Path.Join(appDir.FullName, "AppX"), IsDevelopmentMode: true)
+                Path.Join(_tempDirectory.FullName, "bin", "Debug", "AppX"), IsDevelopmentMode: true)
         ];
+        _fakePackageRegistrationService.FakeUnregisterResult = true;
 
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--manifest", manifest.FullName]);
 
@@ -659,6 +661,78 @@ public class UnregisterCommandTests : BaseCommandTests
 
         Assert.AreEqual(1, exitCode);
         Assert.AreEqual(0, _fakeProjectRunService.ResolveSingleFileIdentityCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task UnregisterCommand_ExplicitManifest_TrustsTheCurrentDirectoryToo()
+    {
+        // `run . --manifest C:\shared\custom.appxmanifest` copies that manifest into the INPUT's AppX
+        // layout, so the registration lives under the project — not under the manifest's own folder.
+        // Trusting only the manifest directory would refuse to clean up its own registrations.
+        var sharedDir = _tempDirectory.CreateSubdirectory("shared");
+        var manifest = await CreateTestManifestAsync(sharedDir.FullName);
+        var command = GetRequiredService<UnregisterCommand>();
+
+        _fakePackageRegistrationService.FakeDevPackages =
+        [
+            // _tempDirectory is the working directory for these tests.
+            new DevPackageInfo("TestPackage_1.0.0.0_x64__abc123", "TestPackage", "1.0.0.0",
+                Path.Join(_tempDirectory.FullName, "bin", "Debug", "AppX"), IsDevelopmentMode: true)
+        ];
+        _fakePackageRegistrationService.FakeUnregisterResult = true;
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--manifest", manifest.FullName]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.IsTrue(_fakePackageRegistrationService.UnregisterByFullNameCalls.Any(c => c.PackageFullName == "TestPackage_1.0.0.0_x64__abc123"));
+    }
+
+    [TestMethod]
+    public async Task UnregisterCommand_OutputAppXDirectory_IsAcceptedAsAnOwnershipRoot()
+    {
+        // `run --output-appx-directory X` relocates the layout, and nothing on the package records which
+        // run option produced it — so the caller has to be able to name it here.
+        var layout = _tempDirectory.CreateSubdirectory("layouts").CreateSubdirectory("counter");
+        var singleFile = CreateSingleFile();
+        var command = GetRequiredService<UnregisterCommand>();
+
+        _fakeProjectRunService.SingleFileIdentity =
+            new SingleFileIdentityResolution("counter", ProjectPackaging.Packaged, @"C:\Temp\runfile\counter-abc");
+        _fakePackageRegistrationService.FakeDevPackages =
+        [
+            new DevPackageInfo("counter_1.0.0.0_x64__abc", "counter", "1.0.0.0",
+                layout.FullName, IsDevelopmentMode: true)
+        ];
+        _fakePackageRegistrationService.FakeUnregisterResult = true;
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [singleFile.FullName, "--output-appx-directory", layout.FullName]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.IsTrue(_fakePackageRegistrationService.UnregisterByFullNameCalls.Any(c => c.PackageFullName == "counter_1.0.0.0_x64__abc"));
+    }
+
+    [TestMethod]
+    public async Task UnregisterCommand_OutputAppXDirectory_StillRejectsAnUnrelatedTree()
+    {
+        // Naming a layout widens trust to that directory only — it is not a back-door --force.
+        var layout = _tempDirectory.CreateSubdirectory("named-layout");
+        var singleFile = CreateSingleFile();
+        var command = GetRequiredService<UnregisterCommand>();
+
+        _fakeProjectRunService.SingleFileIdentity =
+            new SingleFileIdentityResolution("counter", ProjectPackaging.Packaged, @"C:\Temp\runfile\counter-abc");
+        _fakePackageRegistrationService.FakeDevPackages =
+        [
+            new DevPackageInfo("counter_1.0.0.0_x64__abc", "counter", "1.0.0.0",
+                @"C:\SomewhereElse\AppX", IsDevelopmentMode: true)
+        ];
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [singleFile.FullName, "--output-appx-directory", layout.FullName]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterByFullNameCalls.Count);
     }
 
     #endregion

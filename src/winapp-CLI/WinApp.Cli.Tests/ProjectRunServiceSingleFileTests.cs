@@ -128,6 +128,63 @@ public class ProjectRunServiceSingleFileTests : IDisposable
         };
 
     [TestMethod]
+    public void BuildPassArguments_InjectedRid_DropsAConflictingRuntimeIdentifierProperty()
+    {
+        // MSBuild is last-wins and -p is emitted after -r, so forwarding a conflicting
+        // -p:RuntimeIdentifier would let `--arch x64 -p RuntimeIdentifier=win-arm64` build arm64 while
+        // winapp provisions an x64 Windows App Runtime.
+        var singleFile = WriteSingleFile();
+
+        var args = ProjectRunService.BuildSingleFileBuildPassArguments(
+            singleFile, Options(injectedRid: "win-x64", properties: "RuntimeIdentifier=win-arm64"), "minimal");
+
+        StringAssert.Contains(args, "-r win-x64");
+        Assert.IsFalse(args.Contains("win-arm64", StringComparison.OrdinalIgnoreCase),
+            "A conflicting -p:RuntimeIdentifier must not survive alongside the injected RID");
+    }
+
+    [TestMethod]
+    public void EvaluateArguments_InjectedRid_DropsAConflictingRuntimeIdentifierProperty()
+    {
+        // Both passes must agree, or the evaluate reads a different output directory than the build wrote.
+        var singleFile = WriteSingleFile();
+
+        var args = ProjectRunService.BuildSingleFileEvaluateArguments(
+            singleFile, Options(injectedRid: "win-x64", properties: "RuntimeIdentifier=win-arm64"));
+
+        StringAssert.Contains(args, "-r win-x64");
+        Assert.IsFalse(args.Contains("win-arm64", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [TestMethod]
+    public void BuildPassArguments_NoInjectedRid_KeepsTheUsersRuntimeIdentifier()
+    {
+        // No RID injected means the app declared its own (or the user did), so the property is theirs to
+        // own and must flow through untouched.
+        var singleFile = WriteSingleFile();
+
+        var args = ProjectRunService.BuildSingleFileBuildPassArguments(
+            singleFile, Options(properties: "RuntimeIdentifier=win-arm64"), "minimal");
+
+        StringAssert.Contains(args, "RuntimeIdentifier=win-arm64");
+        Assert.IsFalse(args.Contains("-r ", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void ProbeArguments_KeepTheUsersRuntimeIdentifier_EvenWhenARidWouldBeInjected()
+    {
+        // The probe omits -r entirely and exists to discover whether a RuntimeIdentifier is declared, so
+        // filtering the property here would blind it to the very thing it asks about.
+        var singleFile = WriteSingleFile();
+
+        var args = ProjectRunService.BuildSingleFileProbeArguments(
+            singleFile, Options(injectedRid: "win-x64", properties: "RuntimeIdentifier=win-arm64"), "RuntimeIdentifier");
+
+        StringAssert.Contains(args, "RuntimeIdentifier=win-arm64");
+        Assert.IsFalse(args.Contains("-r ", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public void BuildPassArguments_UseDotnetBuildWithConfigurationOnly()
     {
         var singleFile = WriteSingleFile();
