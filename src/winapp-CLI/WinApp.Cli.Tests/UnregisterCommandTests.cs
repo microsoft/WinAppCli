@@ -735,6 +735,48 @@ public class UnregisterCommandTests : BaseCommandTests
         Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterByFullNameCalls.Count);
     }
 
+    [TestMethod]
+    public async Task UnregisterCommand_SingleFile_ForwardsConfigurationToIdentityResolution()
+    {
+        // A Directory.Build.props beside the .cs can set WinAppPackageName conditionally on
+        // $(Configuration), so `run -c Release` and `unregister` must evaluate the same one.
+        var singleFile = CreateSingleFile();
+        var command = GetRequiredService<UnregisterCommand>();
+
+        _fakeProjectRunService.SingleFileIdentity =
+            new SingleFileIdentityResolution("counter", ProjectPackaging.Packaged, BuildRootDirectory: null);
+
+        await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "-c", "Release"]);
+
+        Assert.AreEqual("Release", _fakeProjectRunService.ResolveSingleFileIdentityConfigurations.Single());
+    }
+
+    [TestMethod]
+    public async Task UnregisterCommand_SingleFile_DefaultsToDebugConfiguration()
+    {
+        var singleFile = CreateSingleFile();
+        var command = GetRequiredService<UnregisterCommand>();
+
+        _fakeProjectRunService.SingleFileIdentity =
+            new SingleFileIdentityResolution("counter", ProjectPackaging.Packaged, BuildRootDirectory: null);
+
+        await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName]);
+
+        Assert.AreEqual("Debug", _fakeProjectRunService.ResolveSingleFileIdentityConfigurations.Single());
+    }
+
+    [TestMethod]
+    public async Task UnregisterCommand_ConfigurationWithoutSingleFileInput_IsRejected()
+    {
+        var manifest = await CreateTestManifestAsync();
+        var command = GetRequiredService<UnregisterCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--manifest", manifest.FullName, "-c", "Release"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterByFullNameCalls.Count);
+    }
+
     #endregion
 
     #region Prune

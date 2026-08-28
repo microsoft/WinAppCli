@@ -922,14 +922,19 @@ winapp run counter.cs --unregister-on-exit
 
 `winapp unregister counter.cs` needs no manifest path: it evaluates the file's `#:property` values the
 same way `run` does, and removes only a package registered from *that* file's build output. A
-same-named app registered from a different folder is refused unless you pass `--force`. If you ran with
-an identity-affecting `-p` override, pass the same one to `unregister`, since it overrides the file's
-own directives:
+same-named app registered from a different folder is refused unless you pass `--force`. If the run used
+an option that shapes the identity or the layout, pass the same one to `unregister`:
 
 ```bash
 winapp run counter.cs -p WinAppPackageName=com.contoso.alt
 winapp unregister counter.cs -p WinAppPackageName=com.contoso.alt
+
+winapp run counter.cs -c Release
+winapp unregister counter.cs -c Release
 ```
+
+`-p` overrides the file's own directives, and a `Directory.Build.props` beside the `.cs` can key
+`WinAppPackageName` off `$(Configuration)` — so both can change which package gets registered.
 
 Once the SDK's temp output has been cleaned, `winapp unregister counter.cs` can no longer confirm the
 registration came from that file and will skip it — use `winapp unregister --prune` to clear
@@ -1040,8 +1045,9 @@ winapp unregister [input] [options]
 
 - `--manifest <path>` - Path to Package.appxmanifest (default: auto-detect from current directory)
 - `--force` - Skip the ownership check and unregister even if the package was registered from a different project tree, or if its install location cannot be resolved. With `--prune`, also skips the confirmation prompt.
-- `--prune` - Remove every development-mode registration whose files are gone. Cannot be combined with an input, `--manifest`, `--property`, or `--output-appx-directory`.
+- `--prune` - Remove every development-mode registration whose files are gone. Cannot be combined with an input, `--manifest`, `--property`, `--configuration`, or `--output-appx-directory`.
 - `-p, --property <Name=Value>` - MSBuild property used when resolving a `.cs` file-based app's identity. Repeatable. Pass the same identity-affecting properties the run used (e.g. `-p WinAppPackageName=...`), since a command-line property overrides the file's own `#:property` directives. Only applies to a `.cs` input.
+- `-c, --configuration <name>` - Build configuration used when resolving a `.cs` file-based app's identity. Default: `Debug`. Pass the same configuration the run used: a `Directory.Build.props` beside the `.cs` can set `WinAppPackageName` or `WinAppManifestPath` conditionally on `$(Configuration)`. Only applies to a `.cs` input.
 - `--output-appx-directory <path>` - The AppX layout directory the package was registered from. Only needed when the run used `--output-appx-directory`, since nothing on the package records which run option produced its layout.
 - `--json` - Format output as JSON
 

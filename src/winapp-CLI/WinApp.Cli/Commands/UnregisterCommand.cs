@@ -24,6 +24,7 @@ internal class UnregisterCommand : Command, IShortDescription
     public static Option<bool> PruneOption { get; }
     public static Option<string[]> PropertyOption { get; }
     public static Option<DirectoryInfo> OutputAppXDirectoryOption { get; }
+    public static Option<string> ConfigurationOption { get; }
 
     static UnregisterCommand()
     {
@@ -61,6 +62,11 @@ internal class UnregisterCommand : Command, IShortDescription
         {
             Description = "The AppX layout directory the package was registered from. Only needed when the run used --output-appx-directory, since nothing on the package records which run option produced its layout; without it the registration looks like it came from a different tree and is skipped."
         };
+
+        ConfigurationOption = new Option<string>("--configuration", "-c")
+        {
+            Description = "Build configuration used when resolving a .cs file-based app's identity (default: Debug). Pass the same configuration the run used: a Directory.Build.props beside the .cs can set WinAppPackageName or WinAppManifestPath conditionally on $(Configuration). Only applies to a .cs input."
+        };
     }
 
     public UnregisterCommand() : base("unregister", "Unregisters a sideloaded development package. Only removes packages registered in development mode (e.g., via 'winapp run' or 'create-debug-identity').")
@@ -71,6 +77,7 @@ internal class UnregisterCommand : Command, IShortDescription
         Options.Add(PruneOption);
         Options.Add(PropertyOption);
         Options.Add(OutputAppXDirectoryOption);
+        Options.Add(ConfigurationOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -89,6 +96,7 @@ internal class UnregisterCommand : Command, IShortDescription
             var prune = parseResult.GetValue(PruneOption);
             var properties = parseResult.GetValue(PropertyOption) ?? [];
             var outputAppXDirectory = parseResult.GetValue(OutputAppXDirectoryOption);
+            var configuration = parseResult.GetValue(ConfigurationOption);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
             if (prune)
@@ -100,10 +108,10 @@ internal class UnregisterCommand : Command, IShortDescription
                         isJson);
                 }
 
-                if (properties.Length > 0 || outputAppXDirectory != null)
+                if (properties.Length > 0 || outputAppXDirectory != null || configuration != null)
                 {
                     return FailWith(
-                        "--prune sweeps by registration state rather than by identity or layout, so it cannot be combined with --property or --output-appx-directory.",
+                        "--prune sweeps by registration state rather than by identity or layout, so it cannot be combined with --property, --output-appx-directory, or --configuration.",
                         isJson);
                 }
 
@@ -120,11 +128,11 @@ internal class UnregisterCommand : Command, IShortDescription
                     isJson);
             }
 
-            // -p only participates in resolving a file-based app's identity; a manifest already states it.
-            if (properties.Length > 0 && input == null)
+            // -p and -c only participate in resolving a file-based app's identity; a manifest states it.
+            if ((properties.Length > 0 || configuration != null) && input == null)
             {
                 return FailWith(
-                    "--property only applies to a .cs file-based app, whose identity is evaluated from its #:property directives. A manifest already declares its identity.",
+                    "--property and --configuration only apply to a .cs file-based app, whose identity is evaluated from its #:property directives. A manifest already declares its identity.",
                     isJson);
             }
 
@@ -153,7 +161,7 @@ internal class UnregisterCommand : Command, IShortDescription
                 SingleFileIdentityResolution resolved;
                 try
                 {
-                    resolved = await projectRunService.ResolveSingleFileIdentityAsync(input, properties, cancellationToken);
+                    resolved = await projectRunService.ResolveSingleFileIdentityAsync(input, configuration ?? "Debug", properties, cancellationToken);
                 }
                 catch (ProjectRunException ex)
                 {

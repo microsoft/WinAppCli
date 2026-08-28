@@ -4947,6 +4947,21 @@
         }
       },
       "options": {
+        "--configuration": {
+          "description": "Build configuration used when resolving a .cs file-based app's identity (default: Debug). Pass the same configuration the run used: a Directory.Build.props beside the .cs can set WinAppPackageName or WinAppManifestPath conditionally on $(Configuration). Only applies to a .cs input.",
+          "hidden": false,
+          "aliases": [
+            "-c"
+          ],
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
         "--force": {
           "description": "Skip the install-location directory check and unregister even if the package was registered from a different project tree. With --prune, also skips the confirmation prompt.",
           "hidden": false,

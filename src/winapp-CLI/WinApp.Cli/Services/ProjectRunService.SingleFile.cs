@@ -312,30 +312,26 @@ internal sealed partial class ProjectRunService
     }
 
     /// <inheritdoc />
-    public Task<SingleFileIdentityResolution> ResolveSingleFileIdentityAsync(
-        FileInfo singleFile,
-        CancellationToken cancellationToken)
-        => ResolveSingleFileIdentityAsync(singleFile, [], cancellationToken);
-
-    /// <inheritdoc />
     public async Task<SingleFileIdentityResolution> ResolveSingleFileIdentityAsync(
         FileInfo singleFile,
+        string configuration,
         IReadOnlyList<string> properties,
         CancellationToken cancellationToken)
     {
-        // Deliberately evaluates rather than builds, and asks for NO RuntimeIdentifier or configuration
-        // of its own. `--getProperty` evaluates the virtual project without compiling anything, and the
-        // two things this needs are invariant across both: the identity is inferred from #:property
-        // values, and the build root is the SDK's per-file %TEMP%\dotnet\runfile\<stem>-<hash> directory,
-        // which sits ABOVE the bin\<config>[_<rid>] tail. So `winapp unregister app.cs` costs one ~1.5s
+        // Deliberately evaluates rather than builds: `--getProperty` evaluates the virtual project without
+        // compiling anything, and the build root this needs is the SDK's per-file
+        // %TEMP%\dotnet\runfile\<stem>-<hash> directory, which sits ABOVE the bin\<config>[_<rid>] tail and
+        // so is invariant across configurations. `winapp unregister app.cs` therefore costs one ~1.5s
         // evaluation and works without the app being buildable on this machine at all.
         //
-        // The caller's -p properties ARE forwarded, because a command-line property is a global MSBuild
-        // property that overrides the file's own directives — so `run counter.cs -p WinAppPackageName=X`
-        // registers X, and an evaluation without that property would resolve a different identity,
-        // leaving X registered with nothing able to name it.
+        // Configuration and the caller's -p ARE both applied, because both can change the IDENTITY. A
+        // command-line property is a global MSBuild property that overrides the file's own directives, and
+        // a Directory.Build.props next to the .cs can set WinAppPackageName or WinAppManifestPath
+        // conditionally on $(Configuration). Evaluating with different inputs than the run used would
+        // resolve a different identity — leaving the registered package with nothing able to name it,
+        // while potentially removing a same-rooted registration from the other configuration.
         var options = new SingleFileRunOptions(
-            Configuration: "Debug",
+            Configuration: configuration,
             Architecture: RunArchHelper.DefaultArchitecture(),
             ArchitectureIsExplicit: false,
             NoBuild: true,
