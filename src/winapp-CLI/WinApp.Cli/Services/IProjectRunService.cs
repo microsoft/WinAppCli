@@ -125,6 +125,21 @@ internal interface IProjectRunService
     Task<SingleFileIdentityResolution> ResolveSingleFileIdentityAsync(
         FileInfo singleFile,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Resolves the package identity a <c>.cs</c> file-based app registers under, applying the same
+    /// <c>-p</c> property overrides the run used.
+    /// </summary>
+    /// <remarks>
+    /// A command-line <c>-p</c> is a global MSBuild property that overrides the file's own
+    /// <c>#:property</c> directives, so it can change the resulting identity. Forwarding the same
+    /// properties keeps every registration <c>run</c> can create removable by <c>unregister</c>.
+    /// </remarks>
+    /// <exception cref="ProjectRunException">Thrown when the file cannot be evaluated or its identity cannot be determined.</exception>
+    Task<SingleFileIdentityResolution> ResolveSingleFileIdentityAsync(
+        FileInfo singleFile,
+        IReadOnlyList<string> properties,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>

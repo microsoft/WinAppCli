@@ -997,6 +997,7 @@ function unregister(options?: UnregisterOptions): Promise<WinappResult>
 | `force` | `boolean \| undefined` | No | Skip the install-location directory check and unregister even if the package was registered from a different project tree. With --prune, also skips the confirmation prompt. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `manifest` | `string \| undefined` | No | Path to the Package.appxmanifest (default: auto-detect from current directory) |
+| `property` | `string \| string[] \| undefined` | No | MSBuild property (Name=Value) used when resolving a .cs file-based app's identity. Repeatable. Pass the same identity-affecting properties the run used (e.g. -p WinAppPackageName=...), since a command-line property overrides the file's own #:property directives. Only applies to a .cs input. |
 | `prune` | `boolean \| undefined` | No | Remove every development-mode registration whose files are gone. These can never launch — Windows keeps the identity and its Start menu entry, but activation silently does nothing. Lists what it found and asks before removing; pass --force to skip the prompt. Cannot be combined with an input or --manifest. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
@@ -1926,6 +1927,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | `force` | `boolean \| undefined` | No | Skip the install-location directory check and unregister even if the package was registered from a different project tree. With --prune, also skips the confirmation prompt. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `manifest` | `string \| undefined` | No | Path to the Package.appxmanifest (default: auto-detect from current directory) |
+| `property` | `string \| string[] \| undefined` | No | MSBuild property (Name=Value) used when resolving a .cs file-based app's identity. Repeatable. Pass the same identity-affecting properties the run used (e.g. -p WinAppPackageName=...), since a command-line property overrides the file's own #:property directives. Only applies to a .cs input. |
 | `prune` | `boolean \| undefined` | No | Remove every development-mode registration whose files are gone. These can never launch — Windows keeps the identity and its Start menu entry, but activation silently does nothing. Lists what it found and asks before removing; pass --force to skip the prompt. Cannot be combined with an input or --manifest. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |

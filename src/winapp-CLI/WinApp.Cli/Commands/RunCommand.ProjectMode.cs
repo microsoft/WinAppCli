@@ -85,31 +85,10 @@ internal partial class RunCommand
         /// <returns><see langword="true"/> when every property is well-formed.</returns>
         private bool TryValidateProperties(IReadOnlyList<string> properties, bool isJson, out int errorExitCode)
         {
-            foreach (var property in properties)
+            if (MsBuildPropertyValidator.Validate(properties) is { } error)
             {
-                // MSBuild splits a -p token on ';' into MULTIPLE properties, which would smuggle a
-                // dedicated-flag property (e.g. RuntimeIdentifier) past the name-only ForwardableProperties
-                // filter and override the arch winapp conveys via the RID. Reject packing; '%3B' escapes a
-                // literal ';' in a value.
-                if (property.Contains(';'))
-                {
-                    // Show the name only — the value may hold a secret.
-                    var name = property[..property.IndexOfAny(['=', ';'])];
-                    errorExitCode = Fail(
-                        $"Invalid --property '{name}'. A single -p cannot pack multiple properties with ';'. " +
-                        "Pass one property per repeatable -p (for example: -p A=1 -p B=2), or escape a literal ';' in a value as '%3B'.",
-                        isJson);
-                    return false;
-                }
-
-                var separator = property.IndexOf('=');
-                if (separator <= 0 || string.IsNullOrWhiteSpace(property[..separator]))
-                {
-                    // Show the name only — the value may hold a secret.
-                    var shown = separator > 0 ? property[..separator] : (separator == 0 ? "(empty)" : property);
-                    errorExitCode = Fail($"Invalid --property '{shown}'. Expected Name=Value (for example: -p WindowsPackageType=None).", isJson);
-                    return false;
-                }
+                errorExitCode = Fail(error, isJson);
+                return false;
             }
 
             errorExitCode = 0;

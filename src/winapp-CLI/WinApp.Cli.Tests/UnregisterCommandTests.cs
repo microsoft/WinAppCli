@@ -351,10 +351,9 @@ public class UnregisterCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task UnregisterCommand_SingleFile_UnresolvedBuildRoot_StillUnregistersByIdentity()
+    public async Task UnregisterCommand_SingleFile_WithForce_RemovesDespiteUnresolvedBuildRoot()
     {
-        // A null build root means the guard has nothing to compare against. Falling back to identity
-        // alone beats refusing to remove a package the user explicitly named by its own source file.
+        // --force is the documented way to remove a package whose ownership cannot be verified.
         var singleFile = CreateSingleFile();
         var command = GetRequiredService<UnregisterCommand>();
 
@@ -367,7 +366,7 @@ public class UnregisterCommandTests : BaseCommandTests
         ];
         _fakePackageRegistrationService.FakeUnregisterResult = true;
 
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName]);
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--force"]);
 
         Assert.AreEqual(0, exitCode);
         Assert.IsTrue(_fakePackageRegistrationService.UnregisterByFullNameCalls.Any(c => c.PackageFullName == "counter_1.0.0.0_x64__abc"));
@@ -552,6 +551,114 @@ public class UnregisterCommandTests : BaseCommandTests
 
         Assert.AreEqual(0, exitCode);
         Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterByFullNameCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task UnregisterCommand_SingleFile_UnresolvedBuildRoot_IsSkippedNotRemoved()
+    {
+        // Identity alone is not proof of ownership: the default identity is the file stem, so
+        // 'A\counter.cs' and 'B\counter.cs' both register 'counter'. With no build root to compare
+        // against, removal would let one file delete the other's registration and app data.
+        var singleFile = CreateSingleFile();
+        var command = GetRequiredService<UnregisterCommand>();
+
+        _fakeProjectRunService.SingleFileIdentity =
+            new SingleFileIdentityResolution("counter", ProjectPackaging.Packaged, BuildRootDirectory: null);
+        _fakePackageRegistrationService.FakeDevPackages =
+        [
+            new DevPackageInfo("counter_1.0.0.0_x64__abc", "counter", "1.0.0.0",
+                @"C:\Temp\dotnet\runfile\counter-abc\bin\debug\AppX", IsDevelopmentMode: true)
+        ];
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterByFullNameCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task UnregisterCommand_UnknownInstallLocation_IsSkippedNotRemoved()
+    {
+        // The package's files were deleted, so Windows cannot report where it came from. That makes
+        // ownership unverifiable, not verified — --prune is the supported way to clear these.
+        var singleFile = CreateSingleFile();
+        var buildRoot = _tempDirectory.CreateSubdirectory("runfile").CreateSubdirectory("counter-mine");
+        var command = GetRequiredService<UnregisterCommand>();
+
+        _fakeProjectRunService.SingleFileIdentity =
+            new SingleFileIdentityResolution("counter", ProjectPackaging.Packaged, buildRoot.FullName);
+        _fakePackageRegistrationService.FakeDevPackages =
+        [
+            new DevPackageInfo("counter_1.0.0.0_x64__abc", "counter", "1.0.0.0", null, IsDevelopmentMode: true)
+        ];
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterByFullNameCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task UnregisterCommand_UnknownInstallLocation_WithForce_IsRemoved()
+    {
+        // --force is the documented escape hatch for exactly this case.
+        var singleFile = CreateSingleFile();
+        var command = GetRequiredService<UnregisterCommand>();
+
+        _fakeProjectRunService.SingleFileIdentity =
+            new SingleFileIdentityResolution("counter", ProjectPackaging.Packaged, BuildRootDirectory: null);
+        _fakePackageRegistrationService.FakeDevPackages =
+        [
+            new DevPackageInfo("counter_1.0.0.0_x64__abc", "counter", "1.0.0.0", null, IsDevelopmentMode: true)
+        ];
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--force"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.IsTrue(_fakePackageRegistrationService.UnregisterByFullNameCalls.Any(c => c.PackageFullName == "counter_1.0.0.0_x64__abc"));
+    }
+
+    [TestMethod]
+    public async Task UnregisterCommand_SingleFile_ForwardsPropertiesToIdentityResolution()
+    {
+        // `run counter.cs -p WinAppPackageName=X` registers X, because a command-line property overrides
+        // the file's own directives. Without forwarding, unregister would resolve a different identity
+        // and leave X registered with nothing able to name it.
+        var singleFile = CreateSingleFile();
+        var command = GetRequiredService<UnregisterCommand>();
+
+        _fakeProjectRunService.SingleFileIdentity =
+            new SingleFileIdentityResolution("com.contoso.alt", ProjectPackaging.Packaged, BuildRootDirectory: null);
+
+        await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "-p", "WinAppPackageName=com.contoso.alt"]);
+
+        var forwarded = _fakeProjectRunService.ResolveSingleFileIdentityProperties.Single();
+        Assert.AreEqual(1, forwarded.Count);
+        Assert.AreEqual("WinAppPackageName=com.contoso.alt", forwarded[0]);
+    }
+
+    [TestMethod]
+    public async Task UnregisterCommand_PropertyWithoutSingleFileInput_IsRejected()
+    {
+        var manifest = await CreateTestManifestAsync();
+        var command = GetRequiredService<UnregisterCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--manifest", manifest.FullName, "-p", "WinAppPackageName=x"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterByFullNameCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task UnregisterCommand_MalformedProperty_IsRejected()
+    {
+        var singleFile = CreateSingleFile();
+        var command = GetRequiredService<UnregisterCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "-p", "NoEqualsSign"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeProjectRunService.ResolveSingleFileIdentityCalls.Count);
     }
 
     #endregion

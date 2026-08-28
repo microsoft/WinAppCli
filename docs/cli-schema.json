@@ -4985,6 +4985,20 @@
           "required": false,
           "recursive": false
         },
+        "--property": {
+          "description": "MSBuild property (Name=Value) used when resolving a .cs file-based app's identity. Repeatable. Pass the same identity-affecting properties the run used (e.g. -p WinAppPackageName=...), since a command-line property overrides the file's own #:property directives. Only applies to a .cs input.",
+          "hidden": false,
+          "aliases": [
+            "-p"
+          ],
+          "valueType": "System.String[]",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
         "--prune": {
           "description": "Remove every development-mode registration whose files are gone. These can never launch — Windows keeps the identity and its Start menu entry, but activation silently does nothing. Lists what it found and asks before removing; pass --force to skip the prompt. Cannot be combined with an input or --manifest.",
           "hidden": false,

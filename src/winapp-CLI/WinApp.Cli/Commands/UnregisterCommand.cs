@@ -22,6 +22,7 @@ internal class UnregisterCommand : Command, IShortDescription
     public static Option<FileInfo> ManifestOption { get; }
     public static Option<bool> ForceOption { get; }
     public static Option<bool> PruneOption { get; }
+    public static Option<string[]> PropertyOption { get; }
 
     static UnregisterCommand()
     {
@@ -47,6 +48,13 @@ internal class UnregisterCommand : Command, IShortDescription
         {
             Description = "Remove every development-mode registration whose files are gone. These can never launch — Windows keeps the identity and its Start menu entry, but activation silently does nothing. Lists what it found and asks before removing; pass --force to skip the prompt. Cannot be combined with an input or --manifest."
         };
+
+        PropertyOption = new Option<string[]>("--property", "-p")
+        {
+            Description = "MSBuild property (Name=Value) used when resolving a .cs file-based app's identity. Repeatable. Pass the same identity-affecting properties the run used (e.g. -p WinAppPackageName=...), since a command-line property overrides the file's own #:property directives. Only applies to a .cs input.",
+            Arity = ArgumentArity.OneOrMore,
+            AllowMultipleArgumentsPerToken = false
+        };
     }
 
     public UnregisterCommand() : base("unregister", "Unregisters a sideloaded development package. Only removes packages registered in development mode (e.g., via 'winapp run' or 'create-debug-identity').")
@@ -55,6 +63,7 @@ internal class UnregisterCommand : Command, IShortDescription
         Options.Add(ManifestOption);
         Options.Add(ForceOption);
         Options.Add(PruneOption);
+        Options.Add(PropertyOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -71,6 +80,7 @@ internal class UnregisterCommand : Command, IShortDescription
             var manifest = parseResult.GetValue(ManifestOption);
             var force = parseResult.GetValue(ForceOption);
             var prune = parseResult.GetValue(PruneOption);
+            var properties = parseResult.GetValue(PropertyOption) ?? [];
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
             if (prune)
@@ -79,6 +89,13 @@ internal class UnregisterCommand : Command, IShortDescription
                 {
                     return FailWith(
                         "--prune sweeps every dev registration whose files are gone, so it cannot be combined with an input or --manifest. Run it on its own.",
+                        isJson);
+                }
+
+                if (properties.Length > 0)
+                {
+                    return FailWith(
+                        "--property resolves a .cs file-based app's identity, so it cannot be combined with --prune, which sweeps by registration state rather than by identity.",
                         isJson);
                 }
 
@@ -93,6 +110,19 @@ internal class UnregisterCommand : Command, IShortDescription
                 return FailWith(
                     $"'{input.Name}' and --manifest name the package two different ways, and they can resolve to different packages. Pass one or the other.",
                     isJson);
+            }
+
+            // -p only participates in resolving a file-based app's identity; a manifest already states it.
+            if (properties.Length > 0 && input == null)
+            {
+                return FailWith(
+                    "--property only applies to a .cs file-based app, whose identity is evaluated from its #:property directives. A manifest already declares its identity.",
+                    isJson);
+            }
+
+            if (MsBuildPropertyValidator.Validate(properties) is { } propertyError)
+            {
+                return FailWith(propertyError, isJson);
             }
 
             string packageName;
@@ -110,7 +140,7 @@ internal class UnregisterCommand : Command, IShortDescription
                 SingleFileIdentityResolution resolved;
                 try
                 {
-                    resolved = await projectRunService.ResolveSingleFileIdentityAsync(input, cancellationToken);
+                    resolved = await projectRunService.ResolveSingleFileIdentityAsync(input, properties, cancellationToken);
                 }
                 catch (ProjectRunException ex)
                 {
@@ -206,8 +236,27 @@ internal class UnregisterCommand : Command, IShortDescription
                     // Segment-aware on purpose: a plain string prefix treats SIBLING directories as the
                     // same tree, so a package installed at 'C:\apps\counter-old\AppX' would pass a check
                     // rooted at 'C:\apps\counter' and be removed along with its app data.
-                    if (!force && !string.IsNullOrEmpty(pkg.InstallLocation) && trustedRoot.Length > 0)
+                    //
+                    // An UNKNOWN location (Windows could not resolve it, typically because the files were
+                    // deleted) or an unresolved root counts as unverifiable, NOT as verified. Identity
+                    // alone is not proof of ownership: the default identity is the file stem, so
+                    // 'A\counter.cs' and 'B\counter.cs' both register 'counter'. Skipping the check there
+                    // would let `winapp unregister B\counter.cs` delete A's registration and its
+                    // application data. `--prune` is the supported way to clear registrations whose files
+                    // are gone, and it preserves that data.
+                    if (!force)
                     {
+                        if (string.IsNullOrEmpty(pkg.InstallLocation) || trustedRoot.Length == 0)
+                        {
+                            if (!isJson)
+                            {
+                                logger.LogWarning("{UISymbol} {FullName}: cannot confirm this registration belongs here (its install location is unavailable). Use --force to remove it anyway, or 'winapp unregister --prune' to clear registrations whose files are gone.",
+                                    UiSymbols.Warning, pkg.FullName);
+                            }
+                            skipped.Add(pkg.FullName);
+                            continue;
+                        }
+
                         if (!MsixService.IsPathInsideDirectory(pkg.InstallLocation, trustedRoot))
                         {
                             if (!isJson)

@@ -312,8 +312,15 @@ internal sealed partial class ProjectRunService
     }
 
     /// <inheritdoc />
+    public Task<SingleFileIdentityResolution> ResolveSingleFileIdentityAsync(
+        FileInfo singleFile,
+        CancellationToken cancellationToken)
+        => ResolveSingleFileIdentityAsync(singleFile, [], cancellationToken);
+
+    /// <inheritdoc />
     public async Task<SingleFileIdentityResolution> ResolveSingleFileIdentityAsync(
         FileInfo singleFile,
+        IReadOnlyList<string> properties,
         CancellationToken cancellationToken)
     {
         // Deliberately evaluates rather than builds, and asks for NO RuntimeIdentifier or configuration
@@ -322,13 +329,18 @@ internal sealed partial class ProjectRunService
         // values, and the build root is the SDK's per-file %TEMP%\dotnet\runfile\<stem>-<hash> directory,
         // which sits ABOVE the bin\<config>[_<rid>] tail. So `winapp unregister app.cs` costs one ~1.5s
         // evaluation and works without the app being buildable on this machine at all.
+        //
+        // The caller's -p properties ARE forwarded, because a command-line property is a global MSBuild
+        // property that overrides the file's own directives — so `run counter.cs -p WinAppPackageName=X`
+        // registers X, and an evaluation without that property would resolve a different identity,
+        // leaving X registered with nothing able to name it.
         var options = new SingleFileRunOptions(
             Configuration: "Debug",
             Architecture: RunArchHelper.DefaultArchitecture(),
             ArchitectureIsExplicit: false,
             NoBuild: true,
             NoRestore: false,
-            Properties: []);
+            Properties: properties);
 
         // Same working directory the build pass uses: MSBuildProjectDirectory for a file-based app is the
         // .cs file's OWN directory, so evaluating from there keeps any Directory.Build.props next to the
