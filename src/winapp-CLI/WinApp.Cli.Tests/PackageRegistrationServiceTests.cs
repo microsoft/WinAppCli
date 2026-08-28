@@ -707,7 +707,7 @@ public class PackageRegistrationServiceTests
     public void FindOrphanedDevPackages_IncludesDevPackageWhoseDirectoryIsGone()
     {
         var (svc, _) = NewService();
-        var missing = Path.Combine(Path.GetTempPath(), $"winapp_missing_{Guid.NewGuid():N}");
+        var missing = Path.Join(Path.GetTempPath(), $"winapp_missing_{Guid.NewGuid():N}");
         svc.EnumerateUserPackagesImpl = () =>
         [
             View("Contoso.Dead", fullName: "Contoso.Dead_1.0.0.0_x64__abc", loc: () => missing),
@@ -744,7 +744,7 @@ public class PackageRegistrationServiceTests
         var live = Directory.CreateTempSubdirectory("winapp_live_");
         try
         {
-            var missing = Path.Combine(Path.GetTempPath(), $"winapp_missing_{Guid.NewGuid():N}");
+            var missing = Path.Join(Path.GetTempPath(), $"winapp_missing_{Guid.NewGuid():N}");
             var (svc, _) = NewService();
             svc.EnumerateUserPackagesImpl = () =>
             [
