@@ -148,14 +148,14 @@ internal interface IDotNetService
     /// <summary>
     /// Runs `dotnet list package --format json` and returns the parsed result.
     /// </summary>
-    /// <param name="csprojFile">
+    /// <param name="projectOrFile">
     /// The project to query. A <c>.cs</c> .NET file-based app is also accepted and is queried through
     /// the SDK 10 <c>dotnet package list --file</c> form.
     /// </param>
     /// <param name="includeTransitive">When true, includes transitive package references in the output.</param>
     /// <param name="noRestore">When true, pass <c>--no-restore</c> so the query doesn't trigger an implicit restore.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo csprojFile, bool includeTransitive = true, bool noRestore = false, CancellationToken cancellationToken = default);
+    Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo projectOrFile, bool includeTransitive = true, bool noRestore = false, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Ensures the .csproj has <c>&lt;EnableMsixTooling&gt;true&lt;/EnableMsixTooling&gt;</c>.

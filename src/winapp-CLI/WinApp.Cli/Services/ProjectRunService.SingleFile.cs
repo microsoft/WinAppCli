@@ -28,16 +28,19 @@ namespace WinApp.Cli.Services;
 ///   evaluates WITHOUT building, so the evaluate stays as cheap as the <c>.csproj</c> one.
 ///   </item>
 ///   <item>
-///   <b>No RuntimeIdentifier or Platform is injected.</b> A file-based app declares its own
-///   <c>TargetFramework</c>/<c>Platform</c> via <c>#:property</c>. Injecting <c>-r win-&lt;arch&gt;</c>
-///   would move the build output away from the path the evaluate reports, so the two passes could
-///   disagree about where the app is. The run handler rejects <c>--arch</c>/<c>--runtime</c>/
-///   <c>--framework</c> and points at the equivalent <c>#:property</c> instead.
+///   <b>No <c>Platform</c> is injected, but a RuntimeIdentifier may be.</b> <c>Platform</c> is
+///   deliberately never passed: a file-based app accepts it yet ignores it for RID selection, so
+///   <c>Platform=arm64</c> still emits an x64 apphost. A <c>-r win-&lt;arch&gt;</c> IS injected when the
+///   app does not declare its own <c>RuntimeIdentifier</c> — without it the SDK builds <c>AnyCPU</c> and
+///   a self-contained Windows App SDK app fails outright. That is safe because BOTH passes receive the
+///   same token, so the evaluate reads back the RID-qualified directory the build wrote. The run handler
+///   honors <c>--arch</c>/<c>--runtime</c> (they override what the file declares) and rejects only
+///   <c>--framework</c> and <c>--project</c>, pointing at the equivalent <c>#:property</c> instead.
 ///   </item>
 /// </list>
 /// <para>
-/// Both passes are otherwise fed IDENTICAL tokens (Configuration + user <c>-p</c>) so the evaluate reads
-/// the output the build wrote.
+/// Both passes are otherwise fed IDENTICAL tokens (Configuration + injected RID + user <c>-p</c>) so the
+/// evaluate reads the output the build wrote.
 /// </para>
 /// </remarks>
 internal sealed partial class ProjectRunService

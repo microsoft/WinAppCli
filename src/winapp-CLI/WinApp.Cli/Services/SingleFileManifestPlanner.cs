@@ -49,7 +49,8 @@ internal sealed record SingleFileManifestInfo(
 /// Pure and side-effect free.
 /// </summary>
 internal static partial class SingleFileManifestPlanner
-{    /// <summary>MSBuild property naming the package identity; falls back to the file stem.</summary>
+{
+    /// <summary>MSBuild property naming the package identity; falls back to the file stem.</summary>
     internal const string PackageNameProperty = "WinAppPackageName";
 
     /// <summary>MSBuild property naming the app's display name; falls back to the file stem.</summary>
