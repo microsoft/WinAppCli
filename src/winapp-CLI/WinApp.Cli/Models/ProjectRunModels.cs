@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using WinApp.Cli.Helpers;
+
 namespace WinApp.Cli.Models;
 
 /// <summary>
@@ -131,10 +133,12 @@ internal sealed record ProjectBuildOutcome(ProjectRunResolution? Resolution, int
 /// User-provided build inputs for single-file mode (a <c>.cs</c> file-based app).
 /// <para>
 /// Deliberately a much smaller set than <see cref="ProjectRunOptions"/>. A file-based app declares its
-/// own <c>TargetFramework</c> and <c>Platform</c> through <c>#:property</c> directives, so winapp does
-/// NOT inject a RuntimeIdentifier or Platform: doing so would move the build output away from the path
-/// <c>--getProperty:OutputPath</c> reports for the evaluate pass. <c>--arch</c>/<c>--runtime</c>/
-/// <c>--framework</c>/<c>--project</c> are rejected by the run handler for the same reason.
+/// own <c>TargetFramework</c> through <c>#:property</c> directives, so <c>--framework</c> and
+/// <c>--project</c> are rejected by the run handler. <c>Platform</c> is never injected — a file-based
+/// app accepts it but ignores it for RID selection — while a <c>RuntimeIdentifier</c> IS injected when
+/// the app declares none, which is what lets a self-contained Windows App SDK app build instead of
+/// failing as <c>AnyCPU</c>. <c>--arch</c>/<c>--runtime</c> are honored and override what the file
+/// declares.
 /// </para>
 /// </summary>
 /// <param name="Configuration">Build configuration (default <c>Debug</c>). File-based apps write to <c>bin\debug</c>/<c>bin\release</c>.</param>
@@ -213,3 +217,31 @@ internal sealed record SingleFileIdentityResolution(
     string PackageName,
     ProjectPackaging Packaging,
     string? BuildRootDirectory);
+
+/// <summary>
+/// Every <c>run</c> input that can change the package identity a <c>.cs</c> file-based app registers
+/// under, bundled so <c>unregister</c> reproduces the same evaluation.
+/// </summary>
+/// <remarks>
+/// Deliberately a record rather than loose parameters. Each of these reaches identity through a
+/// different route — a command-line <c>-p</c> overrides the file's own <c>#:property</c> directives,
+/// and a <c>Directory.Build.props</c> beside the <c>.cs</c> can set <c>WinAppPackageName</c> or
+/// <c>WinAppManifestPath</c> conditionally on <c>$(Configuration)</c> or <c>$(RuntimeIdentifier)</c>.
+/// Missing any one of them makes <c>unregister</c> resolve a different package than <c>run</c>
+/// registered, stranding the real registration while potentially removing a same-rooted one. Naming
+/// the set keeps that surface visible instead of spread across a parameter list.
+/// </remarks>
+/// <param name="Configuration">Build configuration (<c>-c</c>); <c>Debug</c> when the caller did not choose one.</param>
+/// <param name="Architecture">Target architecture, which becomes the injected <c>-r win-&lt;arch&gt;</c> unless the app declares its own.</param>
+/// <param name="ArchitectureIsExplicit">True when <c>--arch</c>/<c>--runtime</c> named the architecture, which then overrides what the file declares.</param>
+/// <param name="Properties">Repeatable <c>-p Name=Value</c> overrides.</param>
+internal sealed record SingleFileIdentityInputs(
+    string Configuration,
+    string Architecture,
+    bool ArchitectureIsExplicit,
+    IReadOnlyList<string> Properties)
+{
+    /// <summary>The inputs a run with no identity-shaping switches uses.</summary>
+    public static SingleFileIdentityInputs Default { get; } =
+        new("Debug", RunArchHelper.DefaultArchitecture(), ArchitectureIsExplicit: false, []);
+}

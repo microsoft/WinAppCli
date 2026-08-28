@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using System.CommandLine;
 using System.CommandLine.Invocation;
+using System.CommandLine.Parsing;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -25,6 +26,8 @@ internal class UnregisterCommand : Command, IShortDescription
     public static Option<string[]> PropertyOption { get; }
     public static Option<DirectoryInfo> OutputAppXDirectoryOption { get; }
     public static Option<string> ConfigurationOption { get; }
+    public static Option<string> ArchOption { get; }
+    public static Option<string> RuntimeOption { get; }
 
     static UnregisterCommand()
     {
@@ -54,7 +57,10 @@ internal class UnregisterCommand : Command, IShortDescription
         PropertyOption = new Option<string[]>("--property", "-p")
         {
             Description = "MSBuild property (Name=Value) used when resolving a .cs file-based app's identity. Repeatable. Pass the same identity-affecting properties the run used (e.g. -p WinAppPackageName=...), since a command-line property overrides the file's own #:property directives. Only applies to a .cs input.",
-            Arity = ArgumentArity.OneOrMore,
+            // ZeroOrMore, not OneOrMore: OneOrMore lets System.CommandLine reject a valueless -p with
+            // plain-text help before the handler runs, which breaks the --json contract scripts rely on.
+            // The handler detects the missing value itself and reports it in the requested format.
+            Arity = ArgumentArity.ZeroOrMore,
             AllowMultipleArgumentsPerToken = false
         };
 
@@ -67,6 +73,16 @@ internal class UnregisterCommand : Command, IShortDescription
         {
             Description = "Build configuration used when resolving a .cs file-based app's identity (default: Debug). Pass the same configuration the run used: a Directory.Build.props beside the .cs can set WinAppPackageName or WinAppManifestPath conditionally on $(Configuration). Only applies to a .cs input."
         };
+
+        ArchOption = new Option<string>("--arch")
+        {
+            Description = "Target architecture (x64, arm64, x86) used when resolving a .cs file-based app's identity (default: the current process architecture). Pass the same architecture the run used, since a Directory.Build.props can key identity off $(RuntimeIdentifier). Only applies to a .cs input."
+        };
+
+        RuntimeOption = new Option<string>("--runtime", "-r")
+        {
+            Description = "Target .NET runtime identifier (e.g. win-x64) used when resolving a .cs file-based app's identity. Only its architecture is used, and it overrides --arch. Only applies to a .cs input."
+        };
     }
 
     public UnregisterCommand() : base("unregister", "Unregisters a sideloaded development package. Only removes packages registered in development mode (e.g., via 'winapp run' or 'create-debug-identity').")
@@ -78,6 +94,8 @@ internal class UnregisterCommand : Command, IShortDescription
         Options.Add(PropertyOption);
         Options.Add(OutputAppXDirectoryOption);
         Options.Add(ConfigurationOption);
+        Options.Add(ArchOption);
+        Options.Add(RuntimeOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -97,7 +115,19 @@ internal class UnregisterCommand : Command, IShortDescription
             var properties = parseResult.GetValue(PropertyOption) ?? [];
             var outputAppXDirectory = parseResult.GetValue(OutputAppXDirectoryOption);
             var configuration = parseResult.GetValue(ConfigurationOption);
+            var archOption = parseResult.GetValue(ArchOption);
+            var runtimeOption = parseResult.GetValue(RuntimeOption);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
+
+            // Reject a valueless -p/--property here rather than letting System.CommandLine's arity check
+            // do it, which would print plain-text help and bypass the --json envelope. There is one
+            // identifier token per '-p' occurrence, so more identifiers than value tokens means at least
+            // one '-p' arrived without its argument. Mirrors RunCommand.
+            if (parseResult.GetResult(PropertyOption) is OptionResult propertyResult &&
+                propertyResult.IdentifierTokenCount > propertyResult.Tokens.Count)
+            {
+                return FailWith("A --property/-p option was provided without a value. Expected Name=Value (for example: -p WinAppPackageName=com.contoso.app).", isJson);
+            }
 
             if (prune)
             {
@@ -108,10 +138,11 @@ internal class UnregisterCommand : Command, IShortDescription
                         isJson);
                 }
 
-                if (properties.Length > 0 || outputAppXDirectory != null || configuration != null)
+                if (properties.Length > 0 || outputAppXDirectory != null || configuration != null
+                    || archOption != null || runtimeOption != null)
                 {
                     return FailWith(
-                        "--prune sweeps by registration state rather than by identity or layout, so it cannot be combined with --property, --output-appx-directory, or --configuration.",
+                        "--prune sweeps by registration state rather than by identity or layout, so it cannot be combined with --property, --configuration, --arch, --runtime, or --output-appx-directory.",
                         isJson);
                 }
 
@@ -128,11 +159,12 @@ internal class UnregisterCommand : Command, IShortDescription
                     isJson);
             }
 
-            // -p and -c only participate in resolving a file-based app's identity; a manifest states it.
-            if ((properties.Length > 0 || configuration != null) && input == null)
+            // These only participate in resolving a file-based app's identity; a manifest states it.
+            if ((properties.Length > 0 || configuration != null || archOption != null || runtimeOption != null)
+                && input == null)
             {
                 return FailWith(
-                    "--property and --configuration only apply to a .cs file-based app, whose identity is evaluated from its #:property directives. A manifest already declares its identity.",
+                    "--property, --configuration, --arch and --runtime only apply to a .cs file-based app, whose identity is evaluated from its #:property directives. A manifest already declares its identity.",
                     isJson);
             }
 
@@ -158,10 +190,22 @@ internal class UnregisterCommand : Command, IShortDescription
                         isJson);
                 }
 
+                // Same resolution run uses: --runtime's arch beats --arch, else the process arch.
+                if (!RunCommand.Handler.TryResolveArchitecture(archOption, runtimeOption, out var architecture, out var archError))
+                {
+                    return FailWith(archError!, isJson);
+                }
+
+                var identityInputs = new SingleFileIdentityInputs(
+                    configuration ?? "Debug",
+                    architecture,
+                    ArchitectureIsExplicit: !string.IsNullOrWhiteSpace(archOption) || !string.IsNullOrWhiteSpace(runtimeOption),
+                    properties);
+
                 SingleFileIdentityResolution resolved;
                 try
                 {
-                    resolved = await projectRunService.ResolveSingleFileIdentityAsync(input, configuration ?? "Debug", properties, cancellationToken);
+                    resolved = await projectRunService.ResolveSingleFileIdentityAsync(input, identityInputs, cancellationToken);
                 }
                 catch (ProjectRunException ex)
                 {

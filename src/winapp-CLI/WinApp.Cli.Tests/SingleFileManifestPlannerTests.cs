@@ -187,6 +187,29 @@ public class SingleFileManifestPlannerTests
         StringAssert.Contains(msBuild.Message, "Version='70000.0'");
     }
 
+    [TestMethod]
+    public void Plan_PublisherThatNormalizesToEmpty_IsRejectedAsACommandError()
+    {
+        // PublisherDnHelper.Normalize throws ArgumentException once wrapper quotes strip to nothing.
+        // Letting that escape printed a stack trace and, under --json, no envelope at all — one
+        // malformed optional directive breaking automation.
+        var ex = Assert.ThrowsExactly<ProjectRunException>(() =>
+            SingleFileManifestPlanner.Plan(SingleFile(), Props((SingleFileManifestPlanner.PublisherProperty, "''"))));
+
+        StringAssert.Contains(ex.Message, SingleFileManifestPlanner.PublisherProperty);
+        StringAssert.Contains(ex.Message, "CN=");
+    }
+
+    [TestMethod]
+    public void Plan_EmptyPublisher_FallsBackToTheDefault()
+    {
+        // An empty value reads as "undeclared", so it must take the default rather than fail.
+        var info = SingleFileManifestPlanner.Plan(
+            SingleFile(), Props((SingleFileManifestPlanner.PublisherProperty, "")), defaultPublisher: "CN=tester");
+
+        Assert.AreEqual("CN=tester", info.PublisherDN);
+    }
+
     #endregion
 
     #region Authored manifest resolution

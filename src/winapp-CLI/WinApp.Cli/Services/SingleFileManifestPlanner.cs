@@ -98,10 +98,28 @@ internal static partial class SingleFileManifestPlanner
         var displayName = Read(properties, DisplayNameProperty) ?? stem;
 
         // Bare names auto-wrap as CN=<name>, exactly as `manifest generate --publisher-name` does.
+        // Normalize throws ArgumentException for a value that is empty once wrapper quotes are stripped
+        // (e.g. WinAppPublisher=''), so it is translated here: an unhandled exception would print a stack
+        // trace and, under --json, no envelope at all — one malformed optional directive breaking
+        // automation. Version validation already reports this way.
         var publisher = Read(properties, PublisherProperty);
-        var publisherDN = publisher is not null
-            ? PublisherDnHelper.Normalize(publisher)
-            : defaultPublisher ?? SystemDefaultsHelper.GetDefaultPublisherCN();
+        string publisherDN;
+        try
+        {
+            publisherDN = publisher is not null
+                ? PublisherDnHelper.Normalize(publisher)
+                : defaultPublisher ?? SystemDefaultsHelper.GetDefaultPublisherCN();
+        }
+        catch (ArgumentException)
+        {
+            // The inner message is deliberately not appended: under AOT its ParamName resource does not
+            // resolve, so it renders as "Arg_ParamName_Name, publisher" — noise that says less than the
+            // sentence above it.
+            throw new ProjectRunException(
+                $"'{singleFile.Name}' declares {PublisherProperty}='{publisher}', which is not a usable publisher. " +
+                $"Set '#:property {PublisherProperty}=<name>' to a plain name (wrapped as CN=<name>) or a full X.500 " +
+                "distinguished name such as 'CN=Contoso'.");
+        }
 
         var version = ResolveVersion(singleFile, properties);
 

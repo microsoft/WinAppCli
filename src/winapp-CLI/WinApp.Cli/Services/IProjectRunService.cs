@@ -121,17 +121,14 @@ internal interface IProjectRunService
     /// This evaluates only (one <c>--getProperty</c> pass, no compilation) and needs nothing on disk
     /// beyond the <c>.cs</c> itself, so it still resolves after the SDK's temp output has been cleaned.
     /// <para>
-    /// <paramref name="configuration"/> and <paramref name="properties"/> must match what the run used:
-    /// both can change the identity. A command-line <c>-p</c> overrides the file's own
-    /// <c>#:property</c> directives, and a <c>Directory.Build.props</c> beside the <c>.cs</c> can set
-    /// <c>WinAppPackageName</c> or <c>WinAppManifestPath</c> conditionally on <c>$(Configuration)</c>.
+    /// <paramref name="inputs"/> must carry what the run used — see
+    /// <see cref="SingleFileIdentityInputs"/> for why each of those reaches identity.
     /// </para>
     /// </remarks>
     /// <exception cref="ProjectRunException">Thrown when the file cannot be evaluated or its identity cannot be determined.</exception>
     Task<SingleFileIdentityResolution> ResolveSingleFileIdentityAsync(
         FileInfo singleFile,
-        string configuration,
-        IReadOnlyList<string> properties,
+        SingleFileIdentityInputs inputs,
         CancellationToken cancellationToken);
 }
 

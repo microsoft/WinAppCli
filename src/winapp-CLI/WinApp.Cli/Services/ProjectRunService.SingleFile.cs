@@ -314,8 +314,7 @@ internal sealed partial class ProjectRunService
     /// <inheritdoc />
     public async Task<SingleFileIdentityResolution> ResolveSingleFileIdentityAsync(
         FileInfo singleFile,
-        string configuration,
-        IReadOnlyList<string> properties,
+        SingleFileIdentityInputs inputs,
         CancellationToken cancellationToken)
     {
         // Deliberately evaluates rather than builds: `--getProperty` evaluates the virtual project without
@@ -324,24 +323,24 @@ internal sealed partial class ProjectRunService
         // so is invariant across configurations. `winapp unregister app.cs` therefore costs one ~1.5s
         // evaluation and works without the app being buildable on this machine at all.
         //
-        // Configuration and the caller's -p ARE both applied, because both can change the IDENTITY. A
-        // command-line property is a global MSBuild property that overrides the file's own directives, and
-        // a Directory.Build.props next to the .cs can set WinAppPackageName or WinAppManifestPath
-        // conditionally on $(Configuration). Evaluating with different inputs than the run used would
-        // resolve a different identity — leaving the registered package with nothing able to name it,
-        // while potentially removing a same-rooted registration from the other configuration.
+        // Every identity-shaping input is applied, and the RID goes through the SAME resolution the run
+        // uses (probe what the file declares, inject only otherwise) rather than a copy — so the two can
+        // never drift. See SingleFileIdentityInputs for why each one reaches identity.
         var options = new SingleFileRunOptions(
-            Configuration: configuration,
-            Architecture: RunArchHelper.DefaultArchitecture(),
-            ArchitectureIsExplicit: false,
+            Configuration: inputs.Configuration,
+            Architecture: inputs.Architecture,
+            ArchitectureIsExplicit: inputs.ArchitectureIsExplicit,
             NoBuild: true,
             NoRestore: false,
-            Properties: properties);
+            Properties: inputs.Properties);
 
         // Same working directory the build pass uses: MSBuildProjectDirectory for a file-based app is the
         // .cs file's OWN directory, so evaluating from there keeps any Directory.Build.props next to the
         // file in scope and resolves the identity the build would have produced.
         var workingDir = singleFile.Directory ?? new DirectoryInfo(Directory.GetCurrentDirectory());
+
+        options = await ResolveSingleFileRuntimeIdentifierAsync(singleFile, options, workingDir, cancellationToken);
+
         var args = BuildSingleFileEvaluateArguments(singleFile, options);
         logger.LogDebug("{UISymbol} dotnet {Arguments}", UiSymbols.Note, RedactSecretsForDisplay(args));
 

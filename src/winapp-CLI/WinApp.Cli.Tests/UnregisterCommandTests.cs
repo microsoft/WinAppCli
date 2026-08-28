@@ -634,7 +634,7 @@ public class UnregisterCommandTests : BaseCommandTests
 
         await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "-p", "WinAppPackageName=com.contoso.alt"]);
 
-        var forwarded = _fakeProjectRunService.ResolveSingleFileIdentityProperties.Single();
+        var forwarded = _fakeProjectRunService.ResolveSingleFileIdentityInputs.Single().Properties;
         Assert.AreEqual(1, forwarded.Count);
         Assert.AreEqual("WinAppPackageName=com.contoso.alt", forwarded[0]);
     }
@@ -748,7 +748,7 @@ public class UnregisterCommandTests : BaseCommandTests
 
         await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "-c", "Release"]);
 
-        Assert.AreEqual("Release", _fakeProjectRunService.ResolveSingleFileIdentityConfigurations.Single());
+        Assert.AreEqual("Release", _fakeProjectRunService.ResolveSingleFileIdentityInputs.Single().Configuration);
     }
 
     [TestMethod]
@@ -762,7 +762,7 @@ public class UnregisterCommandTests : BaseCommandTests
 
         await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName]);
 
-        Assert.AreEqual("Debug", _fakeProjectRunService.ResolveSingleFileIdentityConfigurations.Single());
+        Assert.AreEqual("Debug", _fakeProjectRunService.ResolveSingleFileIdentityInputs.Single().Configuration);
     }
 
     [TestMethod]
@@ -775,6 +775,82 @@ public class UnregisterCommandTests : BaseCommandTests
 
         Assert.AreEqual(1, exitCode);
         Assert.AreEqual(0, _fakePackageRegistrationService.UnregisterByFullNameCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task UnregisterCommand_SingleFile_ForwardsArchitectureToIdentityResolution()
+    {
+        // A Directory.Build.props can key WinAppPackageName off $(RuntimeIdentifier), so the RID decision
+        // has to match the run's or unregister resolves a different package.
+        var singleFile = CreateSingleFile();
+        var command = GetRequiredService<UnregisterCommand>();
+
+        _fakeProjectRunService.SingleFileIdentity =
+            new SingleFileIdentityResolution("counter", ProjectPackaging.Packaged, BuildRootDirectory: null);
+
+        await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--arch", "arm64"]);
+
+        var inputs = _fakeProjectRunService.ResolveSingleFileIdentityInputs.Single();
+        Assert.AreEqual("arm64", inputs.Architecture);
+        Assert.IsTrue(inputs.ArchitectureIsExplicit);
+    }
+
+    [TestMethod]
+    public async Task UnregisterCommand_SingleFile_RuntimeOverridesArch()
+    {
+        // Same precedence run uses: --runtime's architecture beats --arch.
+        var singleFile = CreateSingleFile();
+        var command = GetRequiredService<UnregisterCommand>();
+
+        _fakeProjectRunService.SingleFileIdentity =
+            new SingleFileIdentityResolution("counter", ProjectPackaging.Packaged, BuildRootDirectory: null);
+
+        await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--arch", "x64", "-r", "win-arm64"]);
+
+        Assert.AreEqual("arm64", _fakeProjectRunService.ResolveSingleFileIdentityInputs.Single().Architecture);
+    }
+
+    [TestMethod]
+    public async Task UnregisterCommand_SingleFile_NoArchitectureSwitch_IsNotExplicit()
+    {
+        // Not explicit means the app's own RuntimeIdentifier wins, exactly as in a plain run.
+        var singleFile = CreateSingleFile();
+        var command = GetRequiredService<UnregisterCommand>();
+
+        _fakeProjectRunService.SingleFileIdentity =
+            new SingleFileIdentityResolution("counter", ProjectPackaging.Packaged, BuildRootDirectory: null);
+
+        await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName]);
+
+        Assert.IsFalse(_fakeProjectRunService.ResolveSingleFileIdentityInputs.Single().ArchitectureIsExplicit);
+    }
+
+    [TestMethod]
+    public async Task UnregisterCommand_InvalidRuntime_IsRejected()
+    {
+        var singleFile = CreateSingleFile();
+        var command = GetRequiredService<UnregisterCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "-r", "linux-x64"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeProjectRunService.ResolveSingleFileIdentityCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task UnregisterCommand_ValuelessProperty_WithJson_EmitsJsonError()
+    {
+        // System.CommandLine's own arity error prints plain-text help, which would corrupt the
+        // machine-readable contract a --json caller depends on.
+        TestAnsiConsole.Profile.Width = 1000;
+        var command = GetRequiredService<UnregisterCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--json", "-p"]);
+
+        Assert.AreEqual(1, exitCode);
+        var root = System.Text.Json.JsonDocument.Parse(TestAnsiConsole.Output.Trim()).RootElement;
+        Assert.IsTrue(root.TryGetProperty("Error", out var error));
+        StringAssert.Contains(error.GetString(), "without a value");
     }
 
     #endregion

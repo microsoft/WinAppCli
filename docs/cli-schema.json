@@ -4947,6 +4947,18 @@
         }
       },
       "options": {
+        "--arch": {
+          "description": "Target architecture (x64, arm64, x86) used when resolving a .cs file-based app's identity (default: the current process architecture). Pass the same architecture the run used, since a Directory.Build.props can key identity off $(RuntimeIdentifier). Only applies to a .cs input.",
+          "hidden": false,
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
         "--configuration": {
           "description": "Build configuration used when resolving a .cs file-based app's identity (default: Debug). Pass the same configuration the run used: a Directory.Build.props beside the .cs can set WinAppPackageName or WinAppManifestPath conditionally on $(Configuration). Only applies to a .cs input.",
           "hidden": false,
@@ -5021,7 +5033,7 @@
           "valueType": "System.String[]",
           "hasDefaultValue": false,
           "arity": {
-            "minimum": 1
+            "minimum": 0
           },
           "required": false,
           "recursive": false
@@ -5050,6 +5062,21 @@
           "defaultValue": false,
           "arity": {
             "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--runtime": {
+          "description": "Target .NET runtime identifier (e.g. win-x64) used when resolving a .cs file-based app's identity. Only its architecture is used, and it overrides --arch. Only applies to a .cs input.",
+          "hidden": false,
+          "aliases": [
+            "-r"
+          ],
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
             "maximum": 1
           },
           "required": false,

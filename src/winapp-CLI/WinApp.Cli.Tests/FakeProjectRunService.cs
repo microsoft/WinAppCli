@@ -130,17 +130,13 @@ internal sealed class FakeProjectRunService : IProjectRunService
 
     public List<FileInfo> ResolveSingleFileIdentityCalls { get; } = [];
 
-    /// <summary>Records the <c>-p</c> properties each identity resolution received.</summary>
-    public List<IReadOnlyList<string>> ResolveSingleFileIdentityProperties { get; } = [];
+    /// <summary>Records the identity-shaping inputs each resolution received.</summary>
+    public List<SingleFileIdentityInputs> ResolveSingleFileIdentityInputs { get; } = [];
 
-    /// <summary>Records the configuration each identity resolution received.</summary>
-    public List<string> ResolveSingleFileIdentityConfigurations { get; } = [];
-
-    public Task<SingleFileIdentityResolution> ResolveSingleFileIdentityAsync(FileInfo singleFile, string configuration, IReadOnlyList<string> properties, CancellationToken cancellationToken)
+    public Task<SingleFileIdentityResolution> ResolveSingleFileIdentityAsync(FileInfo singleFile, SingleFileIdentityInputs inputs, CancellationToken cancellationToken)
     {
         ResolveSingleFileIdentityCalls.Add(singleFile);
-        ResolveSingleFileIdentityProperties.Add(properties);
-        ResolveSingleFileIdentityConfigurations.Add(configuration);
+        ResolveSingleFileIdentityInputs.Add(inputs);
         if (SingleFileIdentityThrows != null)
         {
             throw SingleFileIdentityThrows;

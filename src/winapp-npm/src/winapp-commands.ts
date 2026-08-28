@@ -1456,6 +1456,8 @@ export async function uiWaitFor(options: UiWaitForOptions = {}): Promise<WinappR
 export interface UnregisterOptions extends CommonOptions {
   /** Path to a .NET file-based app (a single .cs) whose package should be unregistered. Its identity is resolved the same way 'winapp run' resolves it, so no manifest path is needed. Omit to use --manifest or auto-detect a manifest in the current directory. Cannot be combined with --manifest. */
   input?: string;
+  /** Target architecture (x64, arm64, x86) used when resolving a .cs file-based app's identity (default: the current process architecture). Pass the same architecture the run used, since a Directory.Build.props can key identity off $(RuntimeIdentifier). Only applies to a .cs input. */
+  arch?: string;
   /** Build configuration used when resolving a .cs file-based app's identity (default: Debug). Pass the same configuration the run used: a Directory.Build.props beside the .cs can set WinAppPackageName or WinAppManifestPath conditionally on $(Configuration). Only applies to a .cs input. */
   configuration?: string;
   /** Skip the install-location directory check and unregister even if the package was registered from a different project tree. With --prune, also skips the confirmation prompt. */
@@ -1470,6 +1472,8 @@ export interface UnregisterOptions extends CommonOptions {
   property?: string | string[];
   /** Remove every development-mode registration whose files are gone. These can never launch — Windows keeps the identity and its Start menu entry, but activation silently does nothing. Lists what it found and asks before removing; pass --force to skip the prompt. Cannot be combined with an input or --manifest. */
   prune?: boolean;
+  /** Target .NET runtime identifier (e.g. win-x64) used when resolving a .cs file-based app's identity. Only its architecture is used, and it overrides --arch. Only applies to a .cs input. */
+  runtime?: string;
 }
 
 /**
@@ -1478,6 +1482,7 @@ export interface UnregisterOptions extends CommonOptions {
 export async function unregister(options: UnregisterOptions = {}): Promise<WinappResult> {
   const args: string[] = ['unregister'];
   if (options.input) args.push(options.input);
+  if (options.arch) args.push('--arch', options.arch);
   if (options.configuration) args.push('--configuration', options.configuration);
   if (options.force) args.push('--force');
   if (options.json) args.push('--json');
@@ -1488,6 +1493,7 @@ export async function unregister(options: UnregisterOptions = {}): Promise<Winap
     for (const v of propertyArr) args.push('--property', v);
   }
   if (options.prune) args.push('--prune');
+  if (options.runtime) args.push('--runtime', options.runtime);
   return execCommand(args, options);
 }
 
