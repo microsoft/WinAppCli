@@ -10,8 +10,8 @@ namespace WinApp.Cli.Tests;
 [TestClass]
 public class GestureTargetingTests
 {
-    private static readonly UiSessionInfo Session = new() { ProcessId = 1, ProcessName = "app", WindowHandle = 2 };
-    private static readonly SelectorExpression Selector = new() { Slug = "btn-ok" };
+    private static readonly UiTarget Session = new() { ProcessId = 1, ProcessName = "app", WindowHandle = 2 };
+    private static readonly UiSelector Selector = new() { Slug = "btn-ok" };
 
     [TestMethod]
     public async Task ResolveStableAsync_ReturnsOkWhenConfirmingReadSettlesWithinTolerance()
@@ -141,14 +141,14 @@ public class GestureTargetingTests
     private static UiElement Element(double x, double y, double width, double height)
         => new() { X = x, Y = y, Width = width, Height = height, Type = "Button", Name = "OK" };
 
-    private sealed class QueueUiAutomation : IUiAutomationService
+    private sealed class QueueUiAutomation : IUiAutomation
     {
         private readonly Queue<UiElement?> _elements;
         public int FindCalls { get; private set; }
 
         public QueueUiAutomation(IEnumerable<UiElement?> elements) => _elements = new Queue<UiElement?>(elements);
 
-        public Task<UiElement?> FindSingleElementAsync(UiSessionInfo session, SelectorExpression selector, CancellationToken ct)
+        public Task<UiElement?> FindSingleElementAsync(UiTarget session, UiSelector selector, CancellationToken ct)
         {
             Assert.AreSame(Session, session);
             Assert.AreSame(Selector, selector);
@@ -158,20 +158,20 @@ public class GestureTargetingTests
 
         public List<(nint Hwnd, int Pid, string Title)> FindWindowsByTitle(string titleQuery) => throw new NotImplementedException();
         public List<(nint Hwnd, int Pid, string Title)> FindWindowsByPid(int pid) => throw new NotImplementedException();
-        public Task<UiElement[]> InspectAsync(UiSessionInfo session, string? elementId, int depth, CancellationToken ct) => throw new NotImplementedException();
-        public Task<UiElement[]> InspectAncestorsAsync(UiSessionInfo session, string elementId, CancellationToken ct) => throw new NotImplementedException();
-        public Task<UiElement[]> SearchAsync(UiSessionInfo session, SelectorExpression selector, int maxResults, CancellationToken ct) => throw new NotImplementedException();
-        public Task<Dictionary<string, object?>> GetPropertiesAsync(UiSessionInfo session, UiElement element, string? propertyName, CancellationToken ct) => throw new NotImplementedException();
-        public Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, bool focus, CancellationToken ct) => throw new NotImplementedException();
-        public Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, CancellationToken ct, Action<bool>? onRecordingStarted = null) => throw new NotImplementedException();
-        public Task<string> InvokeAsync(UiSessionInfo session, UiElement element, CancellationToken ct) => throw new NotImplementedException();
-        public Task SetValueAsync(UiSessionInfo session, UiElement element, string text, CancellationToken ct) => throw new NotImplementedException();
-        public Task FocusAsync(UiSessionInfo session, UiElement element, CancellationToken ct) => throw new NotImplementedException();
-        public Task ScrollIntoViewAsync(UiSessionInfo session, UiElement element, CancellationToken ct) => throw new NotImplementedException();
-        public Task ScrollContainerAsync(UiSessionInfo session, UiElement element, string? direction, string? to, CancellationToken ct) => throw new NotImplementedException();
-        public Task<UiElement?> GetFocusedElementAsync(UiSessionInfo session, CancellationToken ct) => throw new NotImplementedException();
-        public Task<string?> GetTextAsync(UiSessionInfo session, UiElement element, CancellationToken ct) => throw new NotImplementedException();
-        public bool TryGetWindowRect(long hwnd, out WinApp.Cli.Helpers.PointerRect rect)
+        public Task<UiElement[]> InspectAsync(UiTarget session, string? elementId, int depth, CancellationToken ct) => throw new NotImplementedException();
+        public Task<UiElement[]> InspectAncestorsAsync(UiTarget session, string elementId, CancellationToken ct) => throw new NotImplementedException();
+        public Task<UiElement[]> SearchAsync(UiTarget session, UiSelector selector, int maxResults, CancellationToken ct) => throw new NotImplementedException();
+        public Task<Dictionary<string, object?>> GetPropertiesAsync(UiTarget session, UiElement element, string? propertyName, CancellationToken ct) => throw new NotImplementedException();
+        public Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiTarget session, string? elementId, bool captureScreen, bool focus, CancellationToken ct) => throw new NotImplementedException();
+        public Task<RecordCaptureResult> RecordAsync(UiTarget session, string? elementId, RecordOptions options, CancellationToken ct, Action<bool>? onRecordingStarted = null) => throw new NotImplementedException();
+        public Task<string> InvokeAsync(UiTarget session, UiElement element, CancellationToken ct) => throw new NotImplementedException();
+        public Task SetValueAsync(UiTarget session, UiElement element, string text, CancellationToken ct) => throw new NotImplementedException();
+        public Task FocusAsync(UiTarget session, UiElement element, CancellationToken ct) => throw new NotImplementedException();
+        public Task ScrollIntoViewAsync(UiTarget session, UiElement element, CancellationToken ct) => throw new NotImplementedException();
+        public Task ScrollContainerAsync(UiTarget session, UiElement element, string? direction, string? to, CancellationToken ct) => throw new NotImplementedException();
+        public Task<UiElement?> GetFocusedElementAsync(UiTarget session, CancellationToken ct) => throw new NotImplementedException();
+        public Task<string?> GetTextAsync(UiTarget session, UiElement element, CancellationToken ct) => throw new NotImplementedException();
+        public bool TryGetWindowRect(long hwnd, out WinApp.Cli.PointerRect rect)
         {
             rect = default;
             return false;

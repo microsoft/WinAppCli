@@ -69,7 +69,7 @@ public partial class RealUiAutomationTests
     public async Task ScreenshotAsync_NoWindow_Throws()
     {
         var svc = NewService();
-        var session = new UiSessionInfo { ProcessId = 0x7FFFFFFE, WindowHandle = 0, IsExplicitWindow = true };
+        var session = new UiTarget { ProcessId = 0x7FFFFFFE, WindowHandle = 0, IsExplicitWindow = true };
 
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(
             () => svc.ScreenshotAsync(session, null, captureScreen: false, focus: false, CancellationToken.None));

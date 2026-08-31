@@ -46,8 +46,8 @@ public partial class UiCommandTests : BaseCommandTests
         _fakeSystemQuery = new FakeSystemUiQuery();
         _fakePollDelay = new FakePollDelay();
         return services
-            .AddSingleton<IUiAutomationService>(_fakeUia)
-            .AddSingleton<IUiSessionService>(_fakeSession)
+            .AddSingleton<IUiAutomation>(_fakeUia)
+            .AddSingleton<IUiTargetResolver>(_fakeSession)
             .AddSingleton<WinApp.Cli.Helpers.IMouseInput>(_fakeMouse)
             .AddSingleton<WinApp.Cli.Helpers.IKeyboardInput>(_fakeKeyboard)
             .AddSingleton<WinApp.Cli.Helpers.IForegroundGuard>(_fakeForeground)

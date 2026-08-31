@@ -61,9 +61,9 @@ public partial class RealUiAutomationTests
     }
 
     private static UiAutomationService NewService()
-        => new(NullLogger<UiAutomationService>.Instance, new SelectorService());
+        => new(NullLogger<UiAutomationService>.Instance, new UiSelectorParser());
 
-    private static UiSessionInfo SessionFor(UiaTestFixture fx, bool explicitWindow = true) => new()
+    private static UiTarget SessionFor(UiaTestFixture fx, bool explicitWindow = true) => new()
     {
         ProcessId = fx.ProcessId,
         ProcessName = "WinApp.Cli.Tests",
@@ -73,12 +73,12 @@ public partial class RealUiAutomationTests
     };
 
     /// <summary>Polls until the given AutomationId is resolvable via the real service (UIA ready).</summary>
-    private static async Task<UiElement> ResolveAsync(UiAutomationService svc, UiSessionInfo session, string automationId)
+    private static async Task<UiElement> ResolveAsync(UiAutomationService svc, UiTarget session, string automationId)
     {
         var deadline = Environment.TickCount64 + ReadyTimeoutMs;
         while (Environment.TickCount64 < deadline)
         {
-            var el = await svc.FindSingleElementAsync(session, new SelectorExpression { Query = automationId }, CancellationToken.None);
+            var el = await svc.FindSingleElementAsync(session, new UiSelector { Query = automationId }, CancellationToken.None);
             if (el is not null)
             {
                 return el;
@@ -227,7 +227,7 @@ public partial class RealUiAutomationTests
     {
         var svc = NewService();
         // A session pointing at a non-existent window/process yields no root -> empty result.
-        var session = new UiSessionInfo { ProcessId = 0x7FFFFFFE, WindowHandle = 0, IsExplicitWindow = true };
+        var session = new UiTarget { ProcessId = 0x7FFFFFFE, WindowHandle = 0, IsExplicitWindow = true };
 
         var tree = await svc.InspectAsync(session, null, 3, CancellationToken.None);
 
@@ -303,7 +303,7 @@ public partial class RealUiAutomationTests
         var session = SessionFor(fx);
         await ResolveAsync(svc, session, "btnInvoke");
 
-        var results = await svc.SearchAsync(session, new SelectorExpression { Query = "btnInvoke" }, 10, CancellationToken.None);
+        var results = await svc.SearchAsync(session, new UiSelector { Query = "btnInvoke" }, 10, CancellationToken.None);
 
         Assert.AreEqual(1, results.Length);
         Assert.AreEqual("Button", results[0].Type);
@@ -318,7 +318,7 @@ public partial class RealUiAutomationTests
         var session = SessionFor(fx);
         await ResolveAsync(svc, session, "pnlChild00");
 
-        var results = await svc.SearchAsync(session, new SelectorExpression { Query = "Child 1" }, 50, CancellationToken.None);
+        var results = await svc.SearchAsync(session, new UiSelector { Query = "Child 1" }, 50, CancellationToken.None);
 
         // "Child 1" matches Child 10..19 by name (10 controls).
         Assert.IsTrue(results.Length >= 10, $"expected >=10 matches, got {results.Length}");
@@ -333,7 +333,7 @@ public partial class RealUiAutomationTests
         var session = SessionFor(fx);
         await ResolveAsync(svc, session, "btnInvoke");
 
-        var results = await svc.SearchAsync(session, new SelectorExpression { Query = "zzz-does-not-exist" }, 10, CancellationToken.None);
+        var results = await svc.SearchAsync(session, new UiSelector { Query = "zzz-does-not-exist" }, 10, CancellationToken.None);
 
         Assert.AreEqual(0, results.Length);
     }
@@ -349,7 +349,7 @@ public partial class RealUiAutomationTests
         // A Label supports no InvokePattern, so the FindAll loop takes the !IsInvokable branch and
         // looks for an invokable ancestor. The label sits directly on the form (no invokable parent),
         // so the element is returned with a null InvokableAncestor.
-        var results = await svc.SearchAsync(session, new SelectorExpression { Query = "Hello Label" }, 10, CancellationToken.None);
+        var results = await svc.SearchAsync(session, new UiSelector { Query = "Hello Label" }, 10, CancellationToken.None);
 
         var label = results.SingleOrDefault(r => r.AutomationId == "lblText");
         Assert.IsNotNull(label, "expected the non-invokable label to be returned by search");
@@ -385,7 +385,7 @@ public partial class RealUiAutomationTests
         var item = tree.First(e => e.Type == "ListItem" && e.Name == "Item 07");
         Assert.IsNotNull(item.Selector);
 
-        var found = await svc.FindSingleElementAsync(session, new SelectorExpression { Slug = item.Selector }, CancellationToken.None);
+        var found = await svc.FindSingleElementAsync(session, new UiSelector { Slug = item.Selector }, CancellationToken.None);
 
         Assert.IsNotNull(found);
         Assert.AreEqual("Item 07", found.Name);
@@ -399,7 +399,7 @@ public partial class RealUiAutomationTests
         var session = SessionFor(fx);
         await ResolveAsync(svc, session, "btnInvoke");
 
-        var found = await svc.FindSingleElementAsync(session, new SelectorExpression { Query = "nope-xyz-123" }, CancellationToken.None);
+        var found = await svc.FindSingleElementAsync(session, new UiSelector { Query = "nope-xyz-123" }, CancellationToken.None);
 
         Assert.IsNull(found);
     }
@@ -414,7 +414,7 @@ public partial class RealUiAutomationTests
 
         // "Child" matches 40 buttons by name; all are invokable so it cannot be disambiguated.
         var ex = await Assert.ThrowsExactlyAsync<UiAmbiguousSelectorException>(
-            () => svc.FindSingleElementAsync(session, new SelectorExpression { Query = "Child" }, CancellationToken.None));
+            () => svc.FindSingleElementAsync(session, new UiSelector { Query = "Child" }, CancellationToken.None));
         StringAssert.Contains(ex.Message, "matched");
     }
 

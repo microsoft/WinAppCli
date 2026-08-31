@@ -8,7 +8,7 @@ namespace WinApp.Cli.Tests;
 [TestClass]
 public class SelectorServiceTests
 {
-    private readonly SelectorService _sut = new();
+    private readonly UiSelectorParser _sut = new();
 
     [TestMethod]
     public void Parse_Slug_ReturnsSlug()

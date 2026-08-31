@@ -56,9 +56,9 @@ internal class UiScrollCommand : Command, IShortDescription
     }
 
     public class Handler(
-        IUiSessionService sessionService,
-        IUiAutomationService uiAutomation,
-        ISelectorService selectorService,
+        IUiTargetResolver sessionService,
+        IUiAutomation uiAutomation,
+        IUiSelectorParser selectorService,
         IMouseInput mouseInput,
         IForegroundGuard foregroundGuard,
         IAnsiConsole ansiConsole,
@@ -146,7 +146,7 @@ internal class UiScrollCommand : Command, IShortDescription
                     var stable = await GestureTargeting.ResolveStableAsync(
                         uiAutomation, session, selector, element,
                         GestureTargeting.DefaultMaxReads, GestureTargeting.DefaultReadDelayMs, null, cancellationToken);
-                    if (!GestureTargeting.TryReport(stable, logger, json, selectorStr, "scroll --wheel"))
+                    if (!UiInjectionReporting.TryReport(stable, logger, json, selectorStr, "scroll --wheel"))
                     {
                         return 1;
                     }
@@ -173,7 +173,7 @@ internal class UiScrollCommand : Command, IShortDescription
 
                     var confirmed = await GestureTargeting.ConfirmStillAsync(
                         uiAutomation, session, selector, stable.Element, cancellationToken);
-                    if (!GestureTargeting.TryReport(confirmed, logger, json, selectorStr, "scroll --wheel"))
+                    if (!UiInjectionReporting.TryReport(confirmed, logger, json, selectorStr, "scroll --wheel"))
                     {
                         return 1;
                     }

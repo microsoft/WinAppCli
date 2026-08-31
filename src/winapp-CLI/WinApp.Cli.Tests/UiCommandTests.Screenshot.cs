@@ -128,7 +128,7 @@ public partial class UiCommandTests
     {
         // --window 0 with no --app: the missing-app guard passes (window is not null) and
         // DiscoverAllWindows returns null (0 is not > 0, no app). Production then rejects it at
-        // ResolveSessionAsync — hwnd is not > 0 and --app is blank, so UiSessionService throws
+        // ResolveSessionAsync — hwnd is not > 0 and --app is blank, so UiTargetResolver throws
         // "Specify --app..." (proven directly by UiSessionServiceTests.ResolveSession_WhitespaceApp_
         // ZeroHwnd_Throws). The command maps that to exit 1 and writes NO screenshot. The fake models
         // the same throw so the assertion reflects real behavior instead of the fake accepting hwnd 0.

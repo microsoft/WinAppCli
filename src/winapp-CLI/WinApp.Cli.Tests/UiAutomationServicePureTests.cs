@@ -198,7 +198,7 @@ public class UiAutomationServicePureTests
         UiAutomationService.s_foregroundWindowForBlankRetry = _ => foregrounded = true;
         UiAutomationService.s_sleepForBlankRetry = ms => Assert.AreEqual(200, ms);
 
-        var service = new UiAutomationService(NullLogger<UiAutomationService>.Instance, new SelectorService());
+        var service = new UiAutomationService(NullLogger<UiAutomationService>.Instance, new UiSelectorParser());
         var pixels = service.CaptureFromWindowWithBlankRetry(new HWND(123), 1, 2);
 
         Assert.AreEqual(2, calls, "blank first capture must trigger one retry");
@@ -217,7 +217,7 @@ public class UiAutomationServicePureTests
         };
         UiAutomationService.s_foregroundWindowForBlankRetry = _ => Assert.Fail("non-blank capture must not foreground/retry");
 
-        var service = new UiAutomationService(NullLogger<UiAutomationService>.Instance, new SelectorService());
+        var service = new UiAutomationService(NullLogger<UiAutomationService>.Instance, new UiSelectorParser());
         var pixels = service.CaptureFromWindowWithBlankRetry(new HWND(456), 1, 1);
 
         Assert.AreEqual(1, calls);

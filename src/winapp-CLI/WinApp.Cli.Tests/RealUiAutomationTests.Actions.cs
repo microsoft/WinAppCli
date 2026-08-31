@@ -69,7 +69,7 @@ public partial class RealUiAutomationTests
             "list item never became selected after invoke");
     }
 
-    private static async Task<bool> IsSelectedAsync(UiAutomationService svc, UiSessionInfo session, UiElement item)
+    private static async Task<bool> IsSelectedAsync(UiAutomationService svc, UiTarget session, UiElement item)
     {
         var props = await svc.GetPropertiesAsync(session, item, "IsSelected", CancellationToken.None);
         return props.TryGetValue("IsSelected", out var sel) && sel is bool b && b;
@@ -136,7 +136,7 @@ public partial class RealUiAutomationTests
     {
         var svc = NewService();
         UiElement button;
-        UiSessionInfo session;
+        UiTarget session;
         using (var fx = new UiaTestFixture())
         {
             session = SessionFor(fx);
@@ -182,7 +182,7 @@ public partial class RealUiAutomationTests
     {
         var svc = NewService();
         UiElement box;
-        UiSessionInfo session;
+        UiTarget session;
         using (var fx = new UiaTestFixture())
         {
             session = SessionFor(fx);
@@ -213,7 +213,7 @@ public partial class RealUiAutomationTests
             {
                 return false;
             }
-            var session = new UiSessionInfo
+            var session = new UiTarget
             {
                 ProcessId = pid.Value,
                 ProcessName = "focus-owner",
@@ -234,7 +234,7 @@ public partial class RealUiAutomationTests
 
         // A session whose PID owns nothing on-screen can never match the system focused element, so
         // the service must reject it and return null (the PID-guard / not-in-target-process path).
-        var session = new UiSessionInfo
+        var session = new UiTarget
         {
             ProcessId = 0x7FFF_FFFE,
             ProcessName = "no-such-process",

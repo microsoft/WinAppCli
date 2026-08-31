@@ -9,7 +9,7 @@ namespace WinApp.Cli.Tests;
 /// <summary>
 /// Fake UIA service for testing — returns configurable element data without touching real UIA.
 /// </summary>
-internal class FakeUiAutomationService : IUiAutomationService
+internal class FakeUiAutomationService : IUiAutomation
 {
     public UiElement[] InspectResult { get; set; } = [];
     public UiElement[] SearchResult { get; set; } = [];
@@ -93,7 +93,7 @@ internal class FakeUiAutomationService : IUiAutomationService
     public Exception? FindSingleElementThrowException { get; set; }
 
     /// <summary>The rectangle returned for any nonzero handle (default: 0,0 – 1920,1080).</summary>
-    public WinApp.Cli.Helpers.PointerRect WindowRect { get; set; } = new(0, 0, 1920, 1080);
+    public WinApp.Cli.PointerRect WindowRect { get; set; } = new(0, 0, 1920, 1080);
 
     /// <summary>When <see langword="false"/>, reports the window rect as unreadable (returns false).</summary>
     public bool WindowRectAllow { get; set; } = true;
@@ -102,7 +102,7 @@ internal class FakeUiAutomationService : IUiAutomationService
     /// hwnd-0 rejection (no lookup) from the out-of-bounds rejection (lookup happened).</summary>
     public List<long> WindowRectCalls { get; } = [];
 
-    public bool TryGetWindowRect(long hwnd, out WinApp.Cli.Helpers.PointerRect rect)
+    public bool TryGetWindowRect(long hwnd, out WinApp.Cli.PointerRect rect)
     {
         WindowRectCalls.Add(hwnd);
         if (!WindowRectAllow || hwnd == 0)
@@ -115,25 +115,25 @@ internal class FakeUiAutomationService : IUiAutomationService
         return true;
     }
 
-    public Task<UiElement[]> InspectAsync(UiSessionInfo session, string? elementId, int depth, CancellationToken ct)
+    public Task<UiElement[]> InspectAsync(UiTarget session, string? elementId, int depth, CancellationToken ct)
     {
         if (InspectThrow is not null) { throw InspectThrow; }
         return Task.FromResult(InspectResult);
     }
 
-    public Task<UiElement[]> InspectAncestorsAsync(UiSessionInfo session, string elementId, CancellationToken ct)
+    public Task<UiElement[]> InspectAncestorsAsync(UiTarget session, string elementId, CancellationToken ct)
     {
         if (InspectThrow is not null) { throw InspectThrow; }
         return Task.FromResult(InspectResult);
     }
 
-    public Task<UiElement[]> SearchAsync(UiSessionInfo session, SelectorExpression selector, int maxResults, CancellationToken ct)
+    public Task<UiElement[]> SearchAsync(UiTarget session, UiSelector selector, int maxResults, CancellationToken ct)
     {
         if (SearchThrow is not null) { throw SearchThrow; }
         return Task.FromResult(SearchResult.Take(maxResults).ToArray());
     }
 
-    public Task<UiElement?> FindSingleElementAsync(UiSessionInfo session, SelectorExpression selector, CancellationToken ct)
+    public Task<UiElement?> FindSingleElementAsync(UiTarget session, UiSelector selector, CancellationToken ct)
     {
         if (FindSingleElementThrowException is not null) { throw FindSingleElementThrowException; }
         if (FindSingleThrow is not null) { throw FindSingleThrow; }
@@ -170,13 +170,13 @@ internal class FakeUiAutomationService : IUiAutomationService
         return Task.FromResult(FindSingleResult);
     }
 
-    public Task<Dictionary<string, object?>> GetPropertiesAsync(UiSessionInfo session, UiElement element, string? propertyName, CancellationToken ct)
+    public Task<Dictionary<string, object?>> GetPropertiesAsync(UiTarget session, UiElement element, string? propertyName, CancellationToken ct)
     {
         if (PropertiesThrow is not null) { throw PropertiesThrow; }
         return Task.FromResult(PropertiesResult);
     }
 
-    public Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, bool focus, CancellationToken ct)
+    public Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiTarget session, string? elementId, bool captureScreen, bool focus, CancellationToken ct)
     {
         if (ScreenshotThrow is not null) { throw ScreenshotThrow; }
         return Task.FromResult(ScreenshotResult);
@@ -194,7 +194,7 @@ internal class FakeUiAutomationService : IUiAutomationService
 
     public bool? RecordingStartedFrameArtifactsActiveOverride { get; set; }
 
-    public async Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, CancellationToken ct, Action<bool>? onRecordingStarted = null)
+    public async Task<RecordCaptureResult> RecordAsync(UiTarget session, string? elementId, RecordOptions options, CancellationToken ct, Action<bool>? onRecordingStarted = null)
     {
         LastRecordOptions = options;
         if (RecordException is not null)
@@ -260,7 +260,7 @@ internal class FakeUiAutomationService : IUiAutomationService
         };
     }
 
-    public Task<string> InvokeAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
+    public Task<string> InvokeAsync(UiTarget session, UiElement element, CancellationToken ct)
     {
         if (InvokeThrow is not null) { throw InvokeThrow; }
         if (InvokeThrowsForAncestorFallback && element.InvokableAncestor is not null)
@@ -270,25 +270,25 @@ internal class FakeUiAutomationService : IUiAutomationService
         return Task.FromResult(InvokeResult);
     }
 
-    public Task SetValueAsync(UiSessionInfo session, UiElement element, string text, CancellationToken ct)
+    public Task SetValueAsync(UiTarget session, UiElement element, string text, CancellationToken ct)
     {
         if (SetValueThrow is not null) { throw SetValueThrow; }
         return Task.CompletedTask;
     }
 
-    public Task FocusAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
+    public Task FocusAsync(UiTarget session, UiElement element, CancellationToken ct)
     {
         if (FocusThrow is not null) { throw FocusThrow; }
         return Task.CompletedTask;
     }
 
-    public Task ScrollIntoViewAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
+    public Task ScrollIntoViewAsync(UiTarget session, UiElement element, CancellationToken ct)
     {
         if (ScrollIntoViewThrow is not null) { throw ScrollIntoViewThrow; }
         return Task.CompletedTask;
     }
 
-    public Task ScrollContainerAsync(UiSessionInfo session, UiElement element, string? direction, string? to, CancellationToken ct)
+    public Task ScrollContainerAsync(UiTarget session, UiElement element, string? direction, string? to, CancellationToken ct)
     {
         if (ScrollContainerThrow is not null) { throw ScrollContainerThrow; }
         return Task.CompletedTask;
@@ -296,13 +296,13 @@ internal class FakeUiAutomationService : IUiAutomationService
 
     public UiElement? FocusedResult { get; set; } = new UiElement { Id = "e0", Type = "Edit", Name = "FocusedElement" };
 
-    public Task<UiElement?> GetFocusedElementAsync(UiSessionInfo session, CancellationToken ct)
+    public Task<UiElement?> GetFocusedElementAsync(UiTarget session, CancellationToken ct)
     {
         if (GetFocusedThrow is not null) { throw GetFocusedThrow; }
         return Task.FromResult(FocusedResult);
     }
 
-    public Task<string?> GetTextAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
+    public Task<string?> GetTextAsync(UiTarget session, UiElement element, CancellationToken ct)
     {
         if (GetTextThrow is not null) { throw GetTextThrow; }
         if (GetTextResults.Count > 0) { return Task.FromResult(GetTextResults.Dequeue()); }
@@ -313,9 +313,9 @@ internal class FakeUiAutomationService : IUiAutomationService
 /// <summary>
 /// Fake session service for testing — returns a configurable session without process resolution.
 /// </summary>
-internal class FakeUiSessionService : IUiSessionService
+internal class FakeUiSessionService : IUiTargetResolver
 {
-    public UiSessionInfo SessionResult { get; set; } = new()
+    public UiTarget SessionResult { get; set; } = new()
     {
         ProcessId = 1234,
         ProcessName = "TestApp",
@@ -330,7 +330,7 @@ internal class FakeUiSessionService : IUiSessionService
     /// (or COMException) catch from inside its <c>try</c>, before any element work. Default null = no-op.</summary>
     public Exception? ResolveThrow { get; set; }
 
-    public Task<UiSessionInfo> ResolveSessionAsync(string? app, long? hwnd, CancellationToken ct)
+    public Task<UiTarget> ResolveSessionAsync(string? app, long? hwnd, CancellationToken ct)
     {
         if (ThrowException is not null) { throw ThrowException; }
         if (ResolveThrow is not null) { throw ResolveThrow; }
@@ -372,13 +372,13 @@ internal class FakeMouseInput : WinApp.Cli.Helpers.IMouseInput
 internal class FakePointerInput : WinApp.Cli.Helpers.IPointerInput
 {
     public record TouchCall(
-        WinApp.Cli.Helpers.TouchGesture Gesture,
-        IReadOnlyList<IReadOnlyList<WinApp.Cli.Helpers.PointerPoint>> ContactPaths,
+        WinApp.Cli.TouchGesture Gesture,
+        IReadOnlyList<IReadOnlyList<WinApp.Cli.PointerPoint>> ContactPaths,
         int HoldMs,
         int DurationMs);
 
     public record PenCall(
-        IReadOnlyList<WinApp.Cli.Helpers.PointerPoint> Path,
+        IReadOnlyList<WinApp.Cli.PointerPoint> Path,
         float Pressure,
         int TiltX,
         int TiltY,
@@ -393,8 +393,8 @@ internal class FakePointerInput : WinApp.Cli.Helpers.IPointerInput
     public Exception? ThrowException { get; set; }
 
     public void Touch(
-        WinApp.Cli.Helpers.TouchGesture gesture,
-        IReadOnlyList<IReadOnlyList<WinApp.Cli.Helpers.PointerPoint>> contactPaths,
+        WinApp.Cli.TouchGesture gesture,
+        IReadOnlyList<IReadOnlyList<WinApp.Cli.PointerPoint>> contactPaths,
         int holdMs,
         int durationMs)
     {
@@ -403,7 +403,7 @@ internal class FakePointerInput : WinApp.Cli.Helpers.IPointerInput
     }
 
     public void Pen(
-        IReadOnlyList<WinApp.Cli.Helpers.PointerPoint> path,
+        IReadOnlyList<WinApp.Cli.PointerPoint> path,
         float pressure,
         int tiltX,
         int tiltY,
@@ -420,7 +420,7 @@ internal class FakePointerInput : WinApp.Cli.Helpers.IPointerInput
 /// </summary>
 internal class FakeKeyboardInput : WinApp.Cli.Helpers.IKeyboardInput
 {
-    public record SendCall(long Hwnd, IReadOnlyList<WinApp.Cli.Helpers.KeyAction> Actions, WinApp.Cli.Helpers.KeyTransport Transport);
+    public record SendCall(long Hwnd, IReadOnlyList<WinApp.Cli.KeyAction> Actions, WinApp.Cli.KeyTransport Transport);
 
     public List<SendCall> SendCalls { get; } = [];
 
@@ -428,7 +428,7 @@ internal class FakeKeyboardInput : WinApp.Cli.Helpers.IKeyboardInput
     /// command's exception mapping (e.g. a mid-injection <c>ForegroundLostException</c> → foreground_not_target).</summary>
     public Exception? SendException { get; set; }
 
-    public void Send(long hwnd, IReadOnlyList<WinApp.Cli.Helpers.KeyAction> actions, WinApp.Cli.Helpers.KeyTransport transport)
+    public void Send(long hwnd, IReadOnlyList<WinApp.Cli.KeyAction> actions, WinApp.Cli.KeyTransport transport)
     {
         SendCalls.Add(new(hwnd, actions, transport));
         if (SendException is not null)
@@ -495,7 +495,7 @@ internal class FakeOwnedWindowFinder : WinApp.Cli.Helpers.IOwnedWindowFinder
 }
 
 /// <summary>
-/// Fake <see cref="ISystemUiQuery"/> — drives <see cref="UiSessionService"/>'s OS boundaries
+/// Fake <see cref="ISystemUiQuery"/> — drives <see cref="UiTargetResolver"/>'s OS boundaries
 /// (process enumeration + a few Win32 window queries) from in-memory data so its resolver logic can
 /// be exercised deterministically. Every knob defaults to "nothing found" so a bare instance yields
 /// the same behavior a headless box would (no processes, no foreground, no window title).

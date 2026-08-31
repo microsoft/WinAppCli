@@ -42,8 +42,8 @@ internal class UiRecordCommand : Command, IShortDescription
     }
 
     public class Handler(
-        IUiSessionService sessionService,
-        IUiAutomationService uiAutomation,
+        IUiTargetResolver sessionService,
+        IUiRecordingService recordingService,
         IAnsiConsole ansiConsole,
         ILogger<UiRecordCommand> logger) : AsynchronousCommandLineAction
     {
@@ -231,7 +231,7 @@ internal class UiRecordCommand : Command, IShortDescription
                     FramesDirectory = framesDirectory,
                 };
 
-                var result = await uiAutomation.RecordAsync(session, selector, options, linkedCts.Token, OnRecordingStarted);
+                var result = await recordingService.RecordAsync(session, selector, options, linkedCts.Token, OnRecordingStarted);
 
                 if (json)
                 {

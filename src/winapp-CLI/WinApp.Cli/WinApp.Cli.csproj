@@ -85,6 +85,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\WinApp.UIAutomation\WinApp.UIAutomation.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
       <_Parameter1>WinApp.Cli.Tests</_Parameter1>
     </AssemblyAttribute>

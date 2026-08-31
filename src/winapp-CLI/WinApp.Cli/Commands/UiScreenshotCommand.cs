@@ -34,8 +34,8 @@ internal class UiScreenshotCommand : Command, IShortDescription
     }
 
     public class Handler(
-        IUiSessionService sessionService,
-        IUiAutomationService uiAutomation,
+        IUiTargetResolver sessionService,
+        IUiAutomation uiAutomation,
         IOwnedWindowFinder ownedWindowFinder,
         ISystemUiQuery systemQuery,
         IAnsiConsole ansiConsole,
@@ -68,7 +68,7 @@ internal class UiScreenshotCommand : Command, IShortDescription
                         // Resolve session using the largest window's HWND (suppresses session multi-window warning)
                         var main = allWindows.OrderByDescending(w =>
                         {
-                            var info = UiSessionService.GetWindowInfo(w.Hwnd);
+                            var info = UiTargetResolver.GetWindowInfo(w.Hwnd);
                             return (long)info.Width * info.Height;
                         }).First();
                         var session = await sessionService.ResolveSessionAsync(null, main.Hwnd, cancellationToken);
@@ -142,7 +142,7 @@ internal class UiScreenshotCommand : Command, IShortDescription
 
         private async Task<int> CaptureMultipleWindows(
             List<(nint Hwnd, int Pid, string Title)> windows,
-            UiSessionInfo session,
+            UiTarget session,
             string? output,
             bool json,
             bool captureScreen,
@@ -154,7 +154,7 @@ internal class UiScreenshotCommand : Command, IShortDescription
             // Sort: main window first (largest), then others
             var sorted = windows.OrderByDescending(w =>
             {
-                var info = UiSessionService.GetWindowInfo(w.Hwnd);
+                var info = UiTargetResolver.GetWindowInfo(w.Hwnd);
                 return (long)info.Width * info.Height;
             }).ToList();
 
@@ -168,11 +168,11 @@ internal class UiScreenshotCommand : Command, IShortDescription
             var windowDetails = new List<UiScreenshotWindowInfo>();
             foreach (var w in sorted)
             {
-                var info = UiSessionService.GetWindowInfo(w.Hwnd);
+                var info = UiTargetResolver.GetWindowInfo(w.Hwnd);
                 var title = string.IsNullOrEmpty(w.Title) ? "(no title)" : w.Title;
                 try
                 {
-                    var windowSession = new UiSessionInfo
+                    var windowSession = new UiTarget
                     {
                         ProcessId = w.Pid,
                         ProcessName = session.ProcessName,

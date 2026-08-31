@@ -17,13 +17,13 @@ public partial class RealUiAutomationTests
     {
         var svc = NewService();
         UiAutomationService.s_getRootElement = (_, _) => null;
-        var session = new UiSessionInfo { ProcessId = int.MaxValue, ProcessName = "missing", WindowTitle = "missing" };
+        var session = new UiTarget { ProcessId = int.MaxValue, ProcessName = "missing", WindowTitle = "missing" };
         var element = new UiElement { Id = "dead", Type = "Text", Name = "Dead", AutomationId = "dead" };
 
         Assert.AreEqual(0, (await svc.InspectAsync(session, null, 1, CancellationToken.None)).Length);
         Assert.AreEqual(0, (await svc.InspectAncestorsAsync(session, "dead", CancellationToken.None)).Length);
-        Assert.AreEqual(0, (await svc.SearchAsync(session, new SelectorExpression { Query = "dead" }, 5, CancellationToken.None)).Length);
-        Assert.IsNull(await svc.FindSingleElementAsync(session, new SelectorExpression { Query = "dead" }, CancellationToken.None));
+        Assert.AreEqual(0, (await svc.SearchAsync(session, new UiSelector { Query = "dead" }, 5, CancellationToken.None)).Length);
+        Assert.IsNull(await svc.FindSingleElementAsync(session, new UiSelector { Query = "dead" }, CancellationToken.None));
         Assert.AreEqual("Dead", (await svc.GetPropertiesAsync(session, element, "Name", CancellationToken.None))["Name"]);
 
         foreach (var ex in new[]
@@ -65,7 +65,7 @@ public partial class RealUiAutomationTests
         var replacementHash = item.Selector!.EndsWith("ffff", StringComparison.Ordinal) ? "0000" : "ffff";
         var badSlug = item.Selector[..^4] + replacementHash;
         var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
-            () => svc.FindSingleElementAsync(session, new SelectorExpression { Slug = badSlug }, CancellationToken.None));
+            () => svc.FindSingleElementAsync(session, new UiSelector { Slug = badSlug }, CancellationToken.None));
 
         Assert.AreEqual(1, scoped.Length);
         Assert.AreEqual("Item 04", scoped[0].Name);
@@ -88,8 +88,8 @@ public partial class RealUiAutomationTests
         };
         UiAutomationService.s_findInvokableAncestor = (_, _, root) => root;
 
-        var results = await svc.SearchAsync(session, new SelectorExpression { Query = "manual-only" }, 3, CancellationToken.None);
-        var single = await svc.FindSingleElementAsync(session, new SelectorExpression { Query = "manual-only" }, CancellationToken.None);
+        var results = await svc.SearchAsync(session, new UiSelector { Query = "manual-only" }, 3, CancellationToken.None);
+        var single = await svc.FindSingleElementAsync(session, new UiSelector { Query = "manual-only" }, CancellationToken.None);
 
         Assert.AreEqual(1, results.Length);
         Assert.AreEqual("Window", results[0].Type);
@@ -196,9 +196,9 @@ public partial class RealUiAutomationTests
         UiAutomationService.s_findElementOnOtherWindows = (_, _, selector) =>
             selector.IsSlug ? expected : null;
 
-        var empty = await svc.FindSingleElementAsync(explicitSession, new SelectorExpression(), CancellationToken.None);
-        var fromOther = await svc.FindSingleElementAsync(nonExplicit, new SelectorExpression { Slug = "btn-notthere-0000" }, CancellationToken.None);
-        var missing = await svc.FindSingleElementAsync(nonExplicit, new SelectorExpression { Query = "definitely-not-present" }, CancellationToken.None);
+        var empty = await svc.FindSingleElementAsync(explicitSession, new UiSelector(), CancellationToken.None);
+        var fromOther = await svc.FindSingleElementAsync(nonExplicit, new UiSelector { Slug = "btn-notthere-0000" }, CancellationToken.None);
+        var missing = await svc.FindSingleElementAsync(nonExplicit, new UiSelector { Query = "definitely-not-present" }, CancellationToken.None);
 
         Assert.IsNull(empty);
         Assert.AreSame(expected, fromOther);
@@ -256,7 +256,7 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var logger = new CapturingLogger<UiAutomationService>();
-        var svc = new UiAutomationService(logger, new SelectorService());
+        var svc = new UiAutomationService(logger, new UiSelectorParser());
         var session = NonExplicitSession(fx);
         var childHwnd = fx.OnUiThread(() => (nint)fx.InvokeButton.Handle);
         UiAutomationService.s_getAllAppWindows = (_, _) => [(fx.Hwnd, fx.ProcessId, fx.Title), (childHwnd, fx.ProcessId, "child")];
@@ -291,7 +291,7 @@ public partial class RealUiAutomationTests
         var tree = await svc.InspectAsync(session, null, 2, CancellationToken.None);
         var nameless = tree.First(e => e.Type == "Pane" && e.Name is null && e.AutomationId is null && e.Selector is not null);
 
-        var found = await svc.FindSingleElementAsync(session, new SelectorExpression { Slug = nameless.Selector }, CancellationToken.None);
+        var found = await svc.FindSingleElementAsync(session, new UiSelector { Slug = nameless.Selector }, CancellationToken.None);
 
         Assert.IsNotNull(found);
         Assert.AreEqual(nameless.Selector, found!.Selector);
@@ -308,7 +308,7 @@ public partial class RealUiAutomationTests
 
         var byName = await PollFindOtherWindowAsync(svc, session, "OwnedOnly");
         var bySearch = (await PollSearchAsync(svc, session, "btnOwnedOnly")).Single(e => e.AutomationId == "btnOwnedOnly");
-        var missingSlug = await svc.FindSingleElementAsync(session, new SelectorExpression { Slug = "btn-definitely-missing-0000" }, CancellationToken.None);
+        var missingSlug = await svc.FindSingleElementAsync(session, new UiSelector { Slug = "btn-definitely-missing-0000" }, CancellationToken.None);
 
         Assert.AreEqual("btnOwnedOnly", byName.AutomationId);
         Assert.AreEqual("btnOwnedOnly", bySearch.AutomationId);
@@ -324,14 +324,14 @@ public partial class RealUiAutomationTests
         var svc = NewService();
         var session = SessionFor(fx);
 
-        var found = await svc.FindSingleElementAsync(session, new SelectorExpression { Query = "Inside Invoke" }, CancellationToken.None);
+        var found = await svc.FindSingleElementAsync(session, new UiSelector { Query = "Inside Invoke" }, CancellationToken.None);
 
         Assert.IsNotNull(found);
         Assert.AreEqual("lblInsideInvoke", found!.AutomationId);
         Assert.IsNotNull(found.InvokableAncestor);
         Assert.AreEqual("btnParentInvoke", found.InvokableAncestor!.AutomationId);
 
-        var bySlug = await svc.FindSingleElementAsync(session, new SelectorExpression { Slug = found.Selector! }, CancellationToken.None);
+        var bySlug = await svc.FindSingleElementAsync(session, new UiSelector { Slug = found.Selector! }, CancellationToken.None);
         Assert.IsNotNull(bySlug!.InvokableAncestor);
         Assert.AreEqual("btnParentInvoke", bySlug.InvokableAncestor!.AutomationId);
     }
@@ -343,7 +343,7 @@ public partial class RealUiAutomationTests
         var svc = NewService();
         var session = SessionFor(fx);
 
-        var results = await svc.SearchAsync(session, new SelectorExpression { Query = "Inside Invoke" }, 5, CancellationToken.None);
+        var results = await svc.SearchAsync(session, new UiSelector { Query = "Inside Invoke" }, 5, CancellationToken.None);
         var label = results.Single(e => e.AutomationId == "lblInsideInvoke");
 
         Assert.IsNotNull(label.InvokableAncestor);
@@ -368,8 +368,8 @@ public partial class RealUiAutomationTests
     public async Task InvalidStoredHwndFallsBackAndReturnsEmpty()
     {
         var logger = new CapturingLogger<UiAutomationService>();
-        var svc = new UiAutomationService(logger, new SelectorService());
-        var session = new UiSessionInfo
+        var svc = new UiAutomationService(logger, new UiSelectorParser());
+        var session = new UiTarget
         {
             ProcessId = int.MaxValue,
             ProcessName = "missing",
@@ -403,7 +403,7 @@ public partial class RealUiAutomationTests
     public async Task ScrollIntoViewAsync_TopLevelButtonWithoutScrollableAncestorThrows()
     {
         var svc = NewService();
-        var session = new UiSessionInfo { ProcessId = Environment.ProcessId, ProcessName = "fake" };
+        var session = new UiTarget { ProcessId = Environment.ProcessId, ProcessName = "fake" };
         var model = new UiElement { Id = "no-scroll", Type = "Text", AutomationId = "noScroll" };
         var target = ComProxy<IUIAutomationElement>((method, _) => method.Name switch
         {
@@ -440,15 +440,15 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var logger = new CapturingLogger<UiAutomationService>();
-        var svc = new UiAutomationService(logger, new SelectorService());
+        var svc = new UiAutomationService(logger, new UiSelectorParser());
         var session = NonExplicitSession(fx);
         var otherHwnd = fx.Hwnd + 1000;
         UiAutomationService.s_getAllAppWindows = (_, _) => [(fx.Hwnd, fx.ProcessId, fx.Title), (otherHwnd, fx.ProcessId, "faulty")];
         UiAutomationService.s_getRootElementForHwnd = (_, hwnd) =>
             hwnd == otherHwnd ? throw new COMException("simulated HWND failure") : null;
 
-        var search = await svc.SearchAsync(session, new SelectorExpression { Query = "not-on-main-window" }, 5, CancellationToken.None);
-        var single = await svc.FindSingleElementAsync(session, new SelectorExpression { Query = "not-on-main-window" }, CancellationToken.None);
+        var search = await svc.SearchAsync(session, new UiSelector { Query = "not-on-main-window" }, 5, CancellationToken.None);
+        var single = await svc.FindSingleElementAsync(session, new UiSelector { Query = "not-on-main-window" }, CancellationToken.None);
 
         Assert.AreEqual(0, search.Length);
         Assert.IsNull(single);
@@ -459,8 +459,8 @@ public partial class RealUiAutomationTests
     public async Task FaultInjectedComProxies_CoverPatternBranches()
     {
         var logger = new CapturingLogger<UiAutomationService>();
-        var svc = new UiAutomationService(logger, new SelectorService());
-        var session = new UiSessionInfo { ProcessId = Environment.ProcessId, ProcessName = "fake", WindowHandle = 0 };
+        var svc = new UiAutomationService(logger, new UiSelectorParser());
+        var session = new UiTarget { ProcessId = Environment.ProcessId, ProcessName = "fake", WindowHandle = 0 };
         var model = new UiElement { Id = "fake", Type = "Custom", AutomationId = "fakeAid", Selector = null };
         var rect = new RECT { left = 1, top = 2, right = 11, bottom = 12 };
 
@@ -514,7 +514,7 @@ public partial class RealUiAutomationTests
     public async Task FaultInjectedComProxies_CoverAmbiguousPatternCatchesAndFallbackSlug()
     {
         var svc = NewService();
-        var session = new UiSessionInfo { ProcessId = Environment.ProcessId, ProcessName = "fake" };
+        var session = new UiTarget { ProcessId = Environment.ProcessId, ProcessName = "fake" };
         IUIAutomationElement MakeMatch(string name) => ComProxy<IUIAutomationElement>((method, _) => method.Name switch
         {
             "get_CurrentBoundingRectangle" => new RECT { left = 1, top = 2, right = 11, bottom = 12 },
@@ -543,7 +543,7 @@ public partial class RealUiAutomationTests
         UiAutomationService.s_getRootElement = (_, _) => root;
 
         var ex = await Assert.ThrowsExactlyAsync<UiAmbiguousSelectorException>(
-            () => svc.FindSingleElementAsync(session, new SelectorExpression { Query = "Ambiguous" }, CancellationToken.None));
+            () => svc.FindSingleElementAsync(session, new UiSelector { Query = "Ambiguous" }, CancellationToken.None));
 
         StringAssert.Contains(ex.Message, "lbl[0]");
     }
@@ -552,7 +552,7 @@ public partial class RealUiAutomationTests
     public async Task FaultInjectedComProxies_CoverExpandCollapsePropertyStates()
     {
         var svc = NewService();
-        var session = new UiSessionInfo { ProcessId = Environment.ProcessId, ProcessName = "fake" };
+        var session = new UiTarget { ProcessId = Environment.ProcessId, ProcessName = "fake" };
         var model = new UiElement { Id = "fake", Type = "Custom", AutomationId = "fakeAid" };
         foreach (var (state, expected) in new[]
         {
@@ -583,8 +583,8 @@ public partial class RealUiAutomationTests
     public async Task FaultInjectedComProxies_CoverPromoteFailureAndPatternCatches()
     {
         var logger = new CapturingLogger<UiAutomationService>();
-        var svc = new UiAutomationService(logger, new SelectorService());
-        var session = new UiSessionInfo { ProcessId = Environment.ProcessId, ProcessName = "fake", WindowHandle = 111 };
+        var svc = new UiAutomationService(logger, new UiSelectorParser());
+        var session = new UiTarget { ProcessId = Environment.ProcessId, ProcessName = "fake", WindowHandle = 111 };
         var target = ComProxy<IUIAutomationElement>((method, _) => method.Name switch
         {
             "get_CurrentBoundingRectangle" => new RECT { left = 1, top = 2, right = 31, bottom = 42 },
@@ -616,7 +616,7 @@ public partial class RealUiAutomationTests
         });
         UiAutomationService.s_getRootElement = (_, _) => root;
 
-        var results = await svc.SearchAsync(session, new SelectorExpression { Query = "proxyAid" }, 5, CancellationToken.None);
+        var results = await svc.SearchAsync(session, new UiSelector { Query = "proxyAid" }, 5, CancellationToken.None);
 
         Assert.AreEqual(1, results.Length);
         Assert.AreEqual("proxyAid", results[0].AutomationId);
@@ -628,7 +628,7 @@ public partial class RealUiAutomationTests
     public async Task FaultInjectedComProxies_CoverPromoteInnerElementFailure()
     {
         var svc = NewService();
-        var session = new UiSessionInfo { ProcessId = Environment.ProcessId, ProcessName = "fake", WindowHandle = 222 };
+        var session = new UiTarget { ProcessId = Environment.ProcessId, ProcessName = "fake", WindowHandle = 222 };
         var target = ComProxy<IUIAutomationElement>((method, _) => method.Name switch
         {
             "get_CurrentBoundingRectangle" => new RECT { left = 1, top = 2, right = 31, bottom = 42 },
@@ -662,7 +662,7 @@ public partial class RealUiAutomationTests
         });
         UiAutomationService.s_getRootElement = (_, _) => root;
 
-        var results = await svc.SearchAsync(session, new SelectorExpression { Query = "promoteAid" }, 5, CancellationToken.None);
+        var results = await svc.SearchAsync(session, new UiSelector { Query = "promoteAid" }, 5, CancellationToken.None);
 
         Assert.AreEqual("promoteAid", results.Single().Selector);
     }
@@ -671,8 +671,8 @@ public partial class RealUiAutomationTests
     public async Task NativeSeams_CoverRootElementFallbacks()
     {
         var logger = new CapturingLogger<UiAutomationService>();
-        var svc = new UiAutomationService(logger, new SelectorService());
-        var session = new UiSessionInfo { ProcessId = Environment.ProcessId, ProcessName = "fake", WindowHandle = 0 };
+        var svc = new UiAutomationService(logger, new UiSelectorParser());
+        var session = new UiTarget { ProcessId = Environment.ProcessId, ProcessName = "fake", WindowHandle = 0 };
         var target = ComProxy<IUIAutomationElement>((method, _) => method.Name switch
         {
             "get_CurrentBoundingRectangle" => new RECT { left = 1, top = 2, right = 101, bottom = 82 },
@@ -724,7 +724,7 @@ public partial class RealUiAutomationTests
     public async Task FaultInjectedComProxies_CoverDirectSelectionItemProperties()
     {
         var svc = NewService();
-        var session = new UiSessionInfo { ProcessId = Environment.ProcessId, ProcessName = "fake" };
+        var session = new UiTarget { ProcessId = Environment.ProcessId, ProcessName = "fake" };
         var model = new UiElement { Id = "sel", Type = "ListItem", AutomationId = "selAid" };
         var target = ComProxy<ISelectionItemElement>((method, _) => method.Name switch
         {
@@ -743,7 +743,7 @@ public partial class RealUiAutomationTests
     public async Task FaultInjectedComProxies_CoverTextInvokeAndScrollVariants()
     {
         var svc = NewService();
-        var session = new UiSessionInfo { ProcessId = Environment.ProcessId, ProcessName = "fake" };
+        var session = new UiTarget { ProcessId = Environment.ProcessId, ProcessName = "fake" };
         var model = new UiElement { Id = "fake", Type = "Custom", AutomationId = "fakeAid" };
         var selected = ComProxy<IUIAutomationElement>((method, _) =>
             method.Name == "get_CurrentName" ? StringBstr("Selected From Proxy") : ThrowCom());
@@ -812,7 +812,7 @@ public partial class RealUiAutomationTests
     public async Task FaultInjectedComProxies_CoverEmptyTextAndValueFallthrough()
     {
         var svc = NewService();
-        var session = new UiSessionInfo { ProcessId = Environment.ProcessId, ProcessName = "fake" };
+        var session = new UiTarget { ProcessId = Environment.ProcessId, ProcessName = "fake" };
         var model = new UiElement { Id = "text-fallback", Type = "Custom", AutomationId = "textAid", Name = "Fallback Name" };
         var textRange = ComProxy<IUIAutomationTextRange>((method, _) =>
             method.Name == "GetText" ? EmptyBstr() : ThrowCom());
@@ -856,7 +856,7 @@ public partial class RealUiAutomationTests
     public async Task FaultInjectedComProxies_CoverToUiElementUnknownToggleAndCollapsedExpand()
     {
         var svc = NewService();
-        var session = new UiSessionInfo { ProcessId = Environment.ProcessId, ProcessName = "fake", WindowHandle = 333 };
+        var session = new UiTarget { ProcessId = Environment.ProcessId, ProcessName = "fake", WindowHandle = 333 };
         var toggle = ComProxy<IUIAutomationTogglePattern>((method, _) =>
             method.Name == "get_CurrentToggleState" ? (ToggleState)999 : ThrowCom());
         var expand = ComProxy<IUIAutomationExpandCollapsePattern>((method, _) =>
@@ -894,7 +894,7 @@ public partial class RealUiAutomationTests
         var root = ComProxy<IUIAutomationElement>((method, _) => method.Name == "FindAll" ? array : ThrowCom());
         UiAutomationService.s_getRootElement = (_, _) => root;
 
-        var result = (await svc.SearchAsync(session, new SelectorExpression { Query = "stateAid" }, 1, CancellationToken.None)).Single();
+        var result = (await svc.SearchAsync(session, new UiSelector { Query = "stateAid" }, 1, CancellationToken.None)).Single();
 
         Assert.IsNull(result.ToggleState);
         Assert.AreEqual("collapsed", result.ExpandState);
@@ -904,7 +904,7 @@ public partial class RealUiAutomationTests
     public async Task SetValueAsync_RangeValuePatternSucceedsWhenValuePatternUnavailable()
     {
         var svc = NewService();
-        var session = new UiSessionInfo { ProcessId = Environment.ProcessId, ProcessName = "fake" };
+        var session = new UiTarget { ProcessId = Environment.ProcessId, ProcessName = "fake" };
         var model = new UiElement { Id = "range", Type = "Slider", AutomationId = "rangeAid" };
         var setValues = new List<double>();
         var rangePattern = ComProxy<IUIAutomationRangeValuePattern>((method, args) =>
@@ -938,8 +938,8 @@ public partial class RealUiAutomationTests
     public async Task SetValueAsync_LegacyIAccessibleComFailureIsLoggedAndThrows()
     {
         var logger = new CapturingLogger<UiAutomationService>();
-        var svc = new UiAutomationService(logger, new SelectorService());
-        var session = new UiSessionInfo { ProcessId = Environment.ProcessId, ProcessName = "fake" };
+        var svc = new UiAutomationService(logger, new UiSelectorParser());
+        var session = new UiTarget { ProcessId = Environment.ProcessId, ProcessName = "fake" };
         var model = new UiElement { Id = "legacy", Type = "Edit", AutomationId = "legacyAid" };
         var legacyPattern = ComProxy<IUIAutomationLegacyIAccessiblePattern>((_, _) => ThrowCom());
         var target = ComProxy<IUIAutomationElement>((method, args) =>

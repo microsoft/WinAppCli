@@ -573,7 +573,7 @@ public partial class UiCommandTests
     {
         // When FindSingleElementAsync throws plain InvalidOperationException (selector matched
         // multiple elements), the outer catch must map it to invalid_arguments, NOT missing_app.
-        _fakeSession.SessionResult = new WinApp.Cli.Models.UiSessionInfo
+        _fakeSession.SessionResult = new WinApp.Cli.UiTarget
         {
             ProcessId = 1, ProcessName = "TestApp", WindowHandle = 1234
         };

@@ -29,9 +29,9 @@ internal class UiInvokeCommand : Command, IShortDescription
     }
 
     public class Handler(
-        IUiSessionService sessionService,
-        IUiAutomationService uiAutomation,
-        ISelectorService selectorService,
+        IUiTargetResolver sessionService,
+        IUiAutomation uiAutomation,
+        IUiSelectorParser selectorService,
         IAnsiConsole ansiConsole,
         ILogger<UiInvokeCommand> logger) : AsynchronousCommandLineAction
     {

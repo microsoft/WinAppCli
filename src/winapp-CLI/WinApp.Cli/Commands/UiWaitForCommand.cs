@@ -57,9 +57,9 @@ internal class UiWaitForCommand : Command, IShortDescription
     }
 
     public class Handler(
-        IUiSessionService sessionService,
-        IUiAutomationService uiAutomation,
-        ISelectorService selectorService,
+        IUiTargetResolver sessionService,
+        IUiAutomation uiAutomation,
+        IUiSelectorParser selectorService,
         IPollDelay pollDelay,
         IAnsiConsole ansiConsole,
         ILogger<UiWaitForCommand> logger) : AsynchronousCommandLineAction
@@ -104,7 +104,7 @@ internal class UiWaitForCommand : Command, IShortDescription
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
-                    Models.UiElement? element;
+                    UiElement? element;
                     try
                     {
                         element = await uiAutomation.FindSingleElementAsync(session, selector, cancellationToken);

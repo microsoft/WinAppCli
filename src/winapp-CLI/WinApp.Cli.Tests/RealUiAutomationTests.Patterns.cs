@@ -70,7 +70,7 @@ public partial class RealUiAutomationTests
         // "Shared Widget" is the Name of both a Button and a Label; the service disambiguates by
         // preferring the single invokable match.
         var found = await svc.FindSingleElementAsync(session,
-            new SelectorExpression { Query = "Shared Widget" }, CancellationToken.None);
+            new UiSelector { Query = "Shared Widget" }, CancellationToken.None);
 
         Assert.IsNotNull(found);
         Assert.AreEqual("Button", found.Type);
@@ -105,7 +105,7 @@ public partial class RealUiAutomationTests
         // Resolving a Label (no InvokePattern) drives the single-element non-invokable branch: the
         // service returns the element and probes for an invokable ancestor (none, since the label
         // lives directly on the form).
-        var found = await svc.FindSingleElementAsync(session, new SelectorExpression { Query = "Hello Label" }, CancellationToken.None);
+        var found = await svc.FindSingleElementAsync(session, new UiSelector { Query = "Hello Label" }, CancellationToken.None);
 
         Assert.IsNotNull(found);
         Assert.AreEqual("lblText", found.AutomationId);
@@ -250,7 +250,7 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var logger = new CapturingLogger<UiAutomationService>();
-        var svc = new UiAutomationService(logger, new SelectorService());
+        var svc = new UiAutomationService(logger, new UiSelectorParser());
         var session = SessionFor(fx);
         var spinner = await ResolveAsync(svc, session, "numSpin");
 

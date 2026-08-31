@@ -98,9 +98,9 @@ internal class UiTouchCommand : Command, IShortDescription
     }
 
     public class Handler(
-        IUiSessionService sessionService,
-        IUiAutomationService uiAutomation,
-        ISelectorService selectorService,
+        IUiTargetResolver sessionService,
+        IUiAutomation uiAutomation,
+        IUiSelectorParser selectorService,
         IPointerInput pointerInput,
         IForegroundGuard foregroundGuard,
         IAnsiConsole ansiConsole,

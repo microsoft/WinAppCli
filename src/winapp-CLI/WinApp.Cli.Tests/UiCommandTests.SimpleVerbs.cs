@@ -55,7 +55,7 @@ public partial class UiCommandTests
     [TestMethod]
     public async Task Status_NonJson_PrintsProcessAndHwnd()
     {
-        _fakeSession.SessionResult = new UiSessionInfo
+        _fakeSession.SessionResult = new UiTarget
         {
             ProcessId = 4321,
             ProcessName = "Notepad",

@@ -27,7 +27,7 @@ internal class UiStatusCommand : Command, IShortDescription
     }
 
     public class Handler(
-        IUiSessionService sessionService,
+        IUiTargetResolver sessionService,
         IAnsiConsole ansiConsole,
         ILogger<UiStatusCommand> logger) : AsynchronousCommandLineAction
     {

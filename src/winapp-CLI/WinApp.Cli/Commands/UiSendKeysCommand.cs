@@ -82,9 +82,9 @@ internal class UiSendKeysCommand : Command, IShortDescription
     }
 
     public class Handler(
-        IUiSessionService sessionService,
-        IUiAutomationService uiAutomation,
-        ISelectorService selectorService,
+        IUiTargetResolver sessionService,
+        IUiAutomation uiAutomation,
+        IUiSelectorParser selectorService,
         IKeyboardInput keyboardInput,
         IForegroundGuard foregroundGuard,
         ISystemUiQuery systemQuery,

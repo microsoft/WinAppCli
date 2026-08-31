@@ -25,8 +25,8 @@ internal class UiGetFocusedCommand : Command, IShortDescription
     }
 
     public class Handler(
-        IUiSessionService sessionService,
-        IUiAutomationService uiAutomation,
+        IUiTargetResolver sessionService,
+        IUiAutomation uiAutomation,
         IAnsiConsole ansiConsole,
         ILogger<UiGetFocusedCommand> logger) : AsynchronousCommandLineAction
     {

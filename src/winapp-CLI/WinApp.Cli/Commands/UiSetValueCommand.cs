@@ -32,9 +32,9 @@ internal class UiSetValueCommand : Command, IShortDescription
     }
 
     public class Handler(
-        IUiSessionService sessionService,
-        IUiAutomationService uiAutomation,
-        ISelectorService selectorService,
+        IUiTargetResolver sessionService,
+        IUiAutomation uiAutomation,
+        IUiSelectorParser selectorService,
         IAnsiConsole ansiConsole,
         ILogger<UiSetValueCommand> logger) : AsynchronousCommandLineAction
     {

@@ -8,7 +8,7 @@ using WinApp.Cli.Services;
 namespace WinApp.Cli.Tests;
 
 /// <summary>
-/// Direct unit tests for <see cref="UiSessionService"/>. All OS boundaries (process enumeration and
+/// Direct unit tests for <see cref="UiTargetResolver"/>. All OS boundaries (process enumeration and
 /// Win32 window queries) are driven through <see cref="FakeSystemUiQuery"/>, and window discovery
 /// through <see cref="FakeUiAutomationService"/>, so every resolver branch is exercised
 /// deterministically without a live desktop or specific running processes.
@@ -16,18 +16,18 @@ namespace WinApp.Cli.Tests;
 [TestClass]
 public class UiSessionServiceTests
 {
-    private static (UiSessionService Service, FakeUiAutomationService Uia, FakeSystemUiQuery Sys) NewService()
+    private static (UiTargetResolver Service, FakeUiAutomationService Uia, FakeSystemUiQuery Sys) NewService()
     {
         var uia = new FakeUiAutomationService();
         var sys = new FakeSystemUiQuery();
-        var service = new UiSessionService(uia, sys, NullLogger<UiSessionService>.Instance);
+        var service = new UiTargetResolver(uia, sys, NullLogger<UiTargetResolver>.Instance);
         return (service, uia, sys);
     }
 
     [TestMethod]
     public void UiSessionInfo_IsExplicitWindow_DefaultsToFalse()
     {
-        var info = new UiSessionInfo();
+        var info = new UiTarget();
         Assert.IsFalse(info.IsExplicitWindow);
     }
 
@@ -382,17 +382,17 @@ public class UiSessionServiceTests
 
     [TestMethod]
     public void ClassifyWindow_NullClassName_ReturnsWindow()
-        => Assert.AreEqual("window", UiSessionService.ClassifyWindow(null));
+        => Assert.AreEqual("window", UiTargetResolver.ClassifyWindow(null));
 
     [TestMethod]
     public void ClassifyWindow_PopupClass_ReturnsPopup()
-        => Assert.AreEqual("popup", UiSessionService.ClassifyWindow("SomePopupClass"));
+        => Assert.AreEqual("popup", UiTargetResolver.ClassifyWindow("SomePopupClass"));
 
     [TestMethod]
     public void ClassifyWindow_DialogClass_ReturnsDialog()
-        => Assert.AreEqual("dialog", UiSessionService.ClassifyWindow("#32770"));
+        => Assert.AreEqual("dialog", UiTargetResolver.ClassifyWindow("#32770"));
 
     [TestMethod]
     public void ClassifyWindow_OrdinaryClass_ReturnsWindow()
-        => Assert.AreEqual("window", UiSessionService.ClassifyWindow("Button"));
+        => Assert.AreEqual("window", UiTargetResolver.ClassifyWindow("Button"));
 }

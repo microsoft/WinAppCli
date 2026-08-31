@@ -12,9 +12,9 @@ internal static class PointerCommandSupport
     public readonly record struct ResolvedPoint(bool Ok, PointerPoint Point, long TargetHwnd, string? TargetLabel);
 
     public static async Task<ResolvedPoint> ResolvePointAsync(
-        IUiAutomationService uiAutomation,
-        ISelectorService selectorService,
-        UiSessionInfo session,
+        IUiAutomation uiAutomation,
+        IUiSelectorParser selectorService,
+        UiTarget session,
         string? selectorStr,
         PointerPoint? explicitPoint,
         string? explicitLabel,
@@ -57,7 +57,7 @@ internal static class PointerCommandSupport
         var stable = await GestureTargeting.ResolveStableAsync(
             uiAutomation, session, selector, element,
             GestureTargeting.DefaultMaxReads, GestureTargeting.DefaultReadDelayMs, null, cancellationToken);
-        if (!GestureTargeting.TryReport(stable, logger, json, selectorStr!, action))
+        if (!UiInjectionReporting.TryReport(stable, logger, json, selectorStr!, action))
         {
             return default;
         }
@@ -85,7 +85,7 @@ internal static class PointerCommandSupport
     public readonly record struct InjectionPreparation(bool Ok, string? OutOfWindowWarning);
 
     public static InjectionPreparation TryPrepareInjection(
-        IUiAutomationService uiAutomation,
+        IUiAutomation uiAutomation,
         IForegroundGuard foregroundGuard,
         long targetHwnd,
         IEnumerable<PointerPoint> points,

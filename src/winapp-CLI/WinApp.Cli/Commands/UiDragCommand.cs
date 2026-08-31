@@ -70,9 +70,9 @@ internal class UiDragCommand : Command, IShortDescription
     }
 
     public class Handler(
-        IUiSessionService sessionService,
-        IUiAutomationService uiAutomation,
-        ISelectorService selectorService,
+        IUiTargetResolver sessionService,
+        IUiAutomation uiAutomation,
+        IUiSelectorParser selectorService,
         IMouseInput mouseInput,
         IForegroundGuard foregroundGuard,
         IAnsiConsole ansiConsole,
@@ -190,7 +190,7 @@ internal class UiDragCommand : Command, IShortDescription
 
                     var confirmed = await GestureTargeting.ConfirmStillAsync(
                         uiAutomation, session, from.Selector, fromStable.StableElement, cancellationToken);
-                    if (!GestureTargeting.TryReport(confirmed, logger, json, from.Token ?? "from", "drag"))
+                    if (!UiInjectionReporting.TryReport(confirmed, logger, json, from.Token ?? "from", "drag"))
                     {
                         return 1;
                     }
@@ -250,7 +250,7 @@ internal class UiDragCommand : Command, IShortDescription
             }
         }
 
-        private readonly record struct Endpoint(bool Ok, int X, int Y, long Hwnd, SelectorExpression? Selector, UiElement? Element, string? Token);
+        private readonly record struct Endpoint(bool Ok, int X, int Y, long Hwnd, UiSelector? Selector, UiElement? Element, string? Token);
 
         /// <summary>
         /// Re-resolves an element endpoint's bounds immediately before injection (N5) so the drag uses the
@@ -259,7 +259,7 @@ internal class UiDragCommand : Command, IShortDescription
         /// never-settling target it emits <c>target_moved</c> and returns Ok = <see langword="false"/>.
         /// </summary>
         private async Task<(bool Ok, int X, int Y, UiElement? StableElement)> StabilizeAsync(
-            Endpoint endpoint, UiSessionInfo session, string label, bool json, CancellationToken cancellationToken)
+            Endpoint endpoint, UiTarget session, string label, bool json, CancellationToken cancellationToken)
         {
             if (endpoint.Selector is null || endpoint.Element is null)
             {
@@ -272,7 +272,7 @@ internal class UiDragCommand : Command, IShortDescription
 
             // Report the actual selector token the caller passed (e.g. "row-1") rather than the internal
             // "from"/"to" endpoint label, so a target_moved error's selector field is actionable.
-            if (!GestureTargeting.TryReport(stable, logger, json, endpoint.Token ?? label, "drag"))
+            if (!UiInjectionReporting.TryReport(stable, logger, json, endpoint.Token ?? label, "drag"))
             {
                 return (false, 0, 0, null);
             }
@@ -287,7 +287,7 @@ internal class UiDragCommand : Command, IShortDescription
         /// <see cref="Endpoint.Ok"/> = <see langword="false"/> on failure.
         /// </summary>
         private async Task<Endpoint> ResolveEndpointAsync(
-            string token, string label, UiSessionInfo session, bool json, CancellationToken cancellationToken)
+            string token, string label, UiTarget session, bool json, CancellationToken cancellationToken)
         {
             if (CoordinateParser.TryParsePoint(token, out int px, out int py))
             {

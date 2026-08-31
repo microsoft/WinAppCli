@@ -28,9 +28,9 @@ internal class UiFocusCommand : Command, IShortDescription
     }
 
     public class Handler(
-        IUiSessionService sessionService,
-        IUiAutomationService uiAutomation,
-        ISelectorService selectorService,
+        IUiTargetResolver sessionService,
+        IUiAutomation uiAutomation,
+        IUiSelectorParser selectorService,
         IAnsiConsole ansiConsole,
         ILogger<UiFocusCommand> logger) : AsynchronousCommandLineAction
     {

@@ -62,17 +62,9 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IAzureAuthService, AzureAuthService>()
             .AddSingleton<IAzureSigningService, AzureSigningService>()
             .AddSingleton<IAzureSignToolService, AzureSignToolService>()
-            // UI Automation services
-            .AddSingleton<IMouseInput, RealMouseInput>()
-            .AddSingleton<IPointerInput, RealPointerInput>()
-            .AddSingleton<IKeyboardInput, RealKeyboardInput>()
-            .AddSingleton<IForegroundGuard, RealForegroundGuard>()
-            .AddSingleton<IOwnedWindowFinder, RealOwnedWindowFinder>()
-            .AddSingleton<IPollDelay, RealPollDelay>()
-            .AddSingleton<ISelectorService, SelectorService>()
-            .AddSingleton<ISystemUiQuery, SystemUiQuery>()
-            .AddSingleton<IUiSessionService, UiSessionService>()
-            .AddSingleton<IUiAutomationService, UiAutomationService>()
+            // UI Automation services (from the Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation package)
+            .AddWinAppUiAutomation()
+            .AddSingleton<IUiRecordingService, UiRecordingService>()
             .AddSingleton<IControlsSearchService, ControlsSearchService>();
     }
 
