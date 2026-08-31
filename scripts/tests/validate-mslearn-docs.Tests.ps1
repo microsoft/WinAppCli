@@ -208,4 +208,48 @@ Describe 'port-mslearn-docs: generated toc.yml + guides index' {
         $gi | Should -Match '# Framework guides'
         $gi | Should -Not -Match "`r`r"
     }
+
+    It 'separates every generated table from the preceding paragraph with a blank line' {
+        # A table header glued to the paragraph above it is absorbed into that
+        # paragraph instead of rendering as a table. Here-strings drop the newline
+        # before their closing terminator, which makes this easy to reintroduce.
+        $offenders = @()
+        foreach ($file in Get-ChildItem $script:PortOut -Recurse -File -Filter *.md) {
+            $lines = Get-Content $file.FullName
+            for ($i = 1; $i -lt $lines.Count; $i++) {
+                # A delimiter row identifies a table; its header is the line above.
+                if ($lines[$i] -notmatch '^\s*\|[\s\-:|]+\|\s*$') { continue }
+                if ($lines[$i - 1] -notmatch '^\s*\|') { continue }
+                $headerIndex = $i - 1
+                if ($headerIndex -gt 0 -and $lines[$headerIndex - 1].Trim() -ne '') {
+                    $rel = [System.IO.Path]::GetRelativePath($script:PortOut, $file.FullName)
+                    $offenders += "${rel}:$($headerIndex + 1)"
+                }
+            }
+        }
+        $offenders -join ', ' | Should -BeNullOrEmpty
+    }
+
+    It 'resolves every relative link in the generated docs to a file that exists' {
+        # guides/index.md is assembled from root-relative links lifted out of
+        # index.md, so a target one directory up (security.md) silently 404s
+        # unless it is rebased to ../. Site-absolute MS Learn paths (/windows,
+        # /azure) are intentional and are not resolved against the output tree.
+        $broken = @()
+        foreach ($file in Get-ChildItem $script:PortOut -Recurse -File -Filter *.md) {
+            $content = Get-Content $file.FullName -Raw
+            foreach ($m in [regex]::Matches($content, '\]\(([^)\s]+)\)')) {
+                $href = $m.Groups[1].Value
+                if ($href -match '^(https?:|mailto:|#|/)') { continue }
+                $path = ($href -split '#')[0]
+                if (-not $path) { continue }
+                $target = Join-Path $file.DirectoryName ($path -replace '/', '\')
+                if (-not (Test-Path $target)) {
+                    $rel = [System.IO.Path]::GetRelativePath($script:PortOut, $file.FullName)
+                    $broken += "$rel -> $href"
+                }
+            }
+        }
+        $broken -join ', ' | Should -BeNullOrEmpty
+    }
 }

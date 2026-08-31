@@ -13,8 +13,8 @@ existing commands and options actually look before judging the proposal.
 ## Conventions to check the proposal against
 
 - **Option naming.** kebab-case (`--use-defaults`); `--no-<flag>` for negations;
-  `-a` / `-w` short forms reserved for app/window targeting. Honor existing
-  aliases (e.g. `--use-defaults` ≡ `--no-prompt`) where applicable.
+  `-a` / `-w` short forms reserved for app/window targeting. Keep aliases only
+  when they pass the shared compatibility boundary.
 - **Sane defaults.** The common case should work with minimal flags (e.g.
   `--manifest` auto-detects; dev `--cert-password` defaults to `password`).
   Flag new **required** options that could reasonably have a default.
@@ -33,13 +33,12 @@ existing commands and options actually look before judging the proposal.
   name and options? Is it consistent with the verbs/nouns winapp already uses?
   Is the feature discoverable (help text, docs, guides)?
 
-## Breaking changes & cross-surface impact
+## Published contracts & cross-surface impact
 
-- **Breaking changes** are high-impact: a renamed/removed command or option, a
-  changed default, or changed output shape will break existing scripts and the
-  downstream **npm wrapper**, **NuGet MSBuild targets**, and **VS Code
-  extension**. Flag these prominently and ask whether the break is justified /
-  has a migration path.
+- Apply the shared compatibility boundary before classifying a rename, removed
+  option, changed default, or output shape as breaking. If it passes, show the
+  real script or downstream npm/NuGet/VS Code consumer and the migration needed.
+  If the behavior exists only in unreleased work, prefer a clean replacement.
 - **Cross-surface parity.** A new top-level CLI command usually needs to flow
   through the npm wrapper and be considered for the NuGet targets and VSC
   command palette. Flag a design that would silently diverge across surfaces.

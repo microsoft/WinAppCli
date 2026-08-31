@@ -8,6 +8,24 @@ using System.Text.Json;
 namespace WinApp.Cli.Helpers;
 
 /// <summary>
+/// Whether a <c>dotnet new update --check-only</c> parse authoritatively determined the pack's
+/// update state. <see cref="Unrecognized"/> must not be treated as up-to-date: it means the output
+/// couldn't be interpreted (empty, truncated, or an unexpected format), so the check should retry
+/// rather than be cached.
+/// </summary>
+internal enum UpdateCheckOutcome
+{
+    /// <summary>Output couldn't be interpreted; the result is unknown and the check should retry.</summary>
+    Unrecognized,
+
+    /// <summary>Output was understood and the pack is current (no newer version offered).</summary>
+    UpToDate,
+
+    /// <summary>Output was understood and a newer version is available.</summary>
+    UpdateAvailable,
+}
+
+/// <summary>
 /// A single template row parsed from <c>dotnet new list</c>. <see cref="ShortNames"/> holds every
 /// alias dotnet accepts for the template (comma-separated in the source table); <see cref="ShortName"/>
 /// is the first (canonical) one that <c>dotnet new &lt;short&gt;</c> is invoked with. <see cref="Type"/>
@@ -152,25 +170,47 @@ internal static class WinUiTemplateCatalog
     }
 
     /// <summary>
-    /// Parses <c>dotnet new update --check-only</c> output for the given package id, returning the
-    /// installed (<c>Current</c>) and available (<c>Latest</c>) versions when an update row for the
-    /// package is present. Returns <c>(null, null)</c> when the package is up-to-date (no update row)
-    /// or the output can't be parsed. The update table has three columns (Package, Current, Latest);
-    /// the Package id contains no spaces, so a simple whitespace split is sufficient and avoids
-    /// depending on exact column widths.
+    /// Parses <c>dotnet new update --check-only</c> output for the given package id. The update table
+    /// has three columns (Package, Current, Latest); the Package id contains no spaces, so a simple
+    /// whitespace split is sufficient and avoids depending on exact column widths.
+    /// <para>
+    /// <c>Outcome</c> separates an authoritatively understood result from output we couldn't interpret:
+    /// <see cref="UpdateCheckOutcome.UpdateAvailable"/> (our package appears in the table),
+    /// <see cref="UpdateCheckOutcome.UpToDate"/> (a recognizable table or the "up-to-date" notice, with
+    /// our package absent), or <see cref="UpdateCheckOutcome.Unrecognized"/> (empty, truncated, or an
+    /// unexpected format). Callers must not treat <c>Unrecognized</c> as "up-to-date", otherwise an SDK
+    /// output-format change would be cached as a successful check and suppress retries.
+    /// </para>
     /// </summary>
-    internal static (string? Current, string? Latest) ParseUpdateCheck(string output, string packageId)
+    internal static (UpdateCheckOutcome Outcome, string? Current, string? Latest) ParseUpdateCheck(string output, string packageId)
     {
         if (string.IsNullOrEmpty(output))
         {
-            return (null, null);
+            return (UpdateCheckOutcome.Unrecognized, null, null);
         }
 
+        var recognized = false;
         foreach (var raw in output.Replace("\r\n", "\n").Split('\n'))
         {
             var line = raw.Trim();
-            if (line.Length == 0 || IsSeparatorRow(raw))
+            if (line.Length == 0)
             {
+                continue;
+            }
+
+            // A dashes separator row (always present under the Package/Current/Latest header) marks a
+            // well-formed update table, even when it lists only other packages.
+            if (IsSeparatorRow(raw))
+            {
+                recognized = true;
+                continue;
+            }
+
+            // "All template packages are up-to-date." is the authoritative "nothing to do" notice when
+            // no table is printed. English UI is forced upstream, so this phrase is stable.
+            if (line.Contains("up-to-date", StringComparison.OrdinalIgnoreCase))
+            {
+                recognized = true;
                 continue;
             }
 
@@ -179,11 +219,13 @@ internal static class WinUiTemplateCatalog
             var parts = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length >= 3 && parts[0].Equals(packageId, StringComparison.OrdinalIgnoreCase))
             {
-                return (parts[1], parts[2]);
+                return (UpdateCheckOutcome.UpdateAvailable, parts[1], parts[2]);
             }
         }
 
-        return (null, null);
+        return recognized
+            ? (UpdateCheckOutcome.UpToDate, null, null)
+            : (UpdateCheckOutcome.Unrecognized, null, null);
     }
 
     /// <summary>

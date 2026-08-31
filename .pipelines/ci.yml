@@ -33,6 +33,8 @@ extends:
     - stage: Build
       jobs:
       - job: Build
+        # Same build as the release pipeline, which has already exceeded the 60-minute default.
+        timeoutInMinutes: 120
         pool:
           name: Azure-Pipelines-1ESPT-ExDShared
           image: windows-latest

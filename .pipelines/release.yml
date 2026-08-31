@@ -33,6 +33,15 @@ parameters:
     displayName: GitHub Release already exists, skip uploading GitHub release (GitHubReleaseAlreadyExists)
     type: boolean
     default: false
+  - name: PublishSymbols
+    displayName: Publish symbols to symweb and MSDL (PublishSymbols)
+    type: boolean
+    default: true
+  - name: symbolsIdentity
+    type: object
+    default:
+      serviceConnection: $(SymbolPublishingServiceConnection)
+      project: $(SymbolPublishingProject)
 
 variables:
   # Declared once so the URL and its hash cannot drift apart across the stages that install gh.
@@ -62,6 +71,8 @@ extends:
     - stage: Build
       jobs:
       - job: Build
+        # NativeAOT for two architectures plus tests now runs past the 60-minute default.
+        timeoutInMinutes: 120
         pool:
           name: Azure-Pipelines-1ESPT-ExDShared
           image: windows-latest
@@ -198,6 +209,7 @@ extends:
                 New-Item -ItemType Directory -Path "$staging/scripts" -Force | Out-Null
                 Copy-Item "$(System.DefaultWorkingDirectory)/scripts/port-mslearn-docs.ps1" "$staging/scripts/" -Force
                 Copy-Item "$(System.DefaultWorkingDirectory)/scripts/validate-mslearn-docs.ps1" "$staging/scripts/" -Force
+                Copy-Item "$(System.DefaultWorkingDirectory)/scripts/prune-date-only-doc-changes.ps1" "$staging/scripts/" -Force
                 Copy-Item "$(System.DefaultWorkingDirectory)/scripts/mslearn-doc-lib.ps1" "$staging/scripts/" -Force
                 Copy-Item "$(System.DefaultWorkingDirectory)/docs" "$staging/docs" -Recurse -Force
                 Copy-Item "$(System.DefaultWorkingDirectory)/version.json" "$staging/" -Force
@@ -298,6 +310,97 @@ extends:
                 addChangeLog: false
                 releaseNotesSource: 'filePath'
                 releaseNotesFilePath: '$(Pipeline.Workspace)/release-notes/full-release-notes.md'
+
+    - ${{ if eq(parameters.PublishSymbols, 'true') }}:
+      - stage: Publish_Symbols
+        displayName: Publish Symbols
+        # Build supplies the version output; Release_GitHub gates on the release actually shipping, so
+        # a failed release cannot leave century-retention symbols published for a build nobody has.
+        dependsOn:
+          - Build
+          - Release_GitHub
+        variables:
+          version: $[ stageDependencies.Build.Build.outputs['SetMeta.version'] ]
+          # Used twice: as the PublishSymbols@2 artifact name and as the request name the symbol API
+          # promotes. They must be identical or the request finds nothing to publish. The attempt is
+          # part of the name so a re-run creates a fresh request instead of colliding with its own.
+          SymbolsArtifactName: 'WinAppCLI_$(version)_$(Build.BuildNumber)_$(System.JobAttempt)'
+        jobs:
+        - job: publish_symbols
+          displayName: Publish Symbols to symweb and MSDL
+          pool:
+            name: Azure-Pipelines-1ESPT-ExDShared
+            image: windows-latest
+            os: windows
+            hostArchitecture: amd64
+          templateContext:
+            type: releaseJob
+            isProduction: true
+            inputs:
+            - input: pipelineArtifact
+              artifactName: cli-binaries
+              targetPath: $(Pipeline.Workspace)/symbolStaging
+          steps:
+            - task: AzurePowerShell@5
+              displayName: Acquire symbol request API token
+              inputs:
+                azureSubscription: ${{ parameters.symbolsIdentity.serviceConnection }}
+                azurePowerShellVersion: LatestVersion
+                pwsh: true
+                ScriptType: InlineScript
+                Inline: |-
+                  $token = (Get-AzAccessToken -AsSecureString -ResourceUrl api://30471ccf-0966-45b9-a979-065dbedb24c1).Token |
+                      ConvertFrom-SecureString -AsPlainText
+                  Write-Host "##vso[task.setvariable variable=SymbolAccessToken;issecret=true]$token"
+
+            # Uploads to the symbol service of the ADO org this pipeline runs in (microsoft), which is
+            # why the symbol project's source organization must be `microsoft` rather than the default.
+            - task: PublishSymbols@2
+              displayName: Upload PDBs to the Azure DevOps symbol service
+              inputs:
+                SymbolsFolder: $(Pipeline.Workspace)/symbolStaging
+                SearchPattern: '**/*.pdb'
+                SymbolServerType: TeamServices
+                SymbolsProduct: WinAppCLI
+                SymbolsVersion: $(version)
+                SymbolsArtifactName: $(SymbolsArtifactName)
+                # ~100 years. The standalone reference script defaults to 6 days, which would silently
+                # expire the symbols for a shipped release.
+                SymbolExpirationInDays: 36530
+                # Non-mandatory per the requirement, and srcsrv indexing does not map cleanly onto a
+                # GitHub-sourced NativeAOT build. Tracked separately.
+                IndexSources: false
+                DetailedLog: true
+                SymbolsMaximumWaitTime: 30
+
+            - pwsh: |-
+                $ErrorActionPreference = 'Stop'
+                $PSDefaultParameterValues['Invoke-RestMethod:Headers'] = @{ Authorization = "Bearer $(SymbolAccessToken)" }
+                $PSDefaultParameterValues['Invoke-RestMethod:ContentType'] = 'application/json'
+                $PSDefaultParameterValues['Invoke-RestMethod:Method'] = 'POST'
+
+                # The symbol project name is CASE SENSITIVE and must match the provisioned project
+                # exactly, or the request 404s.
+                $baseUri = "https://symbolrequestprod.trafficmanager.net/projects/${{ parameters.symbolsIdentity.project }}/requests"
+
+                # Round-trip UTC: the service binds this to a DateTime, and a culture-formatted
+                # string would be ambiguous on a non-en-US agent.
+                $createBody = @{
+                    requestName    = '$(SymbolsArtifactName)'
+                    expirationTime = [DateTime]::UtcNow.AddDays(36530).ToString('o')
+                }
+                Write-Host "Registering symbol request $($createBody.requestName)"
+                Invoke-RestMethod -Uri $baseUri -Body ($createBody | ConvertTo-Json -Compress)
+
+                # Public symbols land on MSDL stripped: with no allowed-private-symbols policy on the
+                # project, the service strips the private data out of the PDB before it goes external.
+                $publishBody = @{
+                    publishToInternalServer = $true
+                    publishToPublicServer   = $true
+                }
+                Write-Host "Promoting $($createBody.requestName) to symweb and MSDL"
+                Invoke-RestMethod -Uri "$baseUri/$($createBody.requestName)" -Body ($publishBody | ConvertTo-Json -Compress)
+              displayName: Request publication to symweb and MSDL
 
     - ${{ if eq(parameters.DoEsrp, 'true') }}:
       - stage: Release_Npm
@@ -568,6 +671,19 @@ extends:
                 git config user.name "winapp-cli-bot"
                 git config user.email "winapp-cli-bot@users.noreply.github.com"
                 git checkout -B $branch
+
+                # Every page is restamped with today's ms.date, so pages that did not
+                # otherwise change would show up as date-only diffs and bury the real
+                # edits for the docs-repo reviewer. Drop them before staging.
+                & "$(Pipeline.Workspace)\mslearn-source\scripts\prune-date-only-doc-changes.ps1" `
+                  -RepoPath $docsDir `
+                  -PathSpec $docsRepoBase
+                if ($LASTEXITCODE -ne 0) {
+                  Pop-Location
+                  Write-Error "Failed to prune date-only doc changes. Exit code: $LASTEXITCODE"
+                  exit $LASTEXITCODE
+                }
+
                 git add -A
                 git diff --cached --quiet
                 if ($LASTEXITCODE -eq 0) {

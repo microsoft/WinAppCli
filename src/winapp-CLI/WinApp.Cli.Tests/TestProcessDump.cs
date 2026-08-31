@@ -88,6 +88,15 @@ internal static class TestProcessDump
     /// can enumerate the CLR. Returns the dump path or <c>null</c> (with a reason) when not possible.
     /// The caller owns deleting the returned file.
     /// </summary>
+    /// <remarks>
+    /// The child proves it is ready and the dump is taken only once that proof arrives, because a host
+    /// that has been <em>started</em> is not yet a host with a walkable CLR in it. A fixed 1.5s sleep
+    /// stood in for that proof and did not hold on a loaded agent: CI captured dumps whose only stack
+    /// was <c>hostfxr</c>/<c>hostpolicy</c> still loading coreclr, so ClrMD had nothing to enumerate,
+    /// the analysis reported "No CLR runtime found in dump (native-only crash)", and the managed
+    /// assertions failed intermittently. See <see cref="ManagedChildCandidates"/> for what the child
+    /// does before signalling and why merely reaching managed code is not enough on its own.
+    /// </remarks>
     public static string? TryCreateManagedDump(out string? error)
     {
         error = null;
@@ -104,6 +113,7 @@ internal static class TestProcessDump
                     CreateNoWindow = true,
                     RedirectStandardInput = true,
                     RedirectStandardOutput = true,
+                    RedirectStandardError = true,
                 });
 
                 if (child == null)
@@ -111,21 +121,19 @@ internal static class TestProcessDump
                     continue;
                 }
 
-                // Give the runtime time to fully spin up its heap before dumping.
-                Thread.Sleep(1500);
-                if (child.HasExited)
+                // Drain stderr so a chatty host can never fill the pipe and wedge the child.
+                var draining = child;
+                _ = Task.Run(() => { try { draining.StandardError.ReadToEnd(); } catch { /* ignore */ } });
+
+                if (!WaitForToken(child, ManagedReadyToken, TimeSpan.FromSeconds(30)))
                 {
+                    error = $"managed child did not emit readiness token '{ManagedReadyToken}' (host {fileName})";
+                    KillQuietly(child);
+                    child = null;
                     continue;
                 }
 
-                var service = new CrashDumpService(
-                    new TestConsole(),
-                    NullLogger<CrashDumpService>.Instance,
-                    new FakeXamlTriageService());
-
-                var dumpPath = service.WriteMiniDump(
-                    (uint)child.Id, savedContext: null, savedThreadId: 0,
-                    savedExceptionCode: 0, savedExceptionAddress: 0);
+                var dumpPath = DumpRunningChild(child);
                 if (dumpPath != null)
                 {
                     return dumpPath;
@@ -137,18 +145,9 @@ internal static class TestProcessDump
             }
             finally
             {
-                try
+                if (child != null)
                 {
-                    if (child != null && !child.HasExited)
-                    {
-                        child.Kill(entireProcessTree: true);
-                    }
-
-                    child?.Dispose();
-                }
-                catch
-                {
-                    // best effort
+                    KillQuietly(child);
                 }
             }
         }
@@ -157,10 +156,37 @@ internal static class TestProcessDump
         return null;
     }
 
+    /// <summary>Readiness token the benign managed child emits once its CLR is up and its heap is warm.</summary>
+    private const string ManagedReadyToken = "MANAGED_READY";
+
     private static IEnumerable<(string FileName, string Args)> ManagedChildCandidates()
     {
-        yield return ("pwsh.exe", "-NoLogo -NoProfile -Command \"Start-Sleep -Seconds 120\"");
-        yield return ("powershell.exe", "-NoLogo -NoProfile -Command \"Start-Sleep -Seconds 120\"");
+        // The child allocates, forces a blocking collection, and only then reports readiness, so the
+        // token means "the runtime is up AND its heap is populated and settled" rather than merely "a
+        // process exists". Both halves matter and neither is decoration:
+        //
+        //  - Signalling from managed code is what rules out dumping a host still in NATIVE startup.
+        //    That was the CI failure: dumps whose only stack was hostfxr/hostpolicy loading coreclr, so
+        //    ClrMD found no runtime and the analysis reported a native-only crash.
+        //  - Allocating and collecting first is what rules out the opposite mistake. A token emitted by
+        //    the first line of managed code proves too little -- ClrMD needs walkable GC structures, and
+        //    dumping that early trades the old race for a new one (measured: signalling immediately made
+        //    this test fail or go inconclusive on a machine where the previous code passed).
+        //
+        // [Console]::Out with an explicit Flush, not Write-Object: the token must reach the reader as
+        // soon as it is written, which only an unbuffered write to the real stdout handle guarantees
+        // once the stream is redirected. Single quotes throughout so the script survives being embedded
+        // in the double-quoted -Command argument.
+        const string script =
+            "$sink = 1..2000 | ForEach-Object { [pscustomobject]@{ I = $_; S = 'warm' + $_ } }; " +
+            "[GC]::Collect(); " +
+            "[GC]::WaitForPendingFinalizers(); " +
+            $"[Console]::Out.WriteLine('{ManagedReadyToken}'); " +
+            "[Console]::Out.Flush(); " +
+            "Start-Sleep -Seconds 120";
+
+        yield return ("pwsh.exe", $"-NoLogo -NoProfile -Command \"{script}\"");
+        yield return ("powershell.exe", $"-NoLogo -NoProfile -Command \"{script}\"");
     }
 
     /// <summary>

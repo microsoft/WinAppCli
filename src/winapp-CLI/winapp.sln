@@ -1,4 +1,4 @@
-﻿
+
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 18
 VisualStudioVersion = 18.0.11116.177
@@ -18,6 +18,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Microsoft.WindowsAppSDK.Analyzers.Driver", "..\winapp-Analyzer\Microsoft.WindowsAppSDK.Analyzers.Driver\Microsoft.WindowsAppSDK.Analyzers.Driver.csproj", "{401115C0-F29A-4C5C-982C-FE51D2D69E65}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Microsoft.WindowsAppSDK.Analyzers.Tests", "..\winapp-Analyzer\Microsoft.WindowsAppSDK.Analyzers.Tests\Microsoft.WindowsAppSDK.Analyzers.Tests.csproj", "{DEC16063-98B6-469A-917C-0FE1A66D897A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WinApp.Cli.Fuzz", "WinApp.Cli.Fuzz\WinApp.Cli.Fuzz.csproj", "{9424B3C6-A8EE-4542-AAF2-3F21FDFA746D}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -89,6 +91,18 @@ Global
 		{DEC16063-98B6-469A-917C-0FE1A66D897A}.Release|x64.Build.0 = Release|Any CPU
 		{DEC16063-98B6-469A-917C-0FE1A66D897A}.Release|x86.ActiveCfg = Release|Any CPU
 		{DEC16063-98B6-469A-917C-0FE1A66D897A}.Release|x86.Build.0 = Release|Any CPU
+		{9424B3C6-A8EE-4542-AAF2-3F21FDFA746D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9424B3C6-A8EE-4542-AAF2-3F21FDFA746D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9424B3C6-A8EE-4542-AAF2-3F21FDFA746D}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{9424B3C6-A8EE-4542-AAF2-3F21FDFA746D}.Debug|x64.Build.0 = Debug|Any CPU
+		{9424B3C6-A8EE-4542-AAF2-3F21FDFA746D}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{9424B3C6-A8EE-4542-AAF2-3F21FDFA746D}.Debug|x86.Build.0 = Debug|Any CPU
+		{9424B3C6-A8EE-4542-AAF2-3F21FDFA746D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9424B3C6-A8EE-4542-AAF2-3F21FDFA746D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9424B3C6-A8EE-4542-AAF2-3F21FDFA746D}.Release|x64.ActiveCfg = Release|Any CPU
+		{9424B3C6-A8EE-4542-AAF2-3F21FDFA746D}.Release|x64.Build.0 = Release|Any CPU
+		{9424B3C6-A8EE-4542-AAF2-3F21FDFA746D}.Release|x86.ActiveCfg = Release|Any CPU
+		{9424B3C6-A8EE-4542-AAF2-3F21FDFA746D}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
