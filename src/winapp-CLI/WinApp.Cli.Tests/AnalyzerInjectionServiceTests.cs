@@ -100,6 +100,19 @@ public class AnalyzerInjectionServiceTests
     }
 
     [TestMethod]
+    public void PrepareInjection_HookPropsExemptsWuiIdsFromWarningsAsErrors()
+    {
+        // 'winapp run' injects the analyzer without the user asking, so under TreatWarningsAsErrors=true
+        // the WUIxxxx warnings must NOT be promoted to build-breaking errors (the "warnings only" contract).
+        AnalyzerInjection injection = _service.PrepareInjection()!;
+        string props = File.ReadAllText(injection.HookPropsPath);
+
+        StringAssert.Contains(props, "<WarningsNotAsErrors>");
+        StringAssert.Contains(props, "WUI0001");
+        StringAssert.Contains(props, "WUI4103");
+    }
+
+    [TestMethod]
     public void PrepareInjection_IsIdempotentAndLeavesNoTempFiles()
     {
         AnalyzerInjection first = _service.PrepareInjection()!;

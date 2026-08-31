@@ -94,6 +94,17 @@ internal sealed class AnalyzerInjectionService(IWinappDirectoryService winappDir
             <Analyzer Include="$(MSBuildThisFileDirectory)Microsoft.WindowsAppSDK.Analyzers.dll" />
           </ItemGroup>
 
+          <!--
+            'winapp run' injects the analyzer WITHOUT the user asking, so it must not turn a
+            previously-passing build red: exempt the WUIxxxx IDs from TreatWarningsAsErrors
+            promotion. A user can still opt an individual rule into an error explicitly via
+            their own <WarningsAsErrors> (last-wins over this exemption for that specific ID).
+            Keep this list in sync with the analyzer's SupportedDiagnostics / AnalyzerReleases.
+          -->
+          <PropertyGroup Condition="'$(UseWinUI)' == 'true'">
+            <WarningsNotAsErrors>$(WarningsNotAsErrors);WUI0001;WUI0002;WUI0003;WUI0004;WUI1001;WUI1002;WUI1010;WUI2001;WUI2002;WUI2003;WUI2010;WUI2011;WUI2012;WUI2020;WUI2030;WUI3001;WUI4001;WUI4002;WUI4101;WUI4102;WUI4103</WarningsNotAsErrors>
+          </PropertyGroup>
+
           <!-- Surface XAML files as AdditionalFiles so the XAML rules can inspect them
                (mirrors Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer's packaged .targets). -->
           <Target Name="WinAppInjectXamlFilesForAnalyzer"

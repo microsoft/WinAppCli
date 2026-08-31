@@ -45,7 +45,14 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.12.0" PrivateAssets="all" />
+    <!--
+      Reference the OLDEST Roslyn we must run on, not the newest. The CLI documents .NET SDK
+      8.0.100+ for project-mode run (docs/guides/dotnet.md), whose compiler is Roslyn 4.8;
+      an analyzer that references a newer Microsoft.CodeAnalysis is skipped by that compiler
+      (CS9057), so pinning 4.8.0 keeps .NET 8 users receiving diagnostics. The rules use only
+      stable analyzer/SyntaxKind APIs, so 4.8 is sufficient.
+    -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" PrivateAssets="all" />
     <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="5.3.0" PrivateAssets="all" />
   </ItemGroup>
 

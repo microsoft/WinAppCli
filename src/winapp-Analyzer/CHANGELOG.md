@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Migrated into the `microsoft/winappCli` repo** (from `microsoft/win-dev-skills`)
+  and repackaged as **`Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer`** (the assembly
+  name stays `Microsoft.WindowsAppSDK.Analyzers`). The package is packed by
+  `scripts/package-nuget.ps1`, shares the CLI version, and is embedded in the `winapp`
+  CLI so `winapp run` surfaces the diagnostics for WinUI project-mode builds. **Not yet
+  published** — the first nuget.org release is cut by the repo's `rel/v*` pipeline.
 - **`WUI1001` / `WUI1002` — Data-driven UWP→WinAppSDK API mapping rules**
   sourced from the [Microsoft Learn API mapping table](https://learn.microsoft.com/windows/apps/windows-app-sdk/migrate-to-windows-app-sdk/api-mapping-table).
   ~30 mappings shipped; adding more is a data PR (one row in `ApiMappings.g.cs` + one test).
@@ -21,14 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the WebView2 containing-type guard.
 - **`SuppressionTests.cs`** — pragma-suppression regression test for every shipping rule
   (11 tests). A rule that doesn't honor `#pragma warning disable` will turn this red.
-- **Corpus regression suite** — [`tools/run-corpus.ps1`](tools/run-corpus.ps1) clones a
-  curated set of open-source WinUI 3 apps, injects the analyzer, and reports every
-  diagnostic. Wired to a weekly CI job in `.github/workflows/corpus.yml`.
-- **Release pipeline** — `.github/workflows/release.yml` builds, packs, optionally signs
-  (placeholder), publishes to NuGet on a `v*` tag, and creates a GitHub Release. Manual
-  dry-run available via workflow_dispatch.
 
 ### Changed
+- Analyzer references the oldest supported Roslyn (`Microsoft.CodeAnalysis.CSharp` 4.8.0,
+  = .NET SDK 8.0.100) so older compilers still load it.
 - `UwpApiAnalyzer.GetForCurrentView` heuristic now consults `Allowlists`
   instead of inline `Contains("ConnectedAnimationService")` — same behavior, easier to
   extend, regression-tested.
@@ -41,17 +43,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fallback (target's rightmost name is exactly `Dispatcher`) for the loose-source
   driver path (raw source, no WinUI metadata) where symbols don't bind. `DispatcherQueue` is unaffected.
 
-## [0.1.0-alpha] — 2026-04-20
+## [0.1.0-alpha] — 2026-04-20 (pre-migration lineage, `microsoft/win-dev-skills`)
+
+> Historical entries from when the analyzer lived in `win-dev-skills`. It was **not**
+> published to nuget.org under any package ID; it shipped there as a committed prebuilt
+> DLL. The first public NuGet release happens from `winappCli` (see Unreleased).
 
 ### Added
-- Initial release as a standalone NuGet package, extracted from the
-  `microsoft/win-dev-skills` repository.
+- Initial version, extracted from the `microsoft/win-dev-skills` repository.
 - Categorized diagnostic ID methodology (`WUI0xxx` compat / `WUI1xxx` migration /
   `WUI2xxx` runtime / `WUI3xxx` MVVM / `WUI4xxx` interop). See `RULES.md`.
 - 17 diagnostics across the 5 categories.
 - xUnit + `Microsoft.CodeAnalysis.CSharp.Analyzer.Testing` test harness with
   positive / negative / false-positive-guard tests per rule.
-- GitHub Actions CI: build + test + pack on every PR.
 
 ### Changed
 - **All `Error`-severity rules downgraded to `Warning`** (or `Info` for

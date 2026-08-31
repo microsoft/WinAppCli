@@ -9,7 +9,7 @@ namespace Microsoft.WindowsAppSDK.Analyzers;
 /// </summary>
 internal static class HelpLinks
 {
-    private const string Base = "https://github.com/microsoft/WindowsAppSDK-Analyzers/blob/main/RULES.md";
+    private const string Base = "https://github.com/microsoft/winappCli/blob/main/src/winapp-Analyzer/RULES.md";
 
     public static string For(string diagnosticId) =>
         Base + "#" + diagnosticId.ToLowerInvariant();

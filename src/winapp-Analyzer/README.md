@@ -46,61 +46,47 @@ migration table from the older `WUIxxx` 3-digit scheme.
 
 ## Building & testing
 
-Requires the .NET 10 SDK (a `global.json` in this directory pins to 10.0.x).
+Part of the `winappCli` repo. Build and test via the solution:
 
 ```powershell
-# From this directory (src/tools/winui-analyzer/)
-dotnet build Microsoft.WindowsAppSDK.Analyzers.slnx -c Release
-dotnet test  Microsoft.WindowsAppSDK.Analyzers.slnx -c Release
-
-# Or, from the repo root
-dotnet build src/tools/winui-analyzer/Microsoft.WindowsAppSDK.Analyzers.slnx -c Release
+# From the repo root
+dotnet build src/winapp-CLI/winapp.sln -c Release
+dotnet test  src/winapp-Analyzer/Microsoft.WindowsAppSDK.Analyzers.Tests/Microsoft.WindowsAppSDK.Analyzers.Tests.csproj -c Release
 ```
 
 The build emits `Microsoft.WindowsAppSDK.Analyzers.dll` under
-`Microsoft.WindowsAppSDK.Analyzers/bin/Release/netstandard2.0/`. The `.targets`
-file lives next to the source — both files must be copied to the
-`winui-dev-workflow` skill's `analyzer/` payload after every change so the
-skill stays self-contained.
-
-For a one-shot rebuild + payload refresh, use the repo-root helper:
-
-```powershell
-# Builds analyzer + winmd-cli + winui-search and refreshes the analyzer skill
-# payload in one step. Use this whenever you change analyzer source so the
-# pr-validation provenance check doesn't fail your PR.
-./scripts/build-tools.ps1
-```
+`src/winapp-Analyzer/Microsoft.WindowsAppSDK.Analyzers/bin/Release/netstandard2.0/`.
+The analyzer references the oldest supported Roslyn (`Microsoft.CodeAnalysis.CSharp`
+4.8.0, = .NET SDK 8.0.100) so older compilers still load it.
 
 ## Distribution
 
-Today the analyzer ships as a **prebuilt `Microsoft.WindowsAppSDK.Analyzers.dll`
-committed under `plugins/winui/skills/winui-dev-workflow/analyzer/`**. Two CI
-guardrails keep source ↔ binary honest:
+The analyzer is delivered two ways from a single build (see the design in the
+`winappCli` repo and `scripts/package-nuget.ps1`):
 
-* **`analyzer-provenance`** — every PR rebuilds the DLL and SHA-256 compares
-  it against the committed copy (256-byte size-delta tolerance for
-  deterministic-build drift across SDK versions).
-* **`analyzer-targets-sync`** — the source-tree `.targets` file and the
-  skill-payload `.targets` file must be byte-identical.
+* **Standalone NuGet package** — packed as
+  **`Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer`** (note: the package ID
+  differs from the assembly name, which stays `Microsoft.WindowsAppSDK.Analyzers`).
+  `dotnet build`, Visual Studio, and CI pick it up through the normal
+  `analyzers/dotnet/cs` convention. Reference it directly to get the diagnostics
+  without the CLI.
+* **Embedded in the `winapp` CLI** — `winapp run` extracts and injects the same
+  analyzer DLL for WinUI project-mode builds, so you get the diagnostics even
+  without a `PackageReference`. A build-time provenance gate asserts the embedded
+  DLL is byte-identical to the one packed into the NuGet package.
 
-If you change source, run `scripts/build-tools.ps1` from the repo root before
-opening the PR — otherwise both checks will fail.
-
-The longer-term plan is to publish this as a NuGet package
-(`Microsoft.WindowsAppSDK.Analyzers`); the csproj is already wired for it
-(`PackageId`, `PackageVersion`, `<Description>`, `<PackageTags>`). Flip
-`GeneratePackageOnBuild=true` when ready. NuGet publication is tracked
-separately as `tool-analyzer-nuget` in the launch tracker — independent of
-this repo's public launch.
+Both artifacts share the CLI version and are signed and pushed to nuget.org by the
+repo's `rel/v*` release pipeline.
 
 ## Status
 
-**Preview / `0.1.0-alpha`.** Rule IDs are immutable, but the rule set itself
-will grow. Every rule has a `helpLinkUri` pointing at relevant Microsoft Learn
-documentation. Ships at `Warning` severity (never `Error`) so adding a rule
-can never break someone's build by default — they have to opt into
-`TreatWarningsAsErrors` for the analyzer's diagnostics.
+**Preview / `0.x`.** Rule IDs are immutable, but the rule set itself will grow.
+Every rule has a `helpLinkUri` into the rule catalog (`RULES.md`). Rules ship at
+`Warning` severity (never `Error`) so adding a rule can never break someone's build
+by default. When `winapp run` injects the analyzer it also exempts the `WUIxxxx`
+IDs from `TreatWarningsAsErrors`, so an automatic injection can never turn a
+passing build red (a user can still opt an individual rule into an error via their
+own `WarningsAsErrors`).
 
 ## Contributing
 
@@ -108,9 +94,6 @@ can never break someone's build by default — they have to opt into
   fresh ID in `DiagnosticIds.cs` (don't reuse retired ones), wire a
   `helpLinkUri` into `HelpLinks.cs`, and add positive / negative / FP-guard
   tests under `Microsoft.WindowsAppSDK.Analyzers.Tests/Rules/`. Update
-  `RULES.md` and `CHANGELOG.md`.
-* Bump `<PackageVersion>` in the csproj only when publishing (see distribution
-  section above).
-* Don't put `Directory.Build.props` at the repo root — it would force
-  `TreatWarningsAsErrors` onto `winui-search` / `winmd-cli` which aren't
-  ready for it.
+  `RULES.md`, `CHANGELOG.md`, and the rule list in `AnalyzerReleases.Unshipped.md`.
+  If `winapp run`'s injected `WarningsNotAsErrors` list should cover the new ID,
+  add it in `src/winapp-CLI/WinApp.Cli/Services/AnalyzerInjectionService.cs`.
