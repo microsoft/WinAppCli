@@ -40,6 +40,8 @@ You need an **existing app project** — `winapp init` does **not** create new p
 
 To start a brand-new **WinUI** app (rather than adding Windows support to an existing project), use `winapp new`. It verifies the .NET SDK, installs the official WinUI `dotnet new` template pack on demand (grabbing the latest, or offering to update a stale one), and scaffolds the app against your installed SDK's target framework. Most WinUI templates already include packaging/identity, so **no `winapp init` step is needed** afterward — follow the template-specific next step `winapp new` prints when it finishes. App templates go straight to `winapp run` (which builds and launches the app); the `winui-lib` (class library) and `winui-unittest` templates differ (reference the library from an app project, or `winapp run` the packaged test app to run its tests). The template list is read live from the installed pack — run `winapp new --list` to see the current set.
 
+> A first run, template-pack update, or newly published Windows App SDK version may take longer while missing NuGet packages download and restore. If scaffolding continues beyond 10 seconds, `winapp new` updates its status message rather than silently waiting.
+
 ```powershell
 # Interactive — pick a template, then name/output
 winapp new

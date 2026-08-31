@@ -469,7 +469,14 @@ $portedIndexContent = Get-Content $portedIndexPath -Raw
 $frameworkSection = ""
 if ($portedIndexContent -match '(?ms)(## Supported frameworks\s*\n.+?)(?=\n## )') {
     $frameworkSection = $Matches[1]
-    # Rewrite links from index.md-relative (guides/foo.md) to guides/-relative (foo.md)
+    # The extracted links are index.md-relative (i.e. output-root-relative) but are
+    # about to be written into guides/index.md, one directory down. Rebase them:
+    #   guides/foo.md -> foo.md          (now a sibling)
+    #   security.md   -> ../security.md  (still at the root; a bare name would 404)
+    # Absolute URLs, mailto:, in-page anchors and already-relative paths are left alone.
+    # Root-relative links must be rewritten first, while the guides/ prefix still
+    # marks which targets are siblings.
+    $frameworkSection = $frameworkSection -replace '\]\((?!https?:|mailto:|#|/|\.{1,2}/)(?!guides/)([^)]+)\)', '](../$1)'
     $frameworkSection = $frameworkSection -replace '\]\(guides/', ']('
 }
 
@@ -491,10 +498,9 @@ These guides walk you through using the winapp CLI with your app framework — f
 if ($frameworkSection) {
     # Strip the "## Supported frameworks" heading and the intro line, keep just the table + additional guides
     $tableContent = $frameworkSection -replace '(?ms)^## Supported frameworks\s*\n+.*?app frameworks:\s*\n+', ''
-    $guidesIndex += $tableContent
 } else {
     Write-Warn "  Could not extract framework section from index.md — using fallback"
-    $guidesIndex += @"
+    $tableContent = @"
 | Framework | Guide |
 |-----------|-------|
 | .NET / WPF / WinForms | [Get started with .NET](dotnet.md) |
@@ -505,6 +511,12 @@ if ($frameworkSection) {
 | Flutter | [Get started with Flutter](flutter.md) |
 "@
 }
+
+# A here-string does not include the newline before its closing "@, so the blank
+# line intended to separate the intro paragraph from the table collapses away and
+# Markdown renders the table as part of that paragraph. Join explicitly rather
+# than relying on the here-string to carry the separator.
+$guidesIndex = $guidesIndex.TrimEnd() + "`r`n`r`n" + $tableContent.TrimStart()
 
 # Add Electron deep-dive section (these only exist as guides, not in README)
 # Normalize the boundary: the extracted framework/additional-guides block can

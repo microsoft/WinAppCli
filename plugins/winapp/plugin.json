@@ -1,11 +1,14 @@
 {
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "winappcli",
   "description": "Windows app development, packaging, and distribution. Helps with creating Windows installers (MSIX), code signing, certificates, Windows SDK and Windows App SDK setup, package identity for Windows APIs (push notifications, background tasks, share target), appxmanifest authoring, and Microsoft Store distribution. Supports Electron, .NET, C++, Rust, Flutter, and Tauri apps.",
-  "version": "0.6.1",
+  "version": "0.6.3",
   "author": {
     "name": "Microsoft",
     "url": "https://github.com/microsoft/WinAppCli"
   },
+  "homepage": "https://github.com/microsoft/WinAppCli",
+  "repository": "https://github.com/microsoft/WinAppCli",
   "license": "MIT",
   "keywords": [
     "windows",
@@ -48,22 +51,5 @@
     "uwp",
     "desktop app",
     "win32"
-  ],
-  "category": "windows-development",
-  "tags": [
-    "windows",
-    "msix",
-    "packaging",
-    "installer",
-    "desktop",
-    "notifications",
-    "sdk",
-    "signing",
-    "certificate",
-    "distribution"
-  ],
-  "agents": "agents/",
-  "skills": [
-    "skills/"
   ]
 }

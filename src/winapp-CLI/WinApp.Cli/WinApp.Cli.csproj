@@ -88,6 +88,10 @@
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
       <_Parameter1>WinApp.Cli.Tests</_Parameter1>
     </AssemblyAttribute>
+    <!-- The OneFuzz harness targets ZipRangeExtractor, which is internal. -->
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>WinApp.Cli.Fuzz</_Parameter1>
+    </AssemblyAttribute>
   </ItemGroup>
 
 </Project>

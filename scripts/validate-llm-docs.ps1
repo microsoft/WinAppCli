@@ -6,6 +6,9 @@
     This script compares docs/cli-schema.json with the CLI's --cli-schema output
     and verifies that every plugin manifest version matches version.json. Plugin
     skills are hand-authored and are not generated or drift-checked.
+
+    It also runs scripts/validate-plugin-package.ps1, which enforces Agent Plugins
+    1.0 conformance for plugins/winapp.
 .PARAMETER CliPath
     Path to the winapp.exe CLI binary (default: artifacts/cli/win-x64/winapp.exe)
 .PARAMETER FailOnDrift
@@ -34,6 +37,8 @@ if (-not (Test-Path $CliPath)) {
 
 Write-Host "[VALIDATE] Checking CLI schema and plugin manifests..." -ForegroundColor Blue
 Write-Host "CLI path: $CliPath" -ForegroundColor Gray
+
+$PluginPackageScript = Join-Path $PSScriptRoot "validate-plugin-package.ps1"
 
 if (-not (Test-Path $SchemaPath)) {
     Write-Host "::error::docs/cli-schema.json not found. Run 'scripts/build-cli.ps1' to regenerate it." -ForegroundColor Red
@@ -120,6 +125,19 @@ foreach ($manifestPath in $ManifestPaths) {
         Write-Host "::error::plugin manifest versions in $manifestPath must all equal $BaseVersion" -ForegroundColor Red
         $HasDrift = $true
     }
+}
+
+if (Test-Path $PluginPackageScript) {
+    Write-Host ""
+    # Let the child signal failure via its exit code; -FailOnDrift decides whether it is fatal.
+    & $PluginPackageScript
+    if ($LASTEXITCODE -ne 0) {
+        $HasDrift = $true
+    }
+}
+else {
+    Write-Host "::error::required script not found: $PluginPackageScript" -ForegroundColor Red
+    $HasDrift = $true
 }
 
 if ($HasDrift) {
