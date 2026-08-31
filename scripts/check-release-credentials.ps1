@@ -116,14 +116,18 @@ function Invoke-GitHubApi {
     }
     catch {
         $status = 0
+        $headers = $null
         if ($_.Exception.PSObject.Properties.Name -contains 'Response' -and $_.Exception.Response) {
             $status = [int]$_.Exception.Response.StatusCode
+            # Surface headers on the error path too: a 403 is only distinguishable as rate
+            # limiting (vs. an authorization failure) by its x-ratelimit / retry-after headers.
+            try { $headers = $_.Exception.Response.Headers } catch { $headers = $null }
         }
         return @{
             Ok         = $false
             StatusCode = $status
             Content    = $null
-            Headers    = $null
+            Headers    = $headers
             Message    = $_.Exception.Message
         }
     }
@@ -133,6 +137,18 @@ function Get-HeaderValue {
     param($Headers, [string]$Name)
 
     if (-not $Headers) { return $null }
+
+    # Two shapes reach here: the IDictionary from a successful Invoke-WebRequest, and the
+    # HttpResponseHeaders off an exception's Response (which has no .Keys).
+    if ($Headers -is [System.Net.Http.Headers.HttpResponseHeaders]) {
+        $values = $null
+        if ($Headers.TryGetValues($Name, [ref]$values)) {
+            return ($values -join ', ')
+        }
+        return $null
+    }
+
+    if (-not ($Headers.PSObject.Properties.Name -contains 'Keys')) { return $null }
 
     # Invoke-WebRequest surfaces headers as string[] on pwsh and string on Windows PowerShell.
     foreach ($key in $Headers.Keys) {
@@ -169,7 +185,17 @@ else {
             Add-Result -Status 'FAIL' -Check 'GitHub token' -Detail 'Token was rejected (401). It has expired or been revoked - regenerate it and update the variable group.'
         }
         elseif ($user.StatusCode -eq 403) {
-            Add-Result -Status 'FAIL' -Check 'GitHub token' -Detail 'Token was forbidden (403). It is likely SSO-unauthorized for the org, or its scopes were reduced.'
+            # GitHub returns 403 for BOTH authorization failures and rate limiting, so the status
+            # alone is not a verdict. Rate-limit responses carry x-ratelimit-remaining: 0 (primary)
+            # or a retry-after header (secondary); those say nothing about the credential.
+            $remaining = Get-HeaderValue -Headers $user.Headers -Name 'x-ratelimit-remaining'
+            $retryAfter = Get-HeaderValue -Headers $user.Headers -Name 'retry-after'
+            if ($retryAfter -or $remaining -eq '0') {
+                Add-Result -Status 'WARN' -Check 'GitHub token' -Detail 'Rate limited (403). The token is valid but throttled right now - inconclusive.'
+            }
+            else {
+                Add-Result -Status 'FAIL' -Check 'GitHub token' -Detail 'Token was forbidden (403). It is likely SSO-unauthorized for the org, or its scopes were reduced.'
+            }
         }
         else {
             # DNS failure, timeout, proxy, or a GitHub 5xx all land here with StatusCode 0 or 5xx.
@@ -260,7 +286,15 @@ function Test-RepoAccess {
             Add-Result -Status 'FAIL' -Check $Label -Detail "'$Repo' was not found, or the token cannot see it. If the fork was deleted, recreate it - wingetcreate and the docs PR both depend on it."
         }
         elseif ($result.StatusCode -eq 403) {
-            Add-Result -Status 'FAIL' -Check $Label -Detail "Access to '$Repo' was forbidden (403). The token is likely SSO-unauthorized for the org."
+            # Same ambiguity as GET /user: 403 covers both authorization and rate limiting.
+            $remaining = Get-HeaderValue -Headers $result.Headers -Name 'x-ratelimit-remaining'
+            $retryAfter = Get-HeaderValue -Headers $result.Headers -Name 'retry-after'
+            if ($retryAfter -or $remaining -eq '0') {
+                Add-Result -Status 'WARN' -Check $Label -Detail "Rate limited reading '$Repo' (403). Inconclusive - access was not disproved."
+            }
+            else {
+                Add-Result -Status 'FAIL' -Check $Label -Detail "Access to '$Repo' was forbidden (403). The token is likely SSO-unauthorized for the org."
+            }
         }
         else {
             # Transport failure, rate limit, or a GitHub 5xx. None of those disprove push access,

@@ -148,9 +148,11 @@ extends:
           - task: PowerShell@2
             displayName: "Generate Release Notes"
             # Unconditional: generate-release-notes.ps1 catches its own API and model failures and
-            # falls back to a git-log changelog, so it exits 0 either way. Making this a "hard gate"
-            # on the rehearsal branch would be inert. A dead token is detected by
-            # check-release-credentials.ps1's Models probe instead, which is the only thing that can.
+            # falls back to a git-log changelog, so it exits 0 either way. Gating this on the
+            # rehearsal branch to make it a "hard gate" would be inert.
+            #
+            # Note there is no credential check for the AI path: GitHub Models was retired on
+            # 2026-07-30 and returns 410 for every token, so a probe could never pass.
             continueOnError: true
             # Tokens only on the two branches that legitimately run this pipeline. An unrelated
             # branch someone queues gets the build and the asset preflight and no credentials.
