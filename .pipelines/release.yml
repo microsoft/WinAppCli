@@ -667,12 +667,16 @@ extends:
                   # would 404 when wingetcreate downloads them to hash. Rehearse against the last
                   # PUBLISHED release instead - that still exercises the download, the hashing and
                   # the manifest schema, which is where submissions actually break (#568).
-                  # /releases/latest excludes prereleases, and this pipeline publishes every
-                  # release with isPreRelease: true - so it would rehearse against an ever-staler
-                  # version, or 404 once no stable release remains. List instead.
-                  $latest = & "$tempDir\gh\bin\gh.exe" api "repos/microsoft/winappcli/releases?per_page=1" --jq '.[0].tag_name'
-                  if ($LASTEXITCODE -ne 0 -or -not $latest) {
-                    Write-Error "Could not resolve the latest published release to rehearse against."
+                  #
+                  # Not /releases/latest: that excludes prereleases, and this pipeline publishes
+                  # every release with isPreRelease: true, so it would rehearse an ever-staler
+                  # version or 404 once no stable release remains. The list endpoint keeps
+                  # prereleases, but an authenticated list also includes DRAFTS - whose assets are
+                  # not downloadable - so drop those and take the first real one.
+                  $latest = & "$tempDir\gh\bin\gh.exe" api "repos/microsoft/winappcli/releases?per_page=20" `
+                    --jq 'map(select(.draft == false)) | .[0].tag_name'
+                  if ($LASTEXITCODE -ne 0 -or -not $latest -or $latest.Trim() -eq 'null') {
+                    Write-Error "Could not resolve a published (non-draft) release to rehearse against."
                     exit 1
                   }
                   $manifestVersion = $latest.Trim().TrimStart('v')
