@@ -5,3 +5,5 @@
 // consumes it everywhere the `ui` verbs are implemented, so it is imported globally rather than
 // repeated in every command and helper file.
 global using Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation;
+global using Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation.Recording;
+

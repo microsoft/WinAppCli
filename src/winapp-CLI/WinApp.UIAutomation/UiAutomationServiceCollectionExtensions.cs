@@ -19,9 +19,14 @@ public static class UiAutomationServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddWinAppUiAutomation(this IServiceCollection services)
     {
+        // CA1416: registering the touch/pen implementation does not invoke it. The Windows 10 1809
+        // requirement is declared on IPointerInput itself, so callers that actually inject touch or
+        // pen input still get the platform diagnostic at their call site.
+#pragma warning disable CA1416
         return services
             .AddSingleton<IMouseInput, RealMouseInput>()
             .AddSingleton<IPointerInput, RealPointerInput>()
+#pragma warning restore CA1416
             .AddSingleton<IKeyboardInput, RealKeyboardInput>()
             .AddSingleton<IForegroundGuard, RealForegroundGuard>()
             .AddSingleton<IOwnedWindowFinder, RealOwnedWindowFinder>()
@@ -29,7 +34,11 @@ public static class UiAutomationServiceCollectionExtensions
             .AddSingleton<IUiSelectorParser, UiSelectorParser>()
             .AddSingleton<ISystemUiQuery, SystemUiQuery>()
             .AddSingleton<IUiTargetResolver, UiTargetResolver>()
+#if WINDOWS10_0_19041_0_OR_GREATER
             .AddSingleton<IWindowCapture, WgcWindowCapture>()
+#else
+            .AddSingleton<IWindowCapture, GdiWindowCapture>()
+#endif
             .AddSingleton<IUiAutomation, UiAutomationService>();
     }
 }

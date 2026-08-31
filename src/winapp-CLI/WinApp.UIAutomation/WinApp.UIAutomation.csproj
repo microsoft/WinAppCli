@@ -1,7 +1,10 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <!-- Two targets so consumers pick their cost. The 10.0.19041.0 target adds Windows Graphics
+         Capture (occluded-window screenshots and continuous frame capture) but pulls in the ~24 MB
+         Windows SDK WinRT projection; the plain windows target is GDI-only and adds ~1.5 MB. -->
+    <TargetFrameworks>net10.0-windows;net10.0-windows10.0.19041.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
 
@@ -43,6 +46,18 @@
   <ItemGroup>
     <None Include="PACKAGE.md" Pack="true" PackagePath="" />
     <None Include="icon.png" Pack="true" PackagePath="" />
+  </ItemGroup>
+
+  <!-- Windows Graphics Capture needs the Windows 10 SDK projection; the lean target ships the
+       GDI-only capture implementation instead. Both expose the same IWindowCapture surface. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+    <Compile Remove="Capture\WgcCapture.cs" />
+    <Compile Remove="Capture\WgcCapture.FrameGrabber.cs" />
+    <Compile Remove="Capture\WgcWindowCapture.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' != 'net10.0-windows'">
+    <Compile Remove="Capture\GdiWindowCapture.cs" />
   </ItemGroup>
 
   <ItemGroup>

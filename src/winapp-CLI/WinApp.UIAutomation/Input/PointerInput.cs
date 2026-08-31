@@ -9,6 +9,8 @@ using Windows.Win32.Foundation;
 using Windows.Win32.UI.Input.Pointer;
 using Windows.Win32.UI.WindowsAndMessaging;
 
+using System.Runtime.Versioning;
+
 namespace Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation;
 
 /// <summary>
@@ -19,6 +21,7 @@ namespace Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation;
 /// cannot be created. Pen uses <c>CreateSyntheticPointerDevice(PT_PEN)</c>. Coordinates are screen
 /// pixels — the same space <c>ui inspect</c> reports.
 /// </summary>
+[SupportedOSPlatform("windows10.0.17763.0")]
 public static class PointerInput
 {
     /// <summary>Maximum simultaneous touch contacts we register with the injection subsystem.</summary>

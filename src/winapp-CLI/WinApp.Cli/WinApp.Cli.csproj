@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -86,6 +86,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\WinApp.UIAutomation\WinApp.UIAutomation.csproj" />
+    <ProjectReference Include="..\WinApp.UIAutomation.Recording\WinApp.UIAutomation.Recording.csproj" />
   </ItemGroup>
 
   <ItemGroup>

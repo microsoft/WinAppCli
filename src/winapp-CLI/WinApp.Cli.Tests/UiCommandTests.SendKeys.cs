@@ -36,7 +36,7 @@ public partial class UiCommandTests
         Assert.AreEqual(0, exitCode);
 
         Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
-        Assert.AreEqual(WinApp.Cli.KeyTransport.PostMessage, _fakeKeyboard.SendCalls[0].Transport);
+        Assert.AreEqual(KeyTransport.PostMessage, _fakeKeyboard.SendCalls[0].Transport);
     }
 
     [TestMethod]
@@ -49,7 +49,7 @@ public partial class UiCommandTests
         Assert.AreEqual(0, exitCode);
 
         Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
-        Assert.AreEqual(WinApp.Cli.KeyTransport.SendInput, _fakeKeyboard.SendCalls[0].Transport);
+        Assert.AreEqual(KeyTransport.SendInput, _fakeKeyboard.SendCalls[0].Transport);
     }
 
     [TestMethod]
@@ -63,7 +63,7 @@ public partial class UiCommandTests
         Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
         var actions = _fakeKeyboard.SendCalls[0].Actions;
         Assert.AreEqual(4, actions.Count);
-        Assert.IsInstanceOfType<WinApp.Cli.TextInput>(actions[3]);
+        Assert.IsInstanceOfType<TextInput>(actions[3]);
     }
 
     [TestMethod]
@@ -178,8 +178,8 @@ public partial class UiCommandTests
         Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
         var actions = _fakeKeyboard.SendCalls[0].Actions;
         Assert.AreEqual(1, actions.Count);
-        Assert.IsInstanceOfType<WinApp.Cli.TextInput>(actions[0]);
-        Assert.AreEqual("down down enter", ((WinApp.Cli.TextInput)actions[0]).Text);
+        Assert.IsInstanceOfType<TextInput>(actions[0]);
+        Assert.AreEqual("down down enter", ((TextInput)actions[0]).Text);
 
         var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
         Assert.AreEqual(1, result.GetProperty("actionCount").GetInt32());
@@ -196,7 +196,7 @@ public partial class UiCommandTests
         Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
         var actions = _fakeKeyboard.SendCalls[0].Actions;
         Assert.AreEqual(1, actions.Count);
-        Assert.AreEqual("a  b", ((WinApp.Cli.TextInput)actions[0]).Text);
+        Assert.AreEqual("a  b", ((TextInput)actions[0]).Text);
     }
 
     [TestMethod]
@@ -211,7 +211,7 @@ public partial class UiCommandTests
         Assert.AreEqual(0, exitCode);
 
         Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
-        Assert.IsInstanceOfType<WinApp.Cli.TextInput>(_fakeKeyboard.SendCalls[0].Actions[0]);
+        Assert.IsInstanceOfType<TextInput>(_fakeKeyboard.SendCalls[0].Actions[0]);
     }
 
     [TestMethod]
@@ -236,7 +236,7 @@ public partial class UiCommandTests
         Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
         var actions = _fakeKeyboard.SendCalls[0].Actions;
         Assert.AreEqual(1, actions.Count);
-        Assert.AreEqual("   ", ((WinApp.Cli.TextInput)actions[0]).Text);
+        Assert.AreEqual("   ", ((TextInput)actions[0]).Text);
     }
 
     [TestMethod]
@@ -270,6 +270,7 @@ public partial class UiCommandTests
         // desktop or a wrong-window foreground), no keys are sent (M5).
         _fakeSession.SessionResult.WindowHandle = 4242; // resolvable target → reach the foreground gate
         _fakeForeground.Allow = false;
+        _fakeForeground.DenyReason = ForegroundCheck.ForegroundNotTarget;
 
         var command = GetRequiredService<UiSendKeysCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["enter", "-a", "TestApp", "--via", "send-input", "--json"]);
@@ -277,7 +278,8 @@ public partial class UiCommandTests
         Assert.AreEqual(1, exitCode);
         Assert.AreEqual(0, _fakeKeyboard.SendCalls.Count, "no keys should be sent when the foreground guard refuses");
         Assert.AreEqual(1, _fakeForeground.Calls.Count);
-        Assert.AreEqual("--via send-input", _fakeForeground.Calls[0].Action);
+        StringAssert.Contains(TestAnsiConsole.Output, "refusing to --via send-input",
+            "the refusal must name the action the command was attempting");
     }
 
     [TestMethod]
@@ -290,7 +292,7 @@ public partial class UiCommandTests
         // contract as the pre-send gate (not a generic error) so callers get a precise, actionable code.
         // The command writes the JSON error straight to Console.Error, so capture that stream directly.
         _fakeSession.SessionResult.WindowHandle = 4242; // resolvable target → reach the send path
-        _fakeKeyboard.SendException = new WinApp.Cli.Helpers.ForegroundLostException("focus drifted mid-injection");
+        _fakeKeyboard.SendException = new ForegroundLostException("focus drifted mid-injection");
 
         var command = GetRequiredService<UiSendKeysCommand>();
         var previousErr = Console.Error;
@@ -317,7 +319,7 @@ public partial class UiCommandTests
         // so it lands reliably, which blocks synchronously for a while. The command surfaces an advisory that
         // the throttling is intentional and that set-value is faster for bulk text.
         _fakeSession.SessionResult.WindowHandle = 4242;
-        var longText = new string('a', WinApp.Cli.Helpers.KeyboardInput.DefaultTextChunkChars + 1);
+        var longText = new string('a', KeyboardInput.DefaultTextChunkChars + 1);
 
         var command = GetRequiredService<UiSendKeysCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, [longText, "-a", "TestApp", "--via", "send-input", "--json"]);
@@ -337,7 +339,7 @@ public partial class UiCommandTests
         // throttle advisory must NOT fire — it is scoped to payloads that actually get chunked, to avoid
         // warning on every short send-input.
         _fakeSession.SessionResult.WindowHandle = 4242;
-        var boundaryText = new string('a', WinApp.Cli.Helpers.KeyboardInput.DefaultTextChunkChars);
+        var boundaryText = new string('a', KeyboardInput.DefaultTextChunkChars);
 
         var command = GetRequiredService<UiSendKeysCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, [boundaryText, "-a", "TestApp", "--via", "send-input", "--json"]);
@@ -719,7 +721,7 @@ public partial class UiCommandTests
 
         Assert.AreEqual(0, exitCode);
         Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
-        Assert.AreEqual(WinApp.Cli.KeyTransport.SendInput, _fakeKeyboard.SendCalls[0].Transport);
+        Assert.AreEqual(KeyTransport.SendInput, _fakeKeyboard.SendCalls[0].Transport);
     }
 
     [TestMethod]
@@ -788,7 +790,7 @@ public partial class UiCommandTests
 
         Assert.AreEqual(0, exitCode);
         Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
-        Assert.AreEqual(WinApp.Cli.KeyTransport.SendInput, _fakeKeyboard.SendCalls[0].Transport);
+        Assert.AreEqual(KeyTransport.SendInput, _fakeKeyboard.SendCalls[0].Transport);
     }
 
     // COR-01 — SEC-02: --allow-system-keys with post-message is a no-op (exit 0, warning emitted)
@@ -804,7 +806,7 @@ public partial class UiCommandTests
 
         Assert.AreEqual(0, exitCode);
         Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count, "keys should still be sent via post-message");
-        Assert.AreEqual(WinApp.Cli.KeyTransport.PostMessage, _fakeKeyboard.SendCalls[0].Transport);
+        Assert.AreEqual(KeyTransport.PostMessage, _fakeKeyboard.SendCalls[0].Transport);
     }
 
     // M1: --allow-system-keys + --json + post-message → no-op warning visible in JSON warnings array
@@ -995,7 +997,7 @@ public partial class UiCommandTests
 
         Assert.AreEqual(0, exitCode);
         Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count, "right-Win key should be sent when opted in");
-        Assert.AreEqual(WinApp.Cli.KeyTransport.SendInput, _fakeKeyboard.SendCalls[0].Transport);
+        Assert.AreEqual(KeyTransport.SendInput, _fakeKeyboard.SendCalls[0].Transport);
     }
 
     // LOW: system combo refused without flag → error text contains --allow-system-keys

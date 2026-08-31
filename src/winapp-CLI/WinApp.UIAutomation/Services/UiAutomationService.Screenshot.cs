@@ -93,6 +93,7 @@ internal sealed partial class UiAutomationService
             // Screen capture mode: BitBlt from screen DC — captures popups and overlays.
             pixelData = CaptureFromScreen(rect.left, rect.top, width, height);
         }
+#if WINDOWS10_0_19041_0_OR_GREATER
         else if (WgcCapture.IsSupported())
         {
             try
@@ -115,8 +116,12 @@ internal sealed partial class UiAutomationService
                 pixelData = CaptureFromWindowWithBlankRetry(hwnd, width, height);
             }
         }
+#endif
         else
         {
+            // Without Windows Graphics Capture this is the only window-scoped path, so an occluded
+            // or GPU-composited window may come back blank — CaptureFromWindowWithBlankRetry
+            // foregrounds and retries once before giving up.
             pixelData = CaptureFromWindowWithBlankRetry(hwnd, width, height);
         }
 

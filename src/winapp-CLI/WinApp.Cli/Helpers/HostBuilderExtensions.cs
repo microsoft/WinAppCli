@@ -64,7 +64,7 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IAzureSignToolService, AzureSignToolService>()
             // UI Automation services (from the Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation package)
             .AddWinAppUiAutomation()
-            .AddSingleton<IUiRecordingService, UiRecordingService>()
+            .AddWinAppUiRecording()
             .AddSingleton<IControlsSearchService, ControlsSearchService>();
     }
 

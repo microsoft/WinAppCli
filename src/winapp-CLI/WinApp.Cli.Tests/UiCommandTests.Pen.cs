@@ -416,7 +416,7 @@ public partial class UiCommandTests
     {
         // When the session service throws AppNotFoundException (app not running), the outer
         // catch must map it to missing_app, not internal_error.
-        _fakeSession.ThrowException = new WinApp.Cli.Services.AppNotFoundException(
+        _fakeSession.ThrowException = new AppNotFoundException(
             "No running app found matching '__test_nonexistent__'.");
 
         var command = GetRequiredService<UiPenCommand>();
@@ -441,7 +441,7 @@ public partial class UiCommandTests
     {
         // When FindSingleElementAsync throws plain InvalidOperationException (selector matched
         // multiple elements), the outer catch must map it to invalid_arguments, NOT missing_app.
-        _fakeSession.SessionResult = new WinApp.Cli.UiTarget
+        _fakeSession.SessionResult = new UiTarget
         {
             ProcessId = 1, ProcessName = "TestApp", WindowHandle = 1234
         };

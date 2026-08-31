@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Runtime.Versioning;
+
 namespace Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation;
 
 /// <summary>
@@ -16,6 +18,7 @@ namespace Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation;
 /// path is exercised only on a dedicated interactive lane (see the WINAPP_UI_INJECTION_LIVE-gated
 /// tests). These two members therefore remain un-coverable in the default run by design.
 /// </remarks>
+[SupportedOSPlatform("windows10.0.17763.0")]
 internal class RealPointerInput : IPointerInput
 {
     public void Touch(TouchGesture gesture, IReadOnlyList<IReadOnlyList<PointerPoint>> contactPaths, int holdMs, int durationMs)

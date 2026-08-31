@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Runtime.Versioning;
+
 namespace Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation;
 
 /// <summary>A single point in app/screen pixel space (the same space <c>ui inspect</c> reports).</summary>
@@ -41,6 +43,7 @@ public enum TouchGesture
 /// injected contacts and gesture parameters so the <c>ui touch</c>/<c>ui pen</c> commands can be
 /// unit-tested without a live, unlocked desktop.
 /// </summary>
+[SupportedOSPlatform("windows10.0.17763.0")]
 public interface IPointerInput
 {
     /// <summary>
