@@ -153,9 +153,8 @@ internal static partial class AppxCapabilityCatalog
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var raw in value.Split([';', ','], StringSplitOptions.RemoveEmptyEntries))
+        foreach (var entry in value.Split([';', ','], StringSplitOptions.RemoveEmptyEntries).Select(static raw => raw.Trim()))
         {
-            var entry = raw.Trim();
             if (entry.Length == 0)
             {
                 continue;

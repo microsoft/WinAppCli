@@ -553,10 +553,11 @@ internal class AppxManifestDocument
             return;
         }
 
-        foreach (var family in _document.Root?.Element(DefaultNs + "Dependencies")
-            ?.Elements(DefaultNs + "TargetDeviceFamily") ?? [])
+        var families = _document.Root?.Element(DefaultNs + "Dependencies")
+            ?.Elements(DefaultNs + "TargetDeviceFamily") ?? [];
+
+        foreach (var attribute in families.Select(static family => family.Attribute("MaxVersionTested")))
         {
-            var attribute = family.Attribute("MaxVersionTested");
             if (attribute == null)
             {
                 continue;
