@@ -2924,6 +2924,7 @@ public class ProjectRunServiceTests
         var csproj = WriteFile("App.csproj", ExecutableCsproj);
         var solution = WriteFile("App.slnx", SlnxListing("App.csproj", "Server/Server.csproj"));
         var longRestoreLine = "RESTORE-PROGRESS-" + new string('X', 120);
+        var restoreOutput = $"{longRestoreLine}{Environment.NewLine}{Environment.NewLine}AFTER-BLANK";
         var commandArgs = new List<string>();
         var dotnet = new FakeDotNetService
         {
@@ -2931,7 +2932,7 @@ public class ProjectRunServiceTests
             {
                 commandArgs.Add(a);
                 return a.StartsWith("restore ", StringComparison.Ordinal)
-                    ? (0, longRestoreLine, string.Empty)
+                    ? (0, restoreOutput, string.Empty)
                     : (0, PackagedPropertiesJson(), string.Empty);
             },
         };
@@ -2947,6 +2948,10 @@ public class ProjectRunServiceTests
             "the restore phase should be announced before dotnet starts");
         StringAssert.Contains(console.Output, longRestoreLine,
             "restore output should stream live without Spectre wrapping the subprocess line");
+        StringAssert.Contains(
+            console.Output.ReplaceLineEndings("\n"),
+            $"{longRestoreLine}\n\nAFTER-BLANK",
+            "the streaming fake should preserve genuine blank subprocess lines without inventing CRLF blanks");
         StringAssert.Contains(dotnet.StreamingCalls.Single(a => a.StartsWith("build ", StringComparison.Ordinal)), "--no-restore",
             "the build pass should skip its own restore since the solution restore already covered the target");
     }

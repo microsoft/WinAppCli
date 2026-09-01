@@ -136,17 +136,20 @@ internal class FakeDotNetService : IDotNetService
         if (RunDotnetCommandHandler is not null)
         {
             var (exitCode, output, error) = RunDotnetCommandHandler(arguments);
-            foreach (var line in output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
-            {
-                onOutputLine?.Invoke(line);
-            }
-            foreach (var line in error.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
-            {
-                onErrorLine?.Invoke(line);
-            }
+            ForwardLines(output, onOutputLine);
+            ForwardLines(error, onErrorLine);
             return Task.FromResult(exitCode);
         }
         return Task.FromResult(0);
+    }
+
+    private static void ForwardLines(string text, Action<string>? callback)
+    {
+        using var reader = new StringReader(text);
+        while (reader.ReadLine() is { } line)
+        {
+            callback?.Invoke(line);
+        }
     }
 
     /// <summary>
