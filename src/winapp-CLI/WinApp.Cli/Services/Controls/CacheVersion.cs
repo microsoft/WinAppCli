@@ -6,8 +6,11 @@ namespace WinApp.Cli.Services.Controls;
 /// directory (gallery / toolkit / reactor). <see cref="CachedProviderBase"/>
 /// stamps this string into that provider's <c>schema-version.txt</c> on write
 /// and requires an exact match on read; any mismatch forces a cache miss.
-/// Unlike the upstream winui-search tool, find-ui ships NO embedded scenario
-/// snapshot — a cache miss re-fetches the corpus from GitHub (network required).
+///
+/// It also pins the corpus baked into the binary: the build-time snapshot baker writes
+/// <see cref="Current"/> into the snapshot manifest and <see cref="EmbeddedSnapshot"/>
+/// refuses to serve a snapshot stamped with anything else, so a snapshot produced by
+/// different extraction logic can never be mixed with live or cached data.
 ///
 /// Bump <see cref="Current"/> whenever ANY cached payload should be discarded:
 ///   1. Scenario / tag JSON schema changes (new or removed fields)
@@ -16,6 +19,11 @@ namespace WinApp.Cli.Services.Controls;
 ///      otherwise existing caches keep serving the older fallback contents.
 ///   3. Tag extraction / cleaning logic changes that would alter the cached
 ///      output for the same input data.
+///
+/// A bump requires a re-bake in the same change:
+/// <c>EmbeddedSnapshotTests.Manifest_Ships_AndMatchesCurrentCacheVersion</c> fails the
+/// build when the committed snapshot's version doesn't match, because a mismatch would
+/// silently drop the embedded floor and restore the offline outage it exists to fix.
 ///
 /// History:
 ///   "10" — Notes / Synonyms refactor
@@ -51,6 +59,10 @@ namespace WinApp.Cli.Services.Controls;
 ///          so ~44 scenarios shipped XAML wired to a missing handler (compile error
 ///          on paste). Method-aware: backed handlers (e.g. TabView's) are kept.
 ///          Regenerate so old caches drop the dangling handlers.
+///
+/// Note: adding the embedded snapshot floor did NOT bump this. The cached payload's
+/// schema and extraction logic are unchanged, and a bump would have forced every
+/// existing user through a several-hundred-request re-fetch for no benefit.
 /// </summary>
 internal static class CacheVersion
 {

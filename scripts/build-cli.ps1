@@ -28,6 +28,13 @@
     Skip NuGet, MSIX, docs, and npm package creation (builds the CLI and runs tests). Alias: TestsOnly
 .PARAMETER Stable
     Use stable build configuration (default: false, uses prerelease config)
+.PARAMETER SkipBake
+    Skip refreshing the find-ui corpus baked into the CLI. The bake only runs on -Stable
+    builds; use this to opt out of it on a release build (the committed snapshot is shipped
+    as-is). This is the deliberate override for a known-transient upstream outage: without
+    it, a bake that fails on a stable build fails the build.
+.PARAMETER Bake
+    Refresh the find-ui corpus even on a prerelease build. Requires network access to GitHub.
 .EXAMPLE
     .\scripts\build-cli.ps1
 .EXAMPLE
@@ -50,6 +57,8 @@
     .\scripts\build-cli.ps1 -TestsOnly
 .EXAMPLE
     .\scripts\build-cli.ps1 -Stable
+.EXAMPLE
+    .\scripts\build-cli.ps1 -Bake
 #>
 
 param(
@@ -65,7 +74,9 @@ param(
     [switch]$OnlyDocs = $false,
     [Alias("TestsOnly")]
     [switch]$OnlyTests = $false,
-    [switch]$Stable = $false
+    [switch]$Stable = $false,
+    [switch]$SkipBake = $false,
+    [switch]$Bake = $false
 )
 
 # Validate compound flag usage
@@ -107,6 +118,8 @@ try
     $CliProjectPath = "$CliSolutionDir\WinApp.Cli\WinApp.Cli.csproj"
     $CliTestsProjectPath = "$CliSolutionDir\WinApp.Cli.Tests\WinApp.Cli.Tests.csproj"
     $UiAutomationTestsProjectPath = "$CliSolutionDir\WinApp.UIAutomation.Tests\WinApp.UIAutomation.Tests.csproj"
+    # Build-time only, never shipped: regenerates the embedded find-ui corpus.
+    $SnapshotBakerProjectPath = "$CliSolutionDir\WinApp.Cli.SnapshotBaker\WinApp.Cli.SnapshotBaker.csproj"
     $ArtifactsPath = "artifacts"
     $TestResultsPath = "TestResults"
 
@@ -181,6 +194,133 @@ try
 
     # InformationalVersion shows in --version output (e.g., "0.1.0-prerelease.73")
     $InformationalVersion = $FullVersion
+
+    # Step 1b: Refresh the find-ui corpus baked into the binary.
+    #
+    # The snapshot is an EmbeddedResource, so it must be regenerated BEFORE the publish
+    # below or the release ships the previous corpus. It only runs for stable builds
+    # (or explicit -Bake): every prerelease re-baking would churn a ~930 KB committed diff
+    # for no benefit, since the snapshot only reaches users when they upgrade the CLI.
+    #
+    # A bake failure fails a stable build. The baker fetches through the same providers
+    # `find-ui --refresh` uses at runtime and accepts nothing but CorpusOrigin.Network, so a
+    # bake that cannot complete is direct evidence that the refresh path is broken for users
+    # too. Shipping the previously committed corpus in that state would hide the breakage
+    # behind data that is already stale and that nobody in the field can update -- the
+    # release has to stop and a human has to look. -SkipBake is the deliberate override for
+    # an upstream outage known to be transient.
+    #
+    # Equally fatal is having no corpus at all on a stable build: that ships a CLI whose
+    # find-ui is non-functional offline, the exact regression the embedded snapshot exists
+    # to prevent (issue #704).
+    $SnapshotDataPath = "$CliSolutionDir\WinApp.Cli\Services\Controls\Data"
+    $ShouldBake = ($Stable -or $Bake) -and (-not $SkipBake)
+
+    if ($ShouldBake) {
+        Write-Host "[BAKE] Refreshing find-ui corpus from GitHub..." -ForegroundColor Blue
+
+        # Keep the last known good set aside. The baker stages a bake and only publishes it
+        # once every source and the manifest have succeeded, so a failed run should leave the
+        # committed corpus untouched -- this backup covers the residue of a crash or a kill
+        # partway through that publish, where restoring wholesale is the only way to get a
+        # coherent corpus back.
+        $BakeBackup = Join-Path ([System.IO.Path]::GetTempPath()) "winapp-bake-backup-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $BakeBackup -Force | Out-Null
+        $PreviousSnapshots = @(Get-ChildItem -Path $SnapshotDataPath -Filter "snapshot-*" -ErrorAction SilentlyContinue)
+        $PreviousSnapshots | Copy-Item -Destination $BakeBackup -Force
+
+        dotnet run --project $SnapshotBakerProjectPath -c Debug -- $SnapshotDataPath
+        $BakeExitCode = $LASTEXITCODE
+
+        if ($BakeExitCode -ne 0) {
+            # Restore before deciding what to do about it, so a bake that died partway
+            # through its publish never leaves a half-written corpus in the working tree.
+            Get-ChildItem -Path $SnapshotDataPath -Filter "snapshot-*" -ErrorAction SilentlyContinue | Remove-Item -Force
+            Get-ChildItem -Path $BakeBackup -ErrorAction SilentlyContinue | Copy-Item -Destination $SnapshotDataPath -Force
+            Remove-Item $BakeBackup -Recurse -Force -ErrorAction SilentlyContinue
+
+            if ($Stable) {
+                Write-Error "Stable build aborted: the find-ui corpus refresh failed (exit $BakeExitCode). The baker fetches through the same providers 'winapp find-ui --refresh' uses, so this failure means users cannot refresh either -- shipping the previously committed corpus would hide that behind data nobody can update. Investigate upstream, then re-run. To ship the committed corpus anyway for a known-transient outage, re-run with -SkipBake."
+                exit 1
+            }
+
+            Write-Warning "[BAKE] Corpus refresh failed (exit $BakeExitCode). Restored the previously committed snapshot; not a stable build, so continuing."
+        } else {
+            Write-Host "[BAKE] Corpus refreshed." -ForegroundColor Green
+            Remove-Item $BakeBackup -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    } elseif ($Stable) {
+        Write-Warning "[BAKE] Skipped (-SkipBake); shipping the committed find-ui corpus as-is. It may be several releases behind upstream."
+    }
+
+    # Whether or not we just baked, a stable build must carry a complete, working corpus.
+    # This catches the restored-from-backup case as well as a repo that never had one.
+    #
+    # Presence is not enough now that only the compressed blob is committed: a truncated or
+    # half-written blob is still a file of non-zero length, and it would fail at runtime as
+    # "no embedded corpus" -- silently reinstating issue #704 in a shipped build. So the
+    # blobs are actually decompressed and parsed here, and cross-checked against the
+    # manifest that the CLI, the drift job and the release all read.
+    if ($Stable) {
+        $RequiredSnapshots = @("snapshot-manifest.json", "snapshot-gallery.json.br", "snapshot-toolkit.json.br", "snapshot-reactor.json.br")
+        $MissingSnapshots = @(
+            $RequiredSnapshots | Where-Object {
+                $p = Join-Path $SnapshotDataPath $_
+                (-not (Test-Path $p)) -or ((Get-Item $p).Length -eq 0)
+            }
+        )
+        if ($MissingSnapshots.Count -gt 0) {
+            Write-Error "Stable build is missing the find-ui corpus: $($MissingSnapshots -join ', '). Shipping without it leaves find-ui non-functional offline (issue #704). Run: dotnet run --project $SnapshotBakerProjectPath -- $SnapshotDataPath"
+            exit 1
+        }
+
+        $ManifestPath = Join-Path $SnapshotDataPath "snapshot-manifest.json"
+        try {
+            $Manifest = Get-Content $ManifestPath -Raw | ConvertFrom-Json
+        } catch {
+            Write-Error "Stable build aborted: snapshot-manifest.json does not parse ($($_.Exception.Message)). Re-bake: dotnet run --project $SnapshotBakerProjectPath -- $SnapshotDataPath"
+            exit 1
+        }
+
+        # A CacheVersion bump without a matching re-bake makes EmbeddedSnapshot reject the
+        # corpus at runtime, which removes the offline floor without failing anything else.
+        $CacheVersionSource = Join-Path $PSScriptRoot "..\src\winapp-CLI\WinApp.Cli\Services\Controls\CacheVersion.cs"
+        $CurrentCacheVersion = (Select-String -Path $CacheVersionSource -Pattern 'Current\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+        if ($Manifest.cacheVersion -ne $CurrentCacheVersion) {
+            Write-Error "Stable build aborted: the find-ui corpus was baked at CacheVersion '$($Manifest.cacheVersion)' but the code is at '$CurrentCacheVersion'. EmbeddedSnapshot rejects a version mismatch, so this would ship with no offline corpus. Re-bake: dotnet run --project $SnapshotBakerProjectPath -- $SnapshotDataPath"
+            exit 1
+        }
+
+        foreach ($Provider in @("gallery", "toolkit", "reactor")) {
+            $BlobPath = Join-Path $SnapshotDataPath "snapshot-$Provider.json.br"
+            try {
+                $Raw = [System.IO.File]::ReadAllBytes($BlobPath)
+                $InStream = New-Object System.IO.MemoryStream(, $Raw)
+                $OutStream = New-Object System.IO.MemoryStream
+                $Brotli = New-Object System.IO.Compression.BrotliStream($InStream, [System.IO.Compression.CompressionMode]::Decompress)
+                $Brotli.CopyTo($OutStream)
+                $Brotli.Dispose()
+                $Snapshot = [System.Text.Encoding]::UTF8.GetString($OutStream.ToArray()) | ConvertFrom-Json
+            } catch {
+                Write-Error "Stable build aborted: snapshot-$Provider.json.br is corrupt or truncated ($($_.Exception.Message)). find-ui would start with no offline corpus for '$Provider'. Re-bake: dotnet run --project $SnapshotBakerProjectPath -- $SnapshotDataPath"
+                exit 1
+            }
+
+            $ActualCount = @($Snapshot.scenarios).Count
+            if ($ActualCount -eq 0) {
+                Write-Error "Stable build aborted: snapshot-$Provider.json.br contains no scenarios. The '$Provider' source would silently vanish from find-ui offline. Re-bake: dotnet run --project $SnapshotBakerProjectPath -- $SnapshotDataPath"
+                exit 1
+            }
+
+            $DeclaredCount = $Manifest.scenarioCounts.$Provider
+            if ($ActualCount -ne $DeclaredCount) {
+                Write-Error "Stable build aborted: snapshot-manifest.json declares $DeclaredCount scenarios for '$Provider' but the blob carries $ActualCount. The manifest and the blobs are written by one bake, so they have been edited or partially re-baked. Re-bake: dotnet run --project $SnapshotBakerProjectPath -- $SnapshotDataPath"
+                exit 1
+            }
+
+            Write-Host "[BAKE] Verified $Provider corpus: $ActualCount scenarios." -ForegroundColor Green
+        }
+    }
 
     # Step 2: Publish CLI for x64 and arm64 (implicitly builds the CLI project)
     Write-Host "[PUBLISH] Publishing CLI for x64..." -ForegroundColor Blue
