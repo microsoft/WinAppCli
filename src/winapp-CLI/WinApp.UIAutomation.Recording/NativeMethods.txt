@@ -5,11 +5,8 @@ MFCreateSinkWriterFromURL
 IMFSinkWriter
 MFCreateMediaType
 IMFMediaType
-IMFAttributes
 MFCreateSample
-IMFSample
 MFCreateMemoryBuffer
-IMFMediaBuffer
 MFVideoFormat_H264
 MFVideoFormat_RGB32
 MFMediaType_Video
