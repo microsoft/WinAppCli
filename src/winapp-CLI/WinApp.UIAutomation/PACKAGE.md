@@ -3,6 +3,12 @@
 Inspect and drive any running Windows desktop app from code — the UI Automation engine behind the
 `winapp ui` commands, packaged as a library.
 
+```console
+dotnet add package Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation
+dotnet add package Microsoft.Extensions.DependencyInjection
+dotnet add package Microsoft.Extensions.Logging
+```
+
 ```csharp
 using Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation;
 using Microsoft.Extensions.DependencyInjection;
@@ -70,6 +76,16 @@ public class CalculatorTests : WindowTest
 ```
 
 Your test project must target a framework this package supports — for example `net10.0-windows`.
+
+## Input injection drives the real mouse and keyboard
+
+`IUiInput` sends system-wide input, exactly as a person at the machine would: clicks land wherever
+the cursor is moved, and keystrokes go to whichever window holds focus at that instant. If a popup,
+a UAC prompt, or a screen lock steals focus mid-test, the input goes there instead of your app.
+
+Run this on a dedicated interactive desktop rather than the one you are working on, and note that
+injection does nothing useful over a disconnected RDP session, where there is no live desktop to
+receive it.
 
 ## Requirements
 

@@ -3,6 +3,12 @@
 Record a Windows app window — or one element's region — to an H.264 MP4, with optional timestamped
 JPEG frames for evidence. This is the recording engine behind `winapp ui record`.
 
+```console
+dotnet add package Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation.Recording
+dotnet add package Microsoft.Extensions.DependencyInjection
+dotnet add package Microsoft.Extensions.Logging
+```
+
 ```csharp
 using Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation;
 using Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation.Recording;

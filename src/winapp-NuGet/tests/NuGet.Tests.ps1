@@ -362,7 +362,11 @@ Describe "Microsoft.Windows.SDK.BuildTools.WinApp package layout" -Skip:$script:
         if (-not $NupkgPath) {
             $artifactsDir = Join-Path $script:repoRoot "artifacts\nuget"
             if (Test-Path $artifactsDir) {
+                # The UI Automation package ids are prefixed by this one, so the glob alone also
+                # matches them. Require a digit straight after the id so only the tools package
+                # (id followed by its version) is picked up.
                 $NupkgPath = Get-ChildItem -Path $artifactsDir -Filter "Microsoft.Windows.SDK.BuildTools.WinApp.*.nupkg" -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Name -match '^Microsoft\.Windows\.SDK\.BuildTools\.WinApp\.\d' } |
                     Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
             }
         }

@@ -27,11 +27,6 @@
     Use stable build configuration (default: false, uses prerelease config)
 .PARAMETER SkipCliPackage
     Skip Microsoft.Windows.SDK.BuildTools.WinApp — the only package that needs artifacts/cli.
-.PARAMETER SkipLibraryPackages
-    Skip the UI Automation library packages.
-.PARAMETER SkipBuild
-    Pack the library packages without rebuilding, using whatever is in each project's Release
-    output. Use this when the assemblies were code-signed after the build and must be packed as-is.
 .EXAMPLE
     .\scripts\package-nuget.ps1
     .\scripts\package-nuget.ps1 -Version "1.0.0" -Stable
@@ -47,13 +42,7 @@ param(
     [switch]$Stable = $false,
 
     [Parameter(Mandatory=$false)]
-    [switch]$SkipCliPackage = $false,
-
-    [Parameter(Mandatory=$false)]
-    [switch]$SkipLibraryPackages = $false,
-
-    [Parameter(Mandatory=$false)]
-    [switch]$SkipBuild = $false
+    [switch]$SkipCliPackage = $false
 )
 
 # Ensure we're running from the project root
@@ -223,36 +212,19 @@ try
     # ============================================================================
     # Step 2: Build the UI Automation library packages
     # ============================================================================
-    if (-not $SkipLibraryPackages) {
-        foreach ($Project in $LibraryProjects)
-        {
-            Write-Host ""
-            Write-Host "[NUGET] Building $($Project.Name) package..." -ForegroundColor Blue
-
-            $packArgs = @(
-                'pack', $Project.Path,
-                '-c', 'Release',
-                '-o', $OutputPath,
-                "/p:Version=$Version",
-                "/p:PackageVersion=$Version"
-            )
-            if ($SkipBuild) {
-                # Pack exactly what is on disk — used when the assemblies were signed after building.
-                $packArgs += '--no-build'
-            }
-
-            dotnet @packArgs
-
-            if ($LASTEXITCODE -ne 0) {
-                Write-Error "Failed to create $($Project.Name) NuGet package"
-                exit 1
-            }
-
-            Write-Host "[NUGET] $($Project.Name) package created successfully!" -ForegroundColor Green
-        }
-    } else {
+    foreach ($Project in $LibraryProjects)
+    {
         Write-Host ""
-        Write-Host "[NUGET] Skipping the UI Automation library packages (SkipLibraryPackages)" -ForegroundColor Gray
+        Write-Host "[NUGET] Building $($Project.Name) package..." -ForegroundColor Blue
+
+        dotnet pack $Project.Path -c Release -o $OutputPath "/p:Version=$Version" "/p:PackageVersion=$Version"
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to create $($Project.Name) NuGet package"
+            exit 1
+        }
+
+        Write-Host "[NUGET] $($Project.Name) package created successfully!" -ForegroundColor Green
     }
 
     # ============================================================================

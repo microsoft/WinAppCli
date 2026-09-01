@@ -20,6 +20,21 @@ namespace WinApp.Cli.Tests;
 [DoNotParallelize]
 public partial class RealRecordingTests
 {
+    /// <summary>
+    /// Restores the process-wide encoder and frame-writer seams after every test. These are static,
+    /// so a test that leaves a fake installed corrupts every later test in the assembly — including
+    /// ones in other classes that expect the real encoder.
+    /// </summary>
+    [TestCleanup]
+    public void ResetRecordingSeams()
+    {
+        Mp4SinkWriterEncoder.s_create = (path, width, height, fps, bitrate)
+            => new Mp4SinkWriterEncoder(path, width, height, fps, bitrate);
+        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, fps, bitrate)
+            => new Mp4SinkWriterEncoder(path, width, height, fps, bitrate, overwriteExisting: false);
+        RecordFrameBundleWriter.ResetTestSeams();
+    }
+
     [TestMethod]
     public async Task RecordAsync_WgcSeams_EncodesTimedFramesAndReportsResult()
     {

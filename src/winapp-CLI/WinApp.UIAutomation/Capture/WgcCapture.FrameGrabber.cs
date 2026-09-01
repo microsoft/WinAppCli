@@ -30,7 +30,7 @@ internal static partial class WgcCapture
     {
         if (!s_isSupported())
         {
-            throw new PlatformNotSupportedException("global::Windows.Graphics.Capture is not supported on this system.");
+            throw new PlatformNotSupportedException("Windows.Graphics.Capture is not supported on this system.");
         }
 
         PInvoke.D3D11CreateDevice(

@@ -106,6 +106,7 @@ try
     $CliSolutionPath = "$CliSolutionDir\winapp.sln"
     $CliProjectPath = "$CliSolutionDir\WinApp.Cli\WinApp.Cli.csproj"
     $CliTestsProjectPath = "$CliSolutionDir\WinApp.Cli.Tests\WinApp.Cli.Tests.csproj"
+    $UiAutomationTestsProjectPath = "$CliSolutionDir\WinApp.UIAutomation.Tests\WinApp.UIAutomation.Tests.csproj"
     $ArtifactsPath = "artifacts"
     $TestResultsPath = "TestResults"
 
@@ -270,8 +271,18 @@ try
         # Step 3. Hand-written services (incl. the hardware/COM/GPU interop) are NOT excluded;
         # they are covered by real tests. See issue #630.
         $CoverageSettings = (Resolve-Path "$CliSolutionDir\coverage.runsettings").Path
-        dotnet run --project $CliTestsProjectPath -c Debug --no-build --results-directory $CliSolutionDir\TestResults --report-trx --coverage --coverage-settings $CoverageSettings --coverage-output-format cobertura
-        $TestExitCode = $LASTEXITCODE
+        # Every test project runs. WinApp.UIAutomation.Tests covers the automation engine, which now
+        # lives in its own assembly -- running only WinApp.Cli.Tests would leave it untested in CI.
+        $TestExitCode = 0
+        foreach ($TestProject in @($CliTestsProjectPath, $UiAutomationTestsProjectPath)) {
+            $TestProjectName = [System.IO.Path]::GetFileNameWithoutExtension($TestProject)
+            Write-Host "[TEST] Running $TestProjectName..." -ForegroundColor Blue
+            dotnet run --project $TestProject -c Debug --no-build --results-directory $CliSolutionDir\TestResults --report-trx --report-trx-filename "$TestProjectName.trx" --coverage --coverage-settings $CoverageSettings --coverage-output-format cobertura --coverage-output "$TestProjectName.cobertura.xml"
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "$TestProjectName failed with exit code $LASTEXITCODE"
+                $TestExitCode = $LASTEXITCODE
+            }
+        }
     
         # Copy test results to artifacts BEFORE checking for failure - find all TRX files
         Write-Host "[TEST] Collecting test results..." -ForegroundColor Blue
@@ -382,55 +393,55 @@ try
             Write-Warning "NuGet packages creation failed, but continuing..."
         } else {
             Write-Host "[NUGET] NuGet packages created successfully!" -ForegroundColor Green
+        }
 
-            # Assert the full set landed. Packaging failures above are warnings so a build can still
-            # produce partial output locally, but CI uploads this folder wholesale — without this
-            # check a missing package would ship as a green build with an incomplete artifact.
-            $ExpectedPackages = @(
-                'Microsoft.Windows.SDK.BuildTools.WinApp',
-                'Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation',
-                'Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation.Recording'
-            )
-            $NuGetOutput = Join-Path $ProjectRoot "artifacts\nuget"
-            $BuiltPackages = @(Get-ChildItem $NuGetOutput -Filter '*.nupkg' -ErrorAction SilentlyContinue |
-                ForEach-Object {
-                    # <id>.<version>.nupkg — the ids share a prefix, so split on the version instead.
-                    if ($_.Name -match '^(?<id>.+?)\.(?<version>\d+\.\d+\.\d+.*)\.nupkg$') { $Matches.id }
-                })
-            $MissingPackages = @($ExpectedPackages | Where-Object { $BuiltPackages -notcontains $_ })
-            if ($MissingPackages.Count -gt 0) {
-                Write-Error "Expected NuGet package(s) missing from artifacts/nuget: $($MissingPackages -join ', ')"
-                exit 1
-            }
-            Write-Host "[NUGET] Verified all $($ExpectedPackages.Count) packages are present" -ForegroundColor Green
+        # Assert the full set landed. Packaging failures above are warnings so a build can still
+        # produce partial output locally, but CI uploads this folder wholesale — without this
+        # check a missing package would ship as a green build with an incomplete artifact.
+        $ExpectedPackages = @(
+            'Microsoft.Windows.SDK.BuildTools.WinApp',
+            'Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation',
+            'Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation.Recording'
+        )
+        $NuGetOutput = Join-Path $ProjectRoot "artifacts\nuget"
+        $BuiltPackages = @(Get-ChildItem $NuGetOutput -Filter '*.nupkg' -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                # <id>.<version>.nupkg — the ids share a prefix, so split on the version instead.
+                if ($_.Name -match '^(?<id>.+?)\.(?<version>\d+\.\d+\.\d+.*)\.nupkg$') { $Matches.id }
+            })
+        $MissingPackages = @($ExpectedPackages | Where-Object { $BuiltPackages -notcontains $_ })
+        if ($MissingPackages.Count -gt 0) {
+            Write-Error "Expected NuGet package(s) missing from artifacts/nuget: $($MissingPackages -join ', ')"
+            exit 1
+        }
+        Write-Host "[NUGET] Verified all $($ExpectedPackages.Count) packages are present" -ForegroundColor Green
 
-            # Run NuGet Pester tests (gate matrix + dual-pack layout parity).
-            # Skipped if -SkipTests was passed.
-            if (-not $SkipTests) {
-                $NuGetTestsPath = Join-Path $ProjectRoot "src\winapp-NuGet\tests\NuGet.Tests.ps1"
-                if (Test-Path $NuGetTestsPath) {
-                    $pesterMod = Get-Module -Name Pester -ListAvailable | Where-Object { $_.Version.Major -ge 5 } | Select-Object -First 1
-                    if ($pesterMod) {
-                        Write-Host "[TEST] Running NuGet Pester tests..." -ForegroundColor Blue
-                        $pesterConfig = New-PesterConfiguration
-                        $pesterConfig.Run.Path = $NuGetTestsPath
-                        $pesterConfig.Run.Exit = $false
-                        $pesterConfig.Run.PassThru = $true
-                        $pesterConfig.Output.Verbosity = 'Normal'
-                        $pesterResult = Invoke-Pester -Configuration $pesterConfig
-                        if (($pesterResult.FailedCount + $pesterResult.FailedBlocksCount + $pesterResult.FailedContainersCount) -gt 0) {
-                            if ($FailOnTestFailure) {
-                                Write-Error "Stopping build due to NuGet Pester test failures (FailOnTestFailure flag set): $($pesterResult.FailedCount) failed test(s), $($pesterResult.FailedBlocksCount) failed block(s), $($pesterResult.FailedContainersCount) failed container(s)"
-                                exit 1
-                            } else {
-                                Write-Warning "NuGet Pester tests had $($pesterResult.FailedCount) failed test(s), $($pesterResult.FailedBlocksCount) failed block(s), $($pesterResult.FailedContainersCount) failed container(s) — continuing"
-                            }
+        # Run NuGet Pester tests (gate matrix + dual-pack layout parity).
+        # Skipped if -SkipTests was passed.
+        if (-not $SkipTests) {
+            $NuGetTestsPath = Join-Path $ProjectRoot "src\winapp-NuGet\tests\NuGet.Tests.ps1"
+            if (Test-Path $NuGetTestsPath) {
+                $pesterMod = Get-Module -Name Pester -ListAvailable | Where-Object { $_.Version.Major -ge 5 } | Select-Object -First 1
+                if ($pesterMod) {
+                    Write-Host "[TEST] Running NuGet Pester tests..." -ForegroundColor Blue
+                    $pesterConfig = New-PesterConfiguration
+                    $pesterConfig.Run.Path = $NuGetTestsPath
+                    $pesterConfig.Run.Exit = $false
+                    $pesterConfig.Run.PassThru = $true
+                    $pesterConfig.Output.Verbosity = 'Normal'
+                    $pesterResult = Invoke-Pester -Configuration $pesterConfig
+                    if (($pesterResult.FailedCount + $pesterResult.FailedBlocksCount + $pesterResult.FailedContainersCount) -gt 0) {
+                        if ($FailOnTestFailure) {
+                            Write-Error "Stopping build due to NuGet Pester test failures (FailOnTestFailure flag set): $($pesterResult.FailedCount) failed test(s), $($pesterResult.FailedBlocksCount) failed block(s), $($pesterResult.FailedContainersCount) failed container(s)"
+                            exit 1
                         } else {
-                            Write-Host "[TEST] NuGet Pester tests passed: $($pesterResult.PassedCount) passed, $($pesterResult.SkippedCount) skipped" -ForegroundColor Green
+                            Write-Warning "NuGet Pester tests had $($pesterResult.FailedCount) failed test(s), $($pesterResult.FailedBlocksCount) failed block(s), $($pesterResult.FailedContainersCount) failed container(s) — continuing"
                         }
                     } else {
-                        Write-Warning "Pester 5.x not installed — skipping NuGet Pester tests. Install with: Install-Module Pester -Force -MinimumVersion 5.0"
+                        Write-Host "[TEST] NuGet Pester tests passed: $($pesterResult.PassedCount) passed, $($pesterResult.SkippedCount) skipped" -ForegroundColor Green
                     }
+                } else {
+                    Write-Warning "Pester 5.x not installed — skipping NuGet Pester tests. Install with: Install-Module Pester -Force -MinimumVersion 5.0"
                 }
             }
         }
