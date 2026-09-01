@@ -43,9 +43,11 @@ internal sealed partial class ProjectRunService
         // <PackageReference> lands in project.assets.json before the --no-restore build consumes it.
         tokens.Add($"-p:Configuration={options.Configuration}");
 
-        // Mirror the build pass's injected Platform (when resolved) so platform-conditional
-        // <PackageReference> restore under the same Platform the build resolves. Null = RID-only default.
-        if (!string.IsNullOrWhiteSpace(options.Platform))
+        // Mirror the build pass's injected Platform for project restores so platform-conditional
+        // PackageReferences resolve consistently. A solution-scoped restore must omit it: unlike a
+        // project, MSBuild treats Platform as a requested solution configuration, and configuration-free
+        // .slnx files reject it with MSB4126.
+        if (!IsSolutionFile(csproj) && !string.IsNullOrWhiteSpace(options.Platform))
         {
             tokens.Add($"-p:Platform={options.Platform}");
         }

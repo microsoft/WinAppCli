@@ -515,7 +515,10 @@ internal sealed partial class ProjectRunService(
         if (exitCode != 0)
         {
             // Non-fatal: fall through and let the build pass restore + surface any real error itself.
-            logger.LogDebug("{UISymbol} Pre-shim restore exited {ExitCode}; deferring to the build pass.", UiSymbols.Note, exitCode);
+            logger.LogWarning(
+                "{UISymbol} Initial restore failed (exit code {ExitCode}); continuing with the build, which will retry restore.",
+                UiSymbols.Warning,
+                exitCode);
         }
         return exitCode;
     }
@@ -560,7 +563,10 @@ internal sealed partial class ProjectRunService(
             // Whole-solution restore failed. Don't defer to the target-only build restore (that leaves
             // non-ProjectReference managed siblings unrestored — the NETSDK1004 case this prevents); fall
             // back to per-sibling restore before returning false.
-            logger.LogDebug("{UISymbol} Solution restore exited {ExitCode}; falling back to per-project sibling restore.", UiSymbols.Note, exitCode);
+            logger.LogWarning(
+                "{UISymbol} Solution restore failed (exit code {ExitCode}); retrying managed dependencies individually.",
+                UiSymbols.Warning,
+                exitCode);
         }
 
         // Native project present (dotnet restore <sln> errors VS-less) or the solution restore failed:
@@ -588,7 +594,11 @@ internal sealed partial class ProjectRunService(
                 args, $"Restoring {sibling.Name} dependencies...", options, workingDir, cancellationToken);
             if (exitCode != 0)
             {
-                logger.LogDebug("{UISymbol} Sibling restore of {Sibling} exited {ExitCode}; continuing.", UiSymbols.Note, sibling.Name, exitCode);
+                logger.LogWarning(
+                    "{UISymbol} Restore of {Sibling} failed (exit code {ExitCode}); continuing with the build, which will report any unresolved dependency errors.",
+                    UiSymbols.Warning,
+                    sibling.Name,
+                    exitCode);
             }
         }
     }
@@ -629,21 +639,27 @@ internal sealed partial class ProjectRunService(
             return await dotNetService.RunDotnetInheritedAsync(workingDir, arguments, cancellationToken);
         }
 
-        var writeLock = new object();
-        void WriteLive(string line)
-        {
-            lock (writeLock)
-            {
-                ansiConsole.WriteLine(line);
-            }
-        }
+        var writeLive = CreateSynchronizedRawLineWriter();
 
         return await dotNetService.RunDotnetStreamingAsync(
-            workingDir, arguments, WriteLive, WriteLive, cancellationToken);
+            workingDir, arguments, writeLive, writeLive, cancellationToken);
     }
 
     private static string? ResolveRestoreVerbosity(ILogger logger, bool json) =>
         !json && !logger.IsEnabled(LogLevel.Information) ? "quiet" : null;
+
+    private Action<string> CreateSynchronizedRawLineWriter()
+    {
+        var writeLock = new object();
+        var writer = ansiConsole.Profile.Out.Writer;
+        return line =>
+        {
+            lock (writeLock)
+            {
+                writer.WriteLine(line);
+            }
+        };
+    }
 
     /// <summary>
     /// Runs the project-mode build pass, streaming dotnet's output live. Output routing:
@@ -709,17 +725,10 @@ internal sealed partial class ProjectRunService(
         {
             // Info-enabled but NOT a TTY (agent/CI/redirected/piped --verbose): stream dotnet's output live
             // to stdout, serializing writes so concurrent stdout/stderr callbacks don't interleave.
-            var writeLock = new object();
-            void WriteLive(string line)
-            {
-                lock (writeLock)
-                {
-                    ansiConsole.WriteLine(line);
-                }
-            }
+            var writeLive = CreateSynchronizedRawLineWriter();
 
             streamedExit = await dotNetService.RunDotnetStreamingAsync(
-                workingDir, buildArgs, WriteLive, WriteLive, cancellationToken);
+                workingDir, buildArgs, writeLive, writeLive, cancellationToken);
         }
 
         if (streamedExit == 0)
