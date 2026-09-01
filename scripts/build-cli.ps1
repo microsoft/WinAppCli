@@ -4,7 +4,8 @@
     Build script for Windows App Development CLI, npm package, NuGet packages, and MSIX packages
 .DESCRIPTION
     This script builds the Windows App Development CLI for both x64 and arm64 architectures,
-    creates the npm package, NuGet package (BuildTools.WinApp), creates MSIX packages 
+    creates the npm package, the NuGet packages (the BuildTools.WinApp CLI tools package plus the
+    UI Automation library packages), creates MSIX packages
     with distribution package, and places all artifacts in an artifacts folder. 
     Run this script from the root of the project.
 .PARAMETER SkipTests
@@ -14,7 +15,7 @@
 .PARAMETER SkipNpm
     Skip npm package creation
 .PARAMETER SkipNuGet
-    Skip NuGet package creation (BuildTools.WinApp)
+    Skip NuGet package creation (BuildTools.WinApp and the UI Automation libraries)
 .PARAMETER SkipMsix
     Skip MSIX packages creation
 .PARAMETER SkipDocs
@@ -370,7 +371,17 @@ try
     if (-not $SkipNuGet) {
         Write-Host ""
         Write-Host "[NUGET] Creating NuGet packages..." -ForegroundColor Blue
-    
+
+        # The UI Automation libraries build from source and do not need the published CLI, so they
+        # are packed first and independently of the CLI tools package below.
+        $GenerateNuGetScript = Join-Path $PSScriptRoot "generate-nuget.ps1"
+
+        & $GenerateNuGetScript -Version $FullVersion -Stable:$Stable
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "UI Automation library packages creation failed, but continuing..."
+        }
+
         $PackageNuGetScript = Join-Path $PSScriptRoot "package-nuget.ps1"
 
         & $PackageNuGetScript -Version $FullVersion -Stable:$Stable
@@ -379,6 +390,27 @@ try
             Write-Warning "NuGet packages creation failed, but continuing..."
         } else {
             Write-Host "[NUGET] NuGet packages created successfully!" -ForegroundColor Green
+
+            # Assert the full set landed. Packaging failures above are warnings so a build can still
+            # produce partial output locally, but CI uploads this folder wholesale — without this
+            # check a missing package would ship as a green build with an incomplete artifact.
+            $ExpectedPackages = @(
+                'Microsoft.Windows.SDK.BuildTools.WinApp',
+                'Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation',
+                'Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation.Recording'
+            )
+            $NuGetOutput = Join-Path $ProjectRoot "artifacts\nuget"
+            $BuiltPackages = @(Get-ChildItem $NuGetOutput -Filter '*.nupkg' -ErrorAction SilentlyContinue |
+                ForEach-Object {
+                    # <id>.<version>.nupkg — the ids share a prefix, so split on the version instead.
+                    if ($_.Name -match '^(?<id>.+?)\.(?<version>\d+\.\d+\.\d+.*)\.nupkg$') { $Matches.id }
+                })
+            $MissingPackages = @($ExpectedPackages | Where-Object { $BuiltPackages -notcontains $_ })
+            if ($MissingPackages.Count -gt 0) {
+                Write-Error "Expected NuGet package(s) missing from artifacts/nuget: $($MissingPackages -join ', ')"
+                exit 1
+            }
+            Write-Host "[NUGET] Verified all $($ExpectedPackages.Count) packages are present" -ForegroundColor Green
 
             # Run NuGet Pester tests (gate matrix + dual-pack layout parity).
             # Skipped if -SkipTests was passed.

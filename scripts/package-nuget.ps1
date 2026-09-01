@@ -168,34 +168,9 @@ try
     
     Write-Host "[NUGET] Microsoft.Windows.SDK.BuildTools.WinApp package created successfully!" -ForegroundColor Green
 
-    # ============================================================================
-    # Step 2: Build the UI Automation library packages
-    # ============================================================================
-    # These are real libraries (not tool wrappers), so dotnet pack builds them from source.
-    # The UI Automation package multi-targets net10.0-windows (GDI capture only, ~1.5 MB) and
-    # net10.0-windows10.0.19041.0 (adds Windows Graphics Capture). Recording ships separately so
-    # that projects which only inspect and drive UI do not pull in SkiaSharp's ~9 MB native binary.
-    $UiAutomationProjects = @(
-        @{ Name = 'Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation';
-           Path = Join-Path $ProjectRoot 'src\winapp-CLI\WinApp.UIAutomation\WinApp.UIAutomation.csproj' },
-        @{ Name = 'Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation.Recording';
-           Path = Join-Path $ProjectRoot 'src\winapp-CLI\WinApp.UIAutomation.Recording\WinApp.UIAutomation.Recording.csproj' }
-    )
-
-    foreach ($Project in $UiAutomationProjects)
-    {
-        Write-Host ""
-        Write-Host "[NUGET] Building $($Project.Name) package..." -ForegroundColor Blue
-
-        dotnet pack $Project.Path -c Release -o $OutputPath /p:Version=$Version /p:PackageVersion=$Version
-
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error "Failed to create $($Project.Name) NuGet package"
-            exit 1
-        }
-
-        Write-Host "[NUGET] $($Project.Name) package created successfully!" -ForegroundColor Green
-    }
+    # The UI Automation library packages are built by scripts/generate-nuget.ps1. They are ordinary
+    # libraries that build from source, so they are kept out of this script — which cannot run at
+    # all without a published CLI in artifacts/cli.
 
     # ============================================================================
     # Summary

@@ -77,6 +77,11 @@ dotnet build src/winapp-CLI/winapp.sln -c Debug
 # Run native CLI in-tree
 dotnet run --project src/winapp-CLI/WinApp.Cli/WinApp.Cli.csproj -- <args>
 
+# Build just the UI Automation library NuGet packages (no CLI publish needed, so it is fast).
+# build-cli.ps1 calls this too; package-nuget.ps1 handles the CLI tools package separately
+# because that one embeds the published binaries from artifacts/cli.
+.\scripts\generate-nuget.ps1
+
 # Update npm package after CLI changes
 cd src/winapp-npm && npm run build              # builds C# CLI + copies to npm bin
 cd src/winapp-npm && npm run build-copy-only    # copies already-built Release binaries

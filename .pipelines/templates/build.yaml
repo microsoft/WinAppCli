@@ -183,6 +183,9 @@ steps:
     path: '$(Build.ArtifactStagingDirectory)/msix-packages'
     artifactName: msix-packages
 - task: CopyFiles@2
+  # Picks up all three packages: the CLI tools package plus the two UI Automation library
+  # packages (...WinApp.UIAutomation and ...WinApp.UIAutomation.Recording). build-cli.ps1
+  # verifies the full set exists, and the ESRP NuGet signing step above globs the same folder.
   displayName: Copy Artifacts - NuGet packages
   inputs:
     sourceFolder: '$(System.DefaultWorkingDirectory)/artifacts/nuget/'
