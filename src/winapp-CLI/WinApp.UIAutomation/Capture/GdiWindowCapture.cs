@@ -25,4 +25,15 @@ internal sealed class GdiWindowCapture(ILogger<GdiWindowCapture> logger) : IWind
         throw new PlatformNotSupportedException(
             "Continuous frame capture requires Windows Graphics Capture. Target net10.0-windows10.0.19041.0 or later to use it.");
     }
+
+    public byte[] CaptureWindowPixels(nint hwnd, int width, int height)
+        => UiAutomationService.CaptureFromWindowWithBlankRetry(
+            new global::Windows.Win32.Foundation.HWND(hwnd), width, height, logger);
+
+    public byte[] CaptureScreenPixels(
+        int x, int y, int cropWidth, int cropHeight,
+        int encoderWidth, int encoderHeight,
+        int displayWidth, int displayHeight)
+        => UiAutomationService.CaptureScreenFrame(
+            x, y, cropWidth, cropHeight, encoderWidth, encoderHeight, displayWidth, displayHeight);
 }

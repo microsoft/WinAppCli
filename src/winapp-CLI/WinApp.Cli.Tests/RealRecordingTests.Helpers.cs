@@ -24,25 +24,11 @@ public partial class RealRecordingTests
             .GetRequiredService<IUiAutomation>());
 
     /// <summary>
-    /// Wraps the real engine so a test can substitute the two raw capture primitives (PrintWindow
-    /// and screen-DC) without a live, foregrounded window, while element resolution still runs
-    /// against the real UIA tree.
+    /// Wraps the real engine so element resolution still runs against the real UIA tree. Raw capture
+    /// substitution now lives on <see cref="FakeWindowCapture"/>, which owns those primitives.
     /// </summary>
     internal sealed class TestAutomation(IUiAutomation inner) : IUiAutomation
     {
-        public Func<nint, int, int, byte[]>? CaptureWindowOverride { get; set; }
-
-        public Func<int, int, int, int, int, int, int, int, byte[]>? CaptureScreenOverride { get; set; }
-
-        public byte[] CaptureWindowPixels(nint hwnd, int width, int height)
-            => CaptureWindowOverride is not null
-                ? CaptureWindowOverride(hwnd, width, height)
-                : inner.CaptureWindowPixels(hwnd, width, height);
-
-        public byte[] CaptureScreenPixels(int x, int y, int cropWidth, int cropHeight, int encoderWidth, int encoderHeight, int displayWidth, int displayHeight)
-            => CaptureScreenOverride is not null
-                ? CaptureScreenOverride(x, y, cropWidth, cropHeight, encoderWidth, encoderHeight, displayWidth, displayHeight)
-                : inner.CaptureScreenPixels(x, y, cropWidth, cropHeight, encoderWidth, encoderHeight, displayWidth, displayHeight);
         public List<(nint Hwnd, int Pid, string Title)> FindWindowsByTitle(string titleQuery) => inner.FindWindowsByTitle(titleQuery);
         public List<(nint Hwnd, int Pid, string Title)> FindWindowsByPid(int pid) => inner.FindWindowsByPid(pid);
         public bool TryGetWindowRect(long hwnd, out PointerRect rect) => inner.TryGetWindowRect(hwnd, out rect);

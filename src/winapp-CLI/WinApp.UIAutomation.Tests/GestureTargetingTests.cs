@@ -147,8 +147,7 @@ public class GestureTargetingTests
         public bool TryResolveRootWindow(UiTarget target, out nint hwnd, out string? title) => throw new NotImplementedException();
         public nint ResolveElementTopLevelWindow(UiTarget target, UiElement element) => throw new NotImplementedException();
         public PointerRect GetVisibleWindowBounds(nint hwnd, PointerRect fallback) => fallback;
-        public byte[] CaptureWindowPixels(nint hwnd, int width, int height) => throw new NotImplementedException();
-        public byte[] CaptureScreenPixels(int x, int y, int cropWidth, int cropHeight, int encoderWidth, int encoderHeight, int displayWidth, int displayHeight) => throw new NotImplementedException();
+
         public bool TryGetWindowRect(long hwnd, out PointerRect rect)
         {
             rect = default;

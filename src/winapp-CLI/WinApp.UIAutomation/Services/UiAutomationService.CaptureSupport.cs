@@ -94,22 +94,4 @@ internal sealed partial class UiAutomationService
 
         return new PointerRect(rect.left, rect.top, rect.right, rect.bottom);
     }
-
-    /// <summary>
-    /// Captures a window's pixels (BGRA) via <c>PrintWindow</c>, foregrounding and retrying once when
-    /// the first attempt comes back blank.
-    /// </summary>
-    public byte[] CaptureWindowPixels(nint hwnd, int width, int height)
-        => CaptureFromWindowWithBlankRetry(new global::Windows.Win32.Foundation.HWND(hwnd), width, height);
-
-    /// <summary>
-    /// Captures a screen region (BGRA), scaling it to fit
-    /// <paramref name="displayWidth"/>×<paramref name="displayHeight"/> and centering it within an
-    /// <paramref name="encoderWidth"/>×<paramref name="encoderHeight"/> surface.
-    /// </summary>
-    public byte[] CaptureScreenPixels(
-        int x, int y, int cropWidth, int cropHeight,
-        int encoderWidth, int encoderHeight,
-        int displayWidth, int displayHeight)
-        => CaptureScreenFrame(x, y, cropWidth, cropHeight, encoderWidth, encoderHeight, displayWidth, displayHeight);
 }

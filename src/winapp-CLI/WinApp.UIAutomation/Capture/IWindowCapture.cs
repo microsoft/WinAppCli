@@ -51,4 +51,23 @@ public interface IWindowCapture
     /// Frame capture is not available on this system.
     /// </exception>
     IFrameGrabber StartFrameGrabber(nint hwnd, int fps = 0);
+
+    /// <summary>
+    /// Captures a window's pixels (BGRA) via <c>PrintWindow</c>, foregrounding and retrying once when
+    /// the first attempt comes back blank. Always available, including when
+    /// <see cref="IsFrameCaptureSupported"/> is <see langword="false"/>.
+    /// </summary>
+    byte[] CaptureWindowPixels(nint hwnd, int width, int height);
+
+    /// <summary>
+    /// Captures a screen region (BGRA), scaling it to fit
+    /// <paramref name="displayWidth"/>×<paramref name="displayHeight"/> and centering it within an
+    /// <paramref name="encoderWidth"/>×<paramref name="encoderHeight"/> surface. The surface size is
+    /// separate from the content size so a caller feeding a fixed-size video encoder can letterbox
+    /// content whose aspect ratio does not match.
+    /// </summary>
+    byte[] CaptureScreenPixels(
+        int x, int y, int cropWidth, int cropHeight,
+        int encoderWidth, int encoderHeight,
+        int displayWidth, int displayHeight);
 }

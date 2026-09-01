@@ -134,7 +134,7 @@ public partial class RealRecordingTests
         var output = Path.Combine(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"), "screen.mp4");
         Directory.CreateDirectory(Path.GetDirectoryName(output)!);
         var screenCalls = 0;
-        svc.CaptureScreenOverride = (_, _, _, _, tw, th, _, _) =>
+        capture.CaptureScreenOverride = (_, _, _, _, tw, th, _, _) =>
         {
             screenCalls++;
             return Enumerable.Repeat((byte)0x66, tw * th * 4).ToArray();
@@ -169,7 +169,7 @@ public partial class RealRecordingTests
         Directory.CreateDirectory(Path.GetDirectoryName(output)!);
         var windowCalls = 0;
         capture.Supported = false;
-        svc.CaptureWindowOverride = (_, width, height) =>
+        capture.CaptureWindowOverride = (_, width, height) =>
         {
             windowCalls++;
             return Enumerable.Repeat((byte)0x77, width * height * 4).ToArray();

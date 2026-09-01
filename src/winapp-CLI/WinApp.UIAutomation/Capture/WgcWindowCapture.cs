@@ -15,4 +15,15 @@ internal sealed class WgcWindowCapture(ILogger<WgcWindowCapture> logger) : IWind
 
     public IFrameGrabber StartFrameGrabber(nint hwnd, int fps = 0)
         => WgcCapture.s_startGrabber(new global::Windows.Win32.Foundation.HWND(hwnd), logger, fps);
+
+    public byte[] CaptureWindowPixels(nint hwnd, int width, int height)
+        => UiAutomationService.CaptureFromWindowWithBlankRetry(
+            new global::Windows.Win32.Foundation.HWND(hwnd), width, height, logger);
+
+    public byte[] CaptureScreenPixels(
+        int x, int y, int cropWidth, int cropHeight,
+        int encoderWidth, int encoderHeight,
+        int displayWidth, int displayHeight)
+        => UiAutomationService.CaptureScreenFrame(
+            x, y, cropWidth, cropHeight, encoderWidth, encoderHeight, displayWidth, displayHeight);
 }

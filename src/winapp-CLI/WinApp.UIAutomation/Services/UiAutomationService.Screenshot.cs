@@ -154,11 +154,19 @@ internal sealed partial class UiAutomationService
     }
 
     internal byte[] CaptureFromWindowWithBlankRetry(global::Windows.Win32.Foundation.HWND hwnd, int width, int height)
+        => CaptureFromWindowWithBlankRetry(hwnd, width, height, _logger);
+
+    /// <summary>
+    /// Static entry point so <see cref="IWindowCapture"/> implementations can offer the same
+    /// blank-retry capture the screenshot path uses, without depending on a UI Automation instance.
+    /// </summary>
+    internal static byte[] CaptureFromWindowWithBlankRetry(
+        global::Windows.Win32.Foundation.HWND hwnd, int width, int height, ILogger logger)
     {
         var pixels = s_captureFromWindow(hwnd, width, height);
         if (IsBlankCapture(pixels))
         {
-            _logger.LogDebug("PrintWindow returned blank frame; foregrounding and retrying");
+            logger.LogDebug("PrintWindow returned blank frame; foregrounding and retrying");
             s_foregroundWindowForBlankRetry(hwnd);
             s_sleepForBlankRetry(200);
             pixels = s_captureFromWindow(hwnd, width, height);

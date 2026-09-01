@@ -199,15 +199,6 @@ public class FakeUiAutomationService : IUiAutomation
 
     public PointerRect GetVisibleWindowBounds(nint hwnd, PointerRect fallback) => fallback;
 
-    public byte[] CaptureWindowPixels(nint hwnd, int width, int height)
-        => new byte[Math.Max(0, width * height * 4)];
-
-    public byte[] CaptureScreenPixels(
-        int x, int y, int cropWidth, int cropHeight,
-        int encoderWidth, int encoderHeight,
-        int displayWidth, int displayHeight)
-        => new byte[Math.Max(0, encoderWidth * encoderHeight * 4)];
-
     public Task<string> InvokeAsync(UiTarget uiTarget, UiElement element, CancellationToken ct)
     {
         if (InvokeThrow is not null) { throw InvokeThrow; }

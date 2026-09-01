@@ -14,7 +14,7 @@ public class Mp4SinkWriterEncoderTests
 {
     private static string CreateScratchDirectory()
     {
-        var dir = Path.Combine(Path.GetTempPath(), "winapp-mp4-" + Guid.NewGuid().ToString("N"));
+        var dir = Path.Join(Path.GetTempPath(), "winapp-mp4-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         return dir;
     }
@@ -25,8 +25,8 @@ public class Mp4SinkWriterEncoderTests
         var dir = CreateScratchDirectory();
         try
         {
-            var temp = Path.Combine(dir, "temp.mp4");
-            var dest = Path.Combine(dir, "dest.mp4");
+            var temp = Path.Join(dir, "temp.mp4");
+            var dest = Path.Join(dir, "dest.mp4");
             File.WriteAllText(temp, "new");
 
             Mp4SinkWriterEncoder.PublishAtomic(temp, dest);
@@ -54,7 +54,7 @@ public class Mp4SinkWriterEncoderTests
         var dir = CreateScratchDirectory();
         try
         {
-            var path = Path.Combine(dir, "one-frame.mp4");
+            var path = Path.Join(dir, "one-frame.mp4");
             using var encoder = CreateEncoderOrInconclusive(path);
             Assert.AreEqual(64, encoder.Width);
             Assert.AreEqual(64, encoder.Height);

@@ -74,7 +74,7 @@ public class UiRecordingServiceHelpersTests
 
     private static string CreateScratchDirectory()
     {
-        var dir = Path.Combine(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
+        var dir = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         return dir;
     }

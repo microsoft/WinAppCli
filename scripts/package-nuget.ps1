@@ -27,6 +27,10 @@
     Use stable build configuration (default: false, uses prerelease config)
 .PARAMETER SkipCliPackage
     Skip Microsoft.Windows.SDK.BuildTools.WinApp — the only package that needs artifacts/cli.
+.PARAMETER SkipBuild
+    Pack the library packages from whatever is already in each project's Release output instead of
+    rebuilding. Used by the release pipeline to re-pack after the assemblies are code-signed, so the
+    signed binaries are the ones that ship.
 .EXAMPLE
     .\scripts\package-nuget.ps1
     .\scripts\package-nuget.ps1 -Version "1.0.0" -Stable
@@ -42,7 +46,10 @@ param(
     [switch]$Stable = $false,
 
     [Parameter(Mandatory=$false)]
-    [switch]$SkipCliPackage = $false
+    [switch]$SkipCliPackage = $false,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$SkipBuild = $false
 )
 
 # Ensure we're running from the project root
@@ -217,7 +224,14 @@ try
         Write-Host ""
         Write-Host "[NUGET] Building $($Project.Name) package..." -ForegroundColor Blue
 
-        dotnet pack $Project.Path -c Release -o $OutputPath "/p:Version=$Version" "/p:PackageVersion=$Version"
+        $PackArgs = @('pack', $Project.Path, '-c', 'Release', '-o', $OutputPath,
+            "/p:Version=$Version", "/p:PackageVersion=$Version")
+        if ($SkipBuild) {
+            # Pack exactly what is on disk so code-signed assemblies are not overwritten.
+            $PackArgs += '--no-build'
+        }
+
+        dotnet @PackArgs
 
         if ($LASTEXITCODE -ne 0) {
             Write-Error "Failed to create $($Project.Name) NuGet package"

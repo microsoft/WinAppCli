@@ -369,7 +369,7 @@ public sealed partial class UiRecordingService(
                     }
                     else if (useScreen)
                     {
-                        frame = _uiAutomation.CaptureScreenPixels(
+                        frame = _windowCapture.CaptureScreenPixels(
                             captureOriginLeft + cropX,
                             captureOriginTop + cropY,
                             cropW,
@@ -381,7 +381,7 @@ public sealed partial class UiRecordingService(
                     }
                     else
                     {
-                        var source = _uiAutomation.CaptureWindowPixels((nint)hwnd, srcWidth, srcHeight);
+                        var source = _windowCapture.CaptureWindowPixels((nint)hwnd, srcWidth, srcHeight);
                         frame = ProcessFrame(
                             source, srcWidth, srcHeight,
                             cropX, cropY, cropW, cropH,
