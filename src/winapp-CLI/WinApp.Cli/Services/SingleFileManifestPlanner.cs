@@ -23,28 +23,29 @@ internal sealed record AuthoredSingleFileManifest(FileInfo File, string Source);
 /// <param name="PublisherDN">Normalized X.500 <c>Identity/@Publisher</c>.</param>
 /// <param name="Version">Four-part, in-range <c>Identity/@Version</c>.</param>
 /// <param name="Description">Text for <c>uap:VisualElements/@Description</c>.</param>
+/// <param name="Capabilities">Capabilities to declare, already resolved to their element and XML namespace.</param>
 internal sealed record SingleFileManifestInfo(
     string PackageName,
     string DisplayName,
     string PublisherDN,
     string Version,
-    string Description);
+    string Description,
+    IReadOnlyList<AppxCapability> Capabilities);
 
 /// <summary>
 /// Maps a .NET file-based app's evaluated MSBuild properties onto manifest metadata.
 /// <para>
-/// Deliberately mirrors <c>winapp manifest generate</c>'s options 1:1 and adds nothing — there is no
-/// manifest DSL here. Anything beyond these five values is served by the existing
-/// <c>WinAppManifestPath</c> escape hatch, which lets the app point at a hand-authored manifest.
+/// Mirrors <c>winapp manifest generate</c>'s options and adds one thing it does not have:
+/// <c>WinAppCapabilities</c>. Full trust is not the whole story — <c>runFullTrust</c> covers
+/// notifications, protocol handlers and shell integration, but some APIs are gated on a declared
+/// capability regardless, and the Windows AI APIs are the case that forced this: Phi Silica requires
+/// <c>systemAIModels</c>, which no amount of full trust substitutes for.
 /// </para>
 /// <para>
-/// <b>Capabilities are deliberately NOT modeled.</b> A WinUI 3 desktop app is full-trust by default:
-/// <c>EntryPoint="Windows.FullTrustApplication"</c> plus <c>runFullTrust</c> already unlocks
-/// notifications, on-device AI, protocol handlers and shell integration, none of which need a declared
-/// capability. <c>runFullTrust</c> stays fixed template boilerplate rather than user input. (Capabilities
-/// also span four different manifest elements — <c>Capability</c>, <c>uap:Capability</c>,
-/// <c>rescap:Capability</c>, <c>DeviceCapability</c> — so a flat name list would produce invalid
-/// manifests.)
+/// <c>runFullTrust</c> itself stays fixed template boilerplate rather than user input, so the common
+/// app declares nothing. Capability names are resolved through <see cref="AppxCapabilityCatalog"/>,
+/// because they span several different elements and namespaces and a flat name list emitted into one
+/// of them produces manifests Windows rejects.
 /// </para>
 /// Pure and side-effect free.
 /// </summary>
@@ -64,6 +65,13 @@ internal static partial class SingleFileManifestPlanner
 
     /// <summary>MSBuild property naming the app description; falls back to the display name.</summary>
     internal const string DescriptionProperty = "WinAppDescription";
+
+    /// <summary>
+    /// MSBuild property listing capabilities to declare, separated by <c>;</c> or <c>,</c>. Each entry is
+    /// either a name whose namespace is documented (<c>systemAIModels</c>, <c>microphone</c>) or an
+    /// explicitly qualified <c>prefix:name</c> (<c>rescap:broadFileSystemAccess</c>).
+    /// </summary>
+    internal const string CapabilitiesProperty = "WinAppCapabilities";
 
     /// <summary>
     /// The <c>Application/@Id</c> written for a file-based app. Fixed rather than derived from the package
@@ -127,7 +135,15 @@ internal static partial class SingleFileManifestPlanner
         // installer text meaningful for an app whose whole configuration is a handful of directives.
         var description = Read(properties, DescriptionProperty) ?? displayName;
 
-        return new SingleFileManifestInfo(packageName, displayName, publisherDN, version, description);
+        // Resolved here, at plan time, so a bad name is a command error rather than a manifest Windows
+        // refuses at registration.
+        if (!AppxCapabilityCatalog.TryParse(Read(properties, CapabilitiesProperty), out var capabilities, out var capabilityError))
+        {
+            throw new ProjectRunException(
+                $"'{singleFile.Name}' declares {CapabilitiesProperty} that cannot be used. {capabilityError}");
+        }
+
+        return new SingleFileManifestInfo(packageName, displayName, publisherDN, version, description, capabilities);
     }
 
     /// <summary>

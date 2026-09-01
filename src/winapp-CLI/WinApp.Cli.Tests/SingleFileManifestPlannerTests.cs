@@ -212,6 +212,43 @@ public class SingleFileManifestPlannerTests
 
     #endregion
 
+    #region Capabilities
+
+    [TestMethod]
+    public void Plan_NoCapabilitiesDeclared_YieldsNone()
+    {
+        // The common app declares nothing: runFullTrust is template boilerplate, not user input.
+        Assert.AreEqual(0, SingleFileManifestPlanner.Plan(SingleFile(), Props()).Capabilities.Count);
+    }
+
+    [TestMethod]
+    public void Plan_Capabilities_AreResolvedToElementAndNamespace()
+    {
+        var info = SingleFileManifestPlanner.Plan(
+            SingleFile(),
+            Props((SingleFileManifestPlanner.CapabilitiesProperty, "systemAIModels;microphone")));
+
+        Assert.AreEqual(2, info.Capabilities.Count);
+        Assert.AreEqual("systemai", info.Capabilities[0].Prefix);
+        Assert.IsTrue(info.Capabilities[1].IsDeviceCapability);
+    }
+
+    [TestMethod]
+    public void Plan_UnusableCapability_IsACommandError()
+    {
+        // Surfaced at plan time so the user gets an actionable message, rather than a manifest Windows
+        // refuses at registration with an opaque HRESULT.
+        var ex = Assert.ThrowsExactly<ProjectRunException>(() =>
+            SingleFileManifestPlanner.Plan(
+                SingleFile(),
+                Props((SingleFileManifestPlanner.CapabilitiesProperty, "notARealCapability"))));
+
+        StringAssert.Contains(ex.Message, SingleFileManifestPlanner.CapabilitiesProperty);
+        StringAssert.Contains(ex.Message, "notARealCapability");
+    }
+
+    #endregion
+
     #region Authored manifest resolution
 
     private static DirectoryInfo NewAppDirectory()

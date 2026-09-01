@@ -841,6 +841,7 @@ ReactorApp.Run<MyApp>("Hello");
 | `WinAppPublisher` | `Identity/@Publisher` | `CN=<your Windows user name>`. A bare name is wrapped as `CN=<name>`. |
 | `WinAppVersion` | `Identity/@Version` | `$(Version)`, normalized (see below) |
 | `WinAppDescription` | The description shown during install and in Settings | the display name |
+| `WinAppCapabilities` | Capabilities to declare, separated by `;` or `,` | none |
 
 **Version.** A package version must be exactly four numbers, each 0–65535. `WinAppVersion` (or, if you
 don't set it, the standard `Version` property) is normalized to fit: any `-preview`/`-rc` suffix is
@@ -849,9 +850,56 @@ dropped and missing components are filled with zeros, so `#:property Version=1.2
 fit — a component above 65535, or more than four components — is **rejected with an error** rather
 than silently changed.
 
+##### Capabilities
+
+Your app runs full-trust, which covers notifications, protocol handlers and shell integration without
+declaring anything. But some APIs are gated on a capability regardless — the Windows AI APIs are the
+common case:
+
+```csharp
+#:property WinAppCapabilities=systemAIModels
+```
+
+That is all Phi Silica and the other on-device model APIs need from the manifest. Declare several by
+separating them:
+
+```csharp
+#:property WinAppCapabilities=systemAIModels;internetClient;microphone
+```
+
+winapp writes each one into the element and XML namespace it actually requires, declares that
+namespace, and raises `MaxVersionTested` when the capability needs a newer one. This matters more than
+it sounds: capabilities are spread across several different elements, and the same list above becomes
+three *different* shapes —
+
+```xml
+<systemai:Capability Name="systemAIModels" />
+<Capability Name="internetClient" />
+<DeviceCapability Name="microphone" />
+```
+
+Names winapp knows are written for you. For anything else — the restricted set grows over time —
+qualify it yourself with the namespace prefix:
+
+| Prefix | Emits |
+|--------|-------|
+| `rescap:` | `<rescap:Capability>` — restricted capabilities |
+| `uap:`, `uap6:`, `uap7:`, `uap11:` | `<uap*:Capability>` |
+| `systemai:` | `<systemai:Capability>` |
+| `device:` | `<DeviceCapability>` |
+| `app:` | `<Capability>` in the default namespace |
+
+```csharp
+#:property WinAppCapabilities=rescap:broadFileSystemAccess
+```
+
+An unrecognized bare name is **rejected with an error** naming these prefixes, rather than guessed at —
+a capability emitted in the wrong namespace produces a manifest Windows either refuses to register or
+accepts while silently not granting it.
+
 ##### Bring your own manifest
 
-If you need something the five properties don't cover — a protocol handler, a file association, an execution alias — author a manifest
+If you need something the properties don't cover — a protocol handler, a file association, an execution alias — author a manifest
 and `winapp run` will use it verbatim instead of generating one. It is picked up from, in order:
 
 1. `--manifest <path>` on the command line.

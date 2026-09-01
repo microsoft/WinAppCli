@@ -283,6 +283,14 @@ internal partial class RunCommand
 
             var generatedManifest = new FileInfo(Path.Join(outputFolder.FullName, manifestFileName));
 
+            // Declared capabilities are applied after generation rather than through the template, because
+            // each one may also need its XML namespace declared, added to IgnorableNamespaces, and a
+            // MaxVersionTested floor raised — structure the placeholder substitution cannot express.
+            if (info.Capabilities.Count > 0)
+            {
+                ApplyGeneratedManifestCapabilities(generatedManifest, info.Capabilities, isJson);
+            }
+
             // --with-alias launches through a uap5:ExecutionAlias, which the template does not declare.
             // For a generated manifest the usual advice ("run winapp manifest add-alias") is impossible to
             // follow: this file is regenerated on every run, so any alias the user adds is destroyed by the
@@ -293,6 +301,38 @@ internal partial class RunCommand
             }
 
             return generatedManifest;
+        }
+
+        /// <summary>
+        /// Writes the app's declared capabilities into the freshly generated manifest.
+        /// </summary>
+        /// <remarks>
+        /// Failures are fatal, not advisory: the user asked for a capability, and registering without it
+        /// produces an app whose API calls fail at runtime with nothing pointing back at the manifest.
+        /// </remarks>
+        private void ApplyGeneratedManifestCapabilities(FileInfo manifest, IReadOnlyList<AppxCapability> capabilities, bool isJson)
+        {
+            try
+            {
+                var document = AppxManifestDocument.Load(manifest.FullName);
+                foreach (var capability in capabilities)
+                {
+                    document.EnsureCapability(capability);
+                }
+
+                document.Save(manifest.FullName);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or XmlException)
+            {
+                throw new ProjectRunException(
+                    $"Could not declare capabilities in '{manifest.FullName}': {ex.Message}");
+            }
+
+            if (!isJson && logger.IsEnabled(LogLevel.Debug))
+            {
+                ansiConsole.MarkupLineInterpolated(
+                    $"{UiSymbols.Note} Declared capabilities: {string.Join(", ", capabilities.Select(c => c.Name))}.");
+            }
         }
 
         /// <summary>

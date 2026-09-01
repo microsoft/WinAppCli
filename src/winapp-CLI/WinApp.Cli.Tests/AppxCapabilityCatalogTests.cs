@@ -1,0 +1,248 @@
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
+// Licensed under the MIT License.
+
+using WinApp.Cli.Helpers;
+
+namespace WinApp.Cli.Tests;
+
+/// <summary>
+/// Tests for <see cref="AppxCapabilityCatalog"/> — the mapping from capability names onto the exact
+/// element and XML namespace an appxmanifest requires. Getting a name into the wrong one produces a
+/// manifest Windows rejects, or one it accepts while silently not granting the capability.
+/// </summary>
+[TestClass]
+public class AppxCapabilityCatalogTests
+{
+    private const string FoundationNs = "http://schemas.microsoft.com/appx/manifest/foundation/windows10";
+    private const string RescapNs = "http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities";
+    private const string SystemAiNs = "http://schemas.microsoft.com/appx/manifest/systemai/windows10";
+    private const string UapNs = "http://schemas.microsoft.com/appx/manifest/uap/windows10";
+
+    private static AppxCapability ParseOne(string value)
+    {
+        Assert.IsTrue(AppxCapabilityCatalog.TryParse(value, out var caps, out var error), error);
+        return caps.Single();
+    }
+
+    #region Namespace selection
+
+    [TestMethod]
+    public void SystemAIModels_UsesTheSystemAiNamespace_NotRescap()
+    {
+        // The capability that forced this feature. 'rescap' is the intuitive guess — it is a restricted
+        // capability — but the documented element is systemai:Capability, and the rescap spelling
+        // registers successfully while never granting AI model access.
+        var capability = ParseOne("systemAIModels");
+
+        Assert.AreEqual("Capability", capability.ElementName);
+        Assert.AreEqual("systemai", capability.Prefix);
+        Assert.AreEqual(SystemAiNs, capability.Namespace.NamespaceName);
+    }
+
+    [TestMethod]
+    public void SystemAIModels_CarriesItsMaxVersionTestedFloor()
+    {
+        // Below 10.0.26226.0 the manifest registers but the capability is not honored — the least
+        // debuggable failure, since everything reports success.
+        Assert.AreEqual("10.0.26226.0", ParseOne("systemAIModels").MinimumMaxVersionTested);
+    }
+
+    [TestMethod]
+    public void GeneralCapabilities_UseTheFoundationNamespaceWithNoPrefix()
+    {
+        foreach (var name in new[] { "internetClient", "internetClientServer", "privateNetworkClientServer", "allJoyn", "codeGeneration" })
+        {
+            var capability = ParseOne(name);
+            Assert.AreEqual("Capability", capability.ElementName, name);
+            Assert.IsNull(capability.Prefix, name);
+            Assert.AreEqual(FoundationNs, capability.Namespace.NamespaceName, name);
+        }
+    }
+
+    [TestMethod]
+    public void LibraryCapabilities_UseTheUapNamespace()
+    {
+        foreach (var name in new[] { "picturesLibrary", "videosLibrary", "musicLibrary", "documentsLibrary" })
+        {
+            var capability = ParseOne(name);
+            Assert.AreEqual("uap", capability.Prefix, name);
+            Assert.AreEqual(UapNs, capability.Namespace.NamespaceName, name);
+        }
+    }
+
+    [TestMethod]
+    public void DeviceCapabilities_UseADifferentElement_NotANamespacedCapability()
+    {
+        // microphone/webcam are DeviceCapability elements. Emitting them as <Capability> — the naive
+        // reading of "a capability" — is invalid.
+        foreach (var name in new[] { "microphone", "webcam", "location", "bluetooth" })
+        {
+            var capability = ParseOne(name);
+            Assert.AreEqual("DeviceCapability", capability.ElementName, name);
+            Assert.IsTrue(capability.IsDeviceCapability, name);
+            Assert.IsNull(capability.Prefix, name);
+        }
+    }
+
+    [TestMethod]
+    public void RunFullTrust_UsesRescap()
+    {
+        var capability = ParseOne("runFullTrust");
+        Assert.AreEqual("rescap", capability.Prefix);
+        Assert.AreEqual(RescapNs, capability.Namespace.NamespaceName);
+    }
+
+    #endregion
+
+    #region Parsing
+
+    [TestMethod]
+    public void Parse_AcceptsSemicolonAndCommaSeparators()
+    {
+        Assert.IsTrue(AppxCapabilityCatalog.TryParse("internetClient;microphone", out var semi, out _));
+        Assert.IsTrue(AppxCapabilityCatalog.TryParse("internetClient,microphone", out var comma, out _));
+
+        Assert.AreEqual(2, semi.Count);
+        Assert.AreEqual(2, comma.Count);
+    }
+
+    [TestMethod]
+    public void Parse_TrimsWhitespaceAndIgnoresEmptyEntries()
+    {
+        Assert.IsTrue(AppxCapabilityCatalog.TryParse(" internetClient ; ; microphone ", out var caps, out var error), error);
+
+        Assert.AreEqual(2, caps.Count);
+        Assert.AreEqual("internetClient", caps[0].Name);
+        Assert.AreEqual("microphone", caps[1].Name);
+    }
+
+    [TestMethod]
+    public void Parse_EmptyOrNull_YieldsNoCapabilities()
+    {
+        Assert.IsTrue(AppxCapabilityCatalog.TryParse(null, out var fromNull, out _));
+        Assert.IsTrue(AppxCapabilityCatalog.TryParse("   ", out var fromBlank, out _));
+
+        Assert.AreEqual(0, fromNull.Count);
+        Assert.AreEqual(0, fromBlank.Count);
+    }
+
+    [TestMethod]
+    public void Parse_DropsDuplicates()
+    {
+        // The same capability declared twice is a schema violation, even though the intent is harmless.
+        Assert.IsTrue(AppxCapabilityCatalog.TryParse("internetClient;internetClient", out var caps, out _));
+
+        Assert.AreEqual(1, caps.Count);
+    }
+
+    [TestMethod]
+    public void Parse_PreservesDeclarationOrder()
+    {
+        Assert.IsTrue(AppxCapabilityCatalog.TryParse("microphone;internetClient", out var caps, out _));
+
+        Assert.AreEqual("microphone", caps[0].Name);
+        Assert.AreEqual("internetClient", caps[1].Name);
+    }
+
+    #endregion
+
+    #region Explicit qualification
+
+    [TestMethod]
+    public void Parse_ExplicitPrefix_ResolvesAnUncataloguedName()
+    {
+        // The escape hatch: the restricted set grows, so a name winapp has never heard of must still be
+        // declarable rather than blocking the user.
+        var capability = ParseOne("rescap:someFutureCapability");
+
+        Assert.AreEqual("someFutureCapability", capability.Name);
+        Assert.AreEqual("rescap", capability.Prefix);
+        Assert.AreEqual(RescapNs, capability.Namespace.NamespaceName);
+    }
+
+    [TestMethod]
+    public void Parse_DevicePrefix_SelectsTheDeviceCapabilityElement()
+    {
+        var capability = ParseOne("device:someSensor");
+
+        Assert.AreEqual("DeviceCapability", capability.ElementName);
+        Assert.IsNull(capability.Prefix);
+    }
+
+    [TestMethod]
+    public void Parse_AppPrefix_ForcesTheFoundationNamespace()
+    {
+        var capability = ParseOne("app:internetClient");
+
+        Assert.AreEqual("Capability", capability.ElementName);
+        Assert.IsNull(capability.Prefix);
+        Assert.AreEqual(FoundationNs, capability.Namespace.NamespaceName);
+    }
+
+    [TestMethod]
+    public void Parse_ExplicitPrefixOnAKnownName_KeepsItsVersionFloor()
+    {
+        // Spelling the namespace out must not lose the MaxVersionTested requirement.
+        Assert.AreEqual("10.0.26226.0", ParseOne("systemai:systemAIModels").MinimumMaxVersionTested);
+    }
+
+    [TestMethod]
+    public void Parse_DeviceCapabilityGuidName_IsAccepted()
+    {
+        var capability = ParseOne("device:{A5DCBF10-6530-11D2-901F-00C04FB951ED}");
+
+        Assert.AreEqual("DeviceCapability", capability.ElementName);
+    }
+
+    #endregion
+
+    #region Rejection
+
+    [TestMethod]
+    public void Parse_UnknownBareName_IsRejectedWithGuidance()
+    {
+        // Guessing a namespace here is what produces an invalid manifest, so this must fail rather than
+        // default to one — and the message has to name the way forward.
+        Assert.IsFalse(AppxCapabilityCatalog.TryParse("someFutureCapability", out _, out var error));
+
+        StringAssert.Contains(error, "someFutureCapability");
+        StringAssert.Contains(error, "rescap:someFutureCapability");
+    }
+
+    [TestMethod]
+    public void Parse_UnknownPrefix_IsRejectedAndListsTheSupportedOnes()
+    {
+        Assert.IsFalse(AppxCapabilityCatalog.TryParse("nope:something", out _, out var error));
+
+        StringAssert.Contains(error, "nope");
+        StringAssert.Contains(error, "rescap");
+    }
+
+    [TestMethod]
+    public void Parse_NameWithMarkup_IsRejected()
+    {
+        // The value lands in an XML attribute; rejecting beats escaping.
+        foreach (var bad in new[] { "rescap:a<b", "rescap:a\"b", "rescap:a b", "app:a/b" })
+        {
+            Assert.IsFalse(AppxCapabilityCatalog.TryParse(bad, out _, out _), bad);
+        }
+    }
+
+    [TestMethod]
+    public void Parse_PrefixWithNoName_IsRejected()
+    {
+        Assert.IsFalse(AppxCapabilityCatalog.TryParse("rescap:", out _, out var error));
+        StringAssert.Contains(error, "prefix");
+    }
+
+    [TestMethod]
+    public void Parse_OneBadEntry_RejectsTheWholeList()
+    {
+        // Partially applying a capability list would leave the app registered with some of what it asked
+        // for and no indication which.
+        Assert.IsFalse(AppxCapabilityCatalog.TryParse("internetClient;bogusName", out var caps, out _));
+        Assert.AreEqual(0, caps.Count);
+    }
+
+    #endregion
+}

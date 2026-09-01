@@ -214,6 +214,9 @@ Describe the package with `#:property` directives in the file. All are optional:
 | `WinAppPublisher` | `Identity/@Publisher` | `CN=<current user>`; a bare name is wrapped as `CN=` |
 | `WinAppVersion` | `Identity/@Version` | `$(Version)`, normalized to four 0–65535 parts (`1.2.3-preview.4` ⇒ `1.2.3.0`) |
 | `WinAppDescription` | Install/Settings description | the display name |
+| `WinAppCapabilities` | Capabilities to declare, separated by `;` or `,` | none |
+
+- **Capabilities for gated APIs.** Full trust covers notifications, protocol handlers and shell integration, but some APIs need a declared capability regardless — the Windows AI APIs most notably. `#:property WinAppCapabilities=systemAIModels` is all Phi Silica needs from the manifest. winapp writes each name into the element and namespace it actually requires (`<systemai:Capability>`, `<Capability>`, `<DeviceCapability>` — they differ), declares that namespace, and raises `MaxVersionTested` when required. An unknown bare name is rejected rather than guessed; qualify it yourself with `rescap:`, `uap:`, `systemai:`, `device:` or `app:`.
 
 - **Bring your own manifest** with `--manifest`, `#:property WinAppManifestPath=…`, or a manifest next to the `.cs` named `<filename>.appxmanifest`. Only that per-file name is auto-detected — a shared `Package.appxmanifest` in the folder is ignored, since several `.cs` files can live together. Otherwise one is generated into the build output (with default assets) and refreshed each run.
 - **Packaged and unpackaged both work**, from the effective `WindowsPackageType` — same as project mode. `None` builds, installs the Windows App Runtime, and launches the `.exe` directly; identity options apply to packaged apps only.

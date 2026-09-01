@@ -78,6 +78,9 @@ internal sealed partial class ProjectRunService
         "WinAppPublisher",
         "WinAppVersion",
         "WinAppDescription",
+        // Capabilities to declare. Full trust does not substitute for a gated capability — the Windows AI
+        // APIs need systemAIModels — so this is the one thing here that manifest generate has no option for.
+        "WinAppCapabilities",
         // Read $(Version) — NOT $(VersionPrefix). Setting Version explicitly leaves VersionPrefix EMPTY,
         // so reading VersionPrefix first would silently discard the user's version.
         "Version",

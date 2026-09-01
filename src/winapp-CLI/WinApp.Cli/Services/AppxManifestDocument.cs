@@ -4,6 +4,7 @@
 using System.Text;
 using System.Xml;
 using System.Xml.Linq;
+using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.Services;
 
@@ -467,6 +468,104 @@ internal class AppxManifestDocument
         if (existing == null)
         {
             capabilities.Add(new XElement(targetNs + "Capability", new XAttribute("Name", capabilityName)));
+        }
+    }
+
+    /// <summary>
+    /// Declares a capability resolved by <see cref="AppxCapabilityCatalog"/>, including its XML namespace,
+    /// its <c>IgnorableNamespaces</c> entry, and any <c>MaxVersionTested</c> floor it requires.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Element ORDER matters: the schema requires every <c>DeviceCapability</c> to come after all
+    /// <c>Capability</c> elements, so a <c>Capability</c> is inserted ahead of the first
+    /// <c>DeviceCapability</c> rather than appended. Appending regardless produces a manifest Windows
+    /// rejects as soon as one device capability precedes one ordinary capability.
+    /// </para>
+    /// <para>
+    /// Matching is by name only, across namespaces: the same capability declared twice is a schema
+    /// violation regardless of which namespaces were used.
+    /// </para>
+    /// </remarks>
+    public void EnsureCapability(AppxCapability capability)
+    {
+        var root = _document.Root;
+        if (root == null)
+        {
+            return;
+        }
+
+        if (capability.Prefix is { Length: > 0 } prefix)
+        {
+            EnsureNamespace(prefix, capability.Namespace);
+            AddIgnorableNamespace(prefix);
+        }
+
+        if (capability.MinimumMaxVersionTested is { Length: > 0 } floor)
+        {
+            EnsureMinimumMaxVersionTested(floor);
+        }
+
+        var capabilities = GetCapabilitiesElement();
+        if (capabilities == null)
+        {
+            capabilities = new XElement(DefaultNs + "Capabilities");
+            root.Add(capabilities);
+        }
+
+        var alreadyDeclared = capabilities.Elements()
+            .Any(e => string.Equals(e.Attribute("Name")?.Value, capability.Name, StringComparison.Ordinal));
+        if (alreadyDeclared)
+        {
+            return;
+        }
+
+        var element = new XElement(
+            capability.Namespace + capability.ElementName,
+            new XAttribute("Name", capability.Name));
+
+        var firstDeviceCapability = capabilities.Elements()
+            .FirstOrDefault(e => e.Name.LocalName == "DeviceCapability");
+
+        if (!capability.IsDeviceCapability && firstDeviceCapability != null)
+        {
+            firstDeviceCapability.AddBeforeSelf(element);
+        }
+        else
+        {
+            capabilities.Add(element);
+        }
+    }
+
+    /// <summary>
+    /// Raises every <c>TargetDeviceFamily/@MaxVersionTested</c> that is below <paramref name="minimum"/>.
+    /// </summary>
+    /// <remarks>
+    /// Some capabilities are only honored from a given OS version — <c>systemAIModels</c> needs
+    /// 10.0.26226.0 — and a manifest declaring one below its floor registers successfully while the API
+    /// still fails, which is the least debuggable outcome. Only ever raises: an app that already tested
+    /// against something newer keeps its value.
+    /// </remarks>
+    public void EnsureMinimumMaxVersionTested(string minimum)
+    {
+        if (!Version.TryParse(minimum, out var required))
+        {
+            return;
+        }
+
+        foreach (var family in _document.Root?.Element(DefaultNs + "Dependencies")
+            ?.Elements(DefaultNs + "TargetDeviceFamily") ?? [])
+        {
+            var attribute = family.Attribute("MaxVersionTested");
+            if (attribute == null)
+            {
+                continue;
+            }
+
+            if (!Version.TryParse(attribute.Value, out var current) || current < required)
+            {
+                attribute.Value = minimum;
+            }
         }
     }
 

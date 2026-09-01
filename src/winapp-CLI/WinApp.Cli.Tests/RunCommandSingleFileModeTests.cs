@@ -704,6 +704,101 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
     }
 
     #endregion
+
+    #region Capabilities
+
+    private static readonly XNamespace SystemAiNs = "http://schemas.microsoft.com/appx/manifest/systemai/windows10";
+
+    [TestMethod]
+    public async Task SingleFileMode_DeclaredCapabilities_AreWrittenToTheGeneratedManifest()
+    {
+        // The scenario that forced this: the Windows AI APIs are gated on systemAIModels, which full
+        // trust does not substitute for.
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir, "counter.exe", ("WinAppCapabilities", "systemAIModels;internetClient;microphone"));
+        var command = GetRequiredService<RunCommand>();
+
+        await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--detach"]);
+
+        var capabilities = LoadGeneratedManifest(outputDir).Root!.Element(Ns + "Capabilities")!;
+
+        Assert.IsNotNull(capabilities.Elements(SystemAiNs + "Capability")
+            .FirstOrDefault(e => e.Attribute("Name")?.Value == "systemAIModels"),
+            "systemAIModels must be a systemai:Capability — the rescap spelling registers but grants nothing");
+        Assert.IsNotNull(capabilities.Elements(Ns + "Capability")
+            .FirstOrDefault(e => e.Attribute("Name")?.Value == "internetClient"));
+        Assert.IsNotNull(capabilities.Elements(Ns + "DeviceCapability")
+            .FirstOrDefault(e => e.Attribute("Name")?.Value == "microphone"));
+    }
+
+    [TestMethod]
+    public async Task SingleFileMode_DeviceCapabilities_AreOrderedAfterEveryCapability()
+    {
+        // The schema requires it, so declaring a device capability first must not emit it first.
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir, "counter.exe", ("WinAppCapabilities", "microphone;internetClient"));
+        var command = GetRequiredService<RunCommand>();
+
+        await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--detach"]);
+
+        var children = LoadGeneratedManifest(outputDir).Root!.Element(Ns + "Capabilities")!.Elements().ToList();
+        var lastCapability = children.FindLastIndex(e => e.Name.LocalName == "Capability");
+        var firstDevice = children.FindIndex(e => e.Name.LocalName == "DeviceCapability");
+
+        Assert.IsGreaterThan(-1, firstDevice);
+        Assert.IsLessThan(firstDevice, lastCapability, "Every Capability must precede the first DeviceCapability");
+    }
+
+    [TestMethod]
+    public async Task SingleFileMode_SystemAiCapability_DeclaresItsNamespaceAndRaisesMaxVersionTested()
+    {
+        // A namespace that is used but undeclared is invalid XML, and a MaxVersionTested below the
+        // capability's floor registers successfully while never granting it.
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir, "counter.exe", ("WinAppCapabilities", "systemAIModels"));
+        var command = GetRequiredService<RunCommand>();
+
+        await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--detach"]);
+
+        var root = LoadGeneratedManifest(outputDir).Root!;
+
+        Assert.AreEqual(SystemAiNs.NamespaceName, root.Attribute(XNamespace.Xmlns + "systemai")?.Value);
+        StringAssert.Contains(root.Attribute("IgnorableNamespaces")!.Value, "systemai");
+
+        var family = root.Element(Ns + "Dependencies")!.Element(Ns + "TargetDeviceFamily")!;
+        Assert.IsTrue(Version.Parse(family.Attribute("MaxVersionTested")!.Value) >= Version.Parse("10.0.26226.0"));
+    }
+
+    [TestMethod]
+    public async Task SingleFileMode_NoCapabilitiesDeclared_LeavesTheTemplateBlockAlone()
+    {
+        // The default app declares only the template's runFullTrust, and its MaxVersionTested is not
+        // raised by a capability it never asked for.
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir);
+        var command = GetRequiredService<RunCommand>();
+
+        await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--detach"]);
+
+        var root = LoadGeneratedManifest(outputDir).Root!;
+        Assert.AreEqual(1, root.Element(Ns + "Capabilities")!.Elements().Count());
+        Assert.IsNull(root.Attribute(XNamespace.Xmlns + "systemai"));
+    }
+
+    [TestMethod]
+    public async Task SingleFileMode_UnusableCapability_FailsBeforeRegistering()
+    {
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir, "counter.exe", ("WinAppCapabilities", "notARealCapability"));
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--detach"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeMsixService.AddLooseLayoutCalls.Count);
+    }
+
+    #endregion
 }
 
 
