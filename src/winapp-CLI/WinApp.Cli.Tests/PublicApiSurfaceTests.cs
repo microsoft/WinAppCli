@@ -126,10 +126,11 @@ public class PublicApiSurfaceTests
             Assert.IsTrue(File.Exists(xmlPath), $"No XML documentation shipped next to {anchor.Assembly.GetName().Name}.");
 
             var documented = File.ReadAllText(xmlPath);
-            foreach (var type in anchor.Assembly.GetExportedTypes())
+
+            // Documentation ids separate a nested type with '.', where reflection uses '+'.
+            var docIds = anchor.Assembly.GetExportedTypes().Select(t => t.FullName!.Replace('+', '.'));
+            foreach (var docId in docIds)
             {
-                // Documentation ids separate a nested type with '.', where reflection uses '+'.
-                var docId = type.FullName!.Replace('+', '.');
                 StringAssert.Contains(
                     documented,
                     $"\"T:{docId}\"",
