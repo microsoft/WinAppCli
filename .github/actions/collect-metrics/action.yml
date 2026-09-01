@@ -95,7 +95,7 @@ runs:
         # assembly's coverage from a run that barely touches it, or summing, which would double-count
         # shared code in the denominator.
         $lineHits = @{}
-        $branchHits = @{}
+        $conditionHits = @{}
         foreach ($file in $coverageFiles) {
           [xml]$xml = Get-Content $file.FullName
           foreach ($package in $xml.coverage.packages.package) {
@@ -106,10 +106,18 @@ runs:
                 $key = "$($class.filename)|$($line.number)"
                 $hits = [int]$line.hits
                 if (-not $lineHits.ContainsKey($key) -or $lineHits[$key] -lt $hits) { $lineHits[$key] = $hits }
-                if ($line.'condition-coverage' -match '\((\d+)/(\d+)\)') {
-                  $covered = [int]$Matches[1]
-                  if (-not $branchHits.ContainsKey($key) -or $branchHits[$key].Covered -lt $covered) {
-                    $branchHits[$key] = @{ Covered = $covered; Total = [int]$Matches[2] }
+
+                # Union per condition, not per line: two runs often cover different conditions on
+                # the same line, and taking the line's best count would keep the lower of the two.
+                # Cobertura records a percentage per condition rather than which arm ran, so a
+                # single condition whose arms are split across runs still reads as half covered.
+                # That under-reports rather than over-reports, which is the safe direction.
+                foreach ($condition in @($line.conditions.condition)) {
+                  if (-not $condition) { continue }
+                  $conditionKey = "$key|$($condition.number)"
+                  $percent = [double]($condition.coverage -replace '%', '')
+                  if (-not $conditionHits.ContainsKey($conditionKey) -or $conditionHits[$conditionKey] -lt $percent) {
+                    $conditionHits[$conditionKey] = $percent
                   }
                 }
               }
@@ -119,8 +127,9 @@ runs:
 
         $linesValid = $lineHits.Count
         $linesCovered = @($lineHits.Values | Where-Object { $_ -gt 0 }).Count
-        $branchesValid = @($branchHits.Values | ForEach-Object { $_.Total } | Measure-Object -Sum).Sum
-        $branchesCovered = @($branchHits.Values | ForEach-Object { $_.Covered } | Measure-Object -Sum).Sum
+        # Each condition is a two-way branch point.
+        $branchesValid = $conditionHits.Count * 2
+        $branchesCovered = [int]([math]::Round((@($conditionHits.Values | Measure-Object -Sum).Sum / 100) * 2))
 
         $linePct = if ($linesValid -gt 0) { [math]::Round(100 * $linesCovered / $linesValid, 1) } else { 0 }
         $branchPct = if ($branchesValid -gt 0) { [math]::Round(100 * $branchesCovered / $branchesValid, 1) } else { 0 }
