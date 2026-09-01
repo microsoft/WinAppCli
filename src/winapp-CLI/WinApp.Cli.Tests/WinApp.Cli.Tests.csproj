@@ -47,4 +47,9 @@
     <ProjectReference Include="..\WinApp.Cli.Fuzz\WinApp.Cli.Fuzz.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="TestData\WindowsAppModel\appx-manifest-conformance-vectors.json"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

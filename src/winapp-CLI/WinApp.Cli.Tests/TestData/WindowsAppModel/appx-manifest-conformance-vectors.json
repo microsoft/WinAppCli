@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "description": "Implementation-neutral Windows package identity and application-model vectors intended for reuse by testfx, WinApp CLI, and other Windows app tooling.",
+  "references": [
+    "https://github.com/microsoft/testfx/tree/main/src/Platform/Microsoft.Testing.Extensions.PackagedApp",
+    "https://github.com/microsoft/WinAppCli/blob/main/src/winapp-CLI/WinApp.Cli/Services/AppLauncherService.cs"
+  ],
+  "vectors": [
+    {
+      "name": "store-publisher-full-trust",
+      "manifestLines": [
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>",
+        "<Package xmlns=\"http://schemas.microsoft.com/appx/manifest/foundation/windows10\" xmlns:uap10=\"http://schemas.microsoft.com/appx/manifest/uap/windows10/10\" xmlns:rescap=\"http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities\">",
+        "  <Identity Name=\"Microsoft.TestApp\" Publisher=\"CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US\" Version=\"1.0.0.0\" />",
+        "  <Applications>",
+        "    <Application Id=\"App\" Executable=\"TestApp.exe\" EntryPoint=\"Windows.FullTrustApplication\" uap10:RuntimeBehavior=\"packagedClassicApp\" uap10:TrustLevel=\"mediumIL\" />",
+        "  </Applications>",
+        "  <Capabilities>",
+        "    <rescap:Capability Name=\"runFullTrust\" />",
+        "  </Capabilities>",
+        "</Package>"
+      ],
+      "expected": {
+        "packageName": "Microsoft.TestApp",
+        "publisher": "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+        "publisherId": "8wekyb3d8bbwe",
+        "packageFamilyName": "Microsoft.TestApp_8wekyb3d8bbwe",
+        "applications": [
+          {
+            "id": "App",
+            "executable": "TestApp.exe",
+            "appUserModelId": "Microsoft.TestApp_8wekyb3d8bbwe!App",
+            "usesLaunchActivationArguments": false,
+            "runsInAppContainer": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "legacy-uwp-defaults-to-app-container",
+      "manifestLines": [
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>",
+        "<Package xmlns=\"http://schemas.microsoft.com/appx/manifest/foundation/windows10\">",
+        "  <Identity Name=\"Contoso.LegacyUwp\" Publisher=\"CN=Contoso\" Version=\"1.0.0.0\" />",
+        "  <Applications>",
+        "    <Application Id=\"App\" Executable=\"LegacyUwp.exe\" EntryPoint=\"Contoso.LegacyUwp.App\" />",
+        "  </Applications>",
+        "</Package>"
+      ],
+      "expected": {
+        "packageName": "Contoso.LegacyUwp",
+        "publisher": "CN=Contoso",
+        "publisherId": "h91ms92gdsmmt",
+        "packageFamilyName": "Contoso.LegacyUwp_h91ms92gdsmmt",
+        "applications": [
+          {
+            "id": "App",
+            "executable": "LegacyUwp.exe",
+            "appUserModelId": "Contoso.LegacyUwp_h91ms92gdsmmt!App",
+            "usesLaunchActivationArguments": true,
+            "runsInAppContainer": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "packaged-classic-app-container-with-nested-executable",
+      "manifestLines": [
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>",
+        "<Package xmlns=\"http://schemas.microsoft.com/appx/manifest/foundation/windows10\" xmlns:uap10=\"http://schemas.microsoft.com/appx/manifest/uap/windows10/10\">",
+        "  <Identity Name=\"Contoso.ClassicSandbox\" Publisher=\"CN=contoso\" Version=\"1.0.0.0\" />",
+        "  <Applications>",
+        "    <Application Id=\"Nested\" Executable=\"bin\\Sandbox.exe\" EntryPoint=\"Windows.FullTrustApplication\" uap10:RuntimeBehavior=\"packagedClassicApp\" uap10:TrustLevel=\"appContainer\" />",
+        "  </Applications>",
+        "</Package>"
+      ],
+      "expected": {
+        "packageName": "Contoso.ClassicSandbox",
+        "publisher": "CN=contoso",
+        "publisherId": "74f99pa6tm8gt",
+        "packageFamilyName": "Contoso.ClassicSandbox_74f99pa6tm8gt",
+        "applications": [
+          {
+            "id": "Nested",
+            "executable": "bin\\Sandbox.exe",
+            "appUserModelId": "Contoso.ClassicSandbox_74f99pa6tm8gt!Nested",
+            "usesLaunchActivationArguments": false,
+            "runsInAppContainer": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "windows-app-explicit-medium-integrity",
+      "manifestLines": [
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>",
+        "<Package xmlns=\"http://schemas.microsoft.com/appx/manifest/foundation/windows10\" xmlns:uap10=\"http://schemas.microsoft.com/appx/manifest/uap/windows10/10\">",
+        "  <Identity Name=\"Contoso.WindowsApp\" Publisher=\"CN=Contoso, O=Contoso Corporation, C=US\" Version=\"1.0.0.0\" />",
+        "  <Applications>",
+        "    <Application Id=\"Main\" Executable=\"WindowsApp.exe\" EntryPoint=\"Contoso.WindowsApp.App\" uap10:RuntimeBehavior=\"windowsApp\" uap10:TrustLevel=\"mediumIL\" />",
+        "  </Applications>",
+        "</Package>"
+      ],
+      "expected": {
+        "packageName": "Contoso.WindowsApp",
+        "publisher": "CN=Contoso, O=Contoso Corporation, C=US",
+        "publisherId": "qxmmcvdvc0h2g",
+        "packageFamilyName": "Contoso.WindowsApp_qxmmcvdvc0h2g",
+        "applications": [
+          {
+            "id": "Main",
+            "executable": "WindowsApp.exe",
+            "appUserModelId": "Contoso.WindowsApp_qxmmcvdvc0h2g!Main",
+            "usesLaunchActivationArguments": true,
+            "runsInAppContainer": false
+          }
+        ]
+      }
+    }
+  ]
+}
