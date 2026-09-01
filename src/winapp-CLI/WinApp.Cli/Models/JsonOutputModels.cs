@@ -49,6 +49,8 @@ internal sealed class FindUiSearchJsonOutput
 {
     public required string Query { get; set; }
     public required int MatchCount { get; set; }
+    /// <inheritdoc cref="FindUiCodeJsonOutput.Corpus"/>
+    public string? Corpus { get; set; }
     public required List<FindUiMatchJson> Matches { get; set; }
 }
 
@@ -71,12 +73,23 @@ internal sealed class FindUiScenarioJson
 internal sealed class FindUiListJsonOutput
 {
     public required int Count { get; set; }
+    /// <inheritdoc cref="FindUiCodeJsonOutput.Corpus"/>
+    public string? Corpus { get; set; }
     public required List<FindUiScenarioJson> Items { get; set; }
 }
 
 /// <summary>Output of <c>find-ui --id &lt;id&gt;</c>: full formatted code/notes per id.</summary>
 internal sealed class FindUiCodeJsonOutput
 {
+    /// <summary>
+    /// Least-fresh origin backing this response: <c>network</c> (fetched now),
+    /// <c>cache</c> (this machine's earlier fetch), or <c>embedded</c> (the corpus baked
+    /// into the CLI, so these samples may lag upstream — either the fetch failed or the
+    /// local cache predates the bake).
+    /// Reported so an agent can tell a live answer from an offline fallback. Omitted when
+    /// the result came only from the curated core patterns, which have no upstream.
+    /// </summary>
+    public string? Corpus { get; set; }
     public required List<FindUiCodeEntryJson> Results { get; set; }
 }
 
