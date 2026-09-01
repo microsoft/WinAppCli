@@ -504,6 +504,8 @@ internal partial class DotNetService : IDotNetService
         DirectoryInfo workingDirectory,
         IReadOnlyList<string> arguments,
         IReadOnlyDictionary<string, string>? environmentOverrides = null,
+        Action<string>? onOutputLine = null,
+        Action<string>? onErrorLine = null,
         CancellationToken cancellationToken = default)
     {
         var processStartInfo = new ProcessStartInfo
@@ -533,13 +535,15 @@ internal partial class DotNetService : IDotNetService
             }
         }
 
-        return RunDotnetProcessAsync(processStartInfo, cancellationToken);
+        return RunDotnetProcessAsync(processStartInfo, cancellationToken, onOutputLine: onOutputLine, onErrorLine: onErrorLine);
     }
 
     internal static async Task<(int ExitCode, string Output, string Error)> RunDotnetProcessAsync(
         ProcessStartInfo processStartInfo,
         CancellationToken cancellationToken,
-        Action<Process>? onProcessStarted = null)
+        Action<Process>? onProcessStarted = null,
+        Action<string>? onOutputLine = null,
+        Action<string>? onErrorLine = null)
     {
         using var process = new Process { StartInfo = processStartInfo };
 
@@ -551,6 +555,7 @@ internal partial class DotNetService : IDotNetService
             if (e.Data != null)
             {
                 outputBuilder.AppendLine(e.Data);
+                onOutputLine?.Invoke(e.Data);
             }
         };
 
@@ -559,6 +564,7 @@ internal partial class DotNetService : IDotNetService
             if (e.Data != null)
             {
                 errorBuilder.AppendLine(e.Data);
+                onErrorLine?.Invoke(e.Data);
             }
         };
 

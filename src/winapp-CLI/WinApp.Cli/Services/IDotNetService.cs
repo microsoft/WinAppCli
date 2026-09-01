@@ -88,10 +88,20 @@ internal interface IDotNetService
     /// environment). Use this to force locale-independent output, e.g. <c>DOTNET_CLI_UI_LANGUAGE=en</c>,
     /// when the caller parses labels that dotnet would otherwise localize.
     /// </param>
+    /// <param name="onOutputLine">
+    /// Optional callback invoked with each stdout line as it is produced (in addition to the buffered
+    /// <c>Output</c> returned on completion). Use this to surface a long-running command's output live —
+    /// e.g. echoing <c>dotnet new</c>'s post-creation actions under <c>--verbose</c> — while still
+    /// receiving the full captured text. Invoked on a background thread; callers that touch shared state
+    /// must synchronize.
+    /// </param>
+    /// <param name="onErrorLine">Optional callback invoked with each stderr line, mirroring <paramref name="onOutputLine"/>.</param>
     Task<(int ExitCode, string Output, string Error)> RunDotnetCommandAsync(
         DirectoryInfo workingDirectory,
         IReadOnlyList<string> arguments,
         IReadOnlyDictionary<string, string>? environmentOverrides = null,
+        Action<string>? onOutputLine = null,
+        Action<string>? onErrorLine = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
