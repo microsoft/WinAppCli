@@ -132,7 +132,10 @@ Describe "Electron Sample" {
             (Join-Path $bindingsDir ".dynwinrt-managed") | Should -Exist
             # 50 is a generous lower bound for the full WinAppSDK scope; catches
             # "0 files generated" regressions without being brittle to SDK updates.
-            $jsCount = (Get-ChildItem -Path $bindingsDir -Filter '*.js' -ErrorAction SilentlyContinue).Count
+            # -Recurse because codegen emits namespace subdirectories (dynwinrt-codegen
+            # 0.1.0-preview.20 moved output from flat to windows/foundation/-style
+            # nesting); without it only the 3 root scaffolding files are counted.
+            $jsCount = (Get-ChildItem -Path $bindingsDir -Filter '*.js' -Recurse -ErrorAction SilentlyContinue).Count
             $jsCount | Should -BeGreaterThan 50 -Because "Default jsBindings (full WinAppSDK) should generate many JS files"
         }
 
