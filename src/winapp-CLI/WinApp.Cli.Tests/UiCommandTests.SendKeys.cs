@@ -278,7 +278,7 @@ public partial class UiCommandTests
         Assert.AreEqual(1, exitCode);
         Assert.AreEqual(0, _fakeKeyboard.SendCalls.Count, "no keys should be sent when the foreground guard refuses");
         Assert.AreEqual(1, _fakeForeground.Calls.Count);
-        StringAssert.Contains(TestAnsiConsole.Output, "refusing to --via send-input",
+        StringAssert.Contains(ConsoleStdErr.ToString(), "refusing to --via send-input",
             "the refusal must name the action the command was attempting");
     }
 

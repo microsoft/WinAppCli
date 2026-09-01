@@ -284,7 +284,7 @@ public partial class UiCommandTests
         Assert.AreEqual(0, _fakeMouse.DragCalls.Count, "no drag should be injected when the foreground guard refuses");
         Assert.AreEqual(0, _fakeMouse.MoveCursorCalls.Count, "the gate denies before the cursor is positioned");
         Assert.AreEqual(1, _fakeForeground.Calls.Count);
-        StringAssert.Contains(TestAnsiConsole.Output, "refusing to drag",
+        StringAssert.Contains(ConsoleStdErr.ToString(), "refusing to drag",
             "the refusal must name the action the command was attempting");
     }
 
@@ -414,7 +414,7 @@ public partial class UiCommandTests
         Assert.AreEqual(1, exitCode);
         Assert.AreEqual(0, _fakeMouse.ScrollWheelCalls.Count, "no wheel should be injected when the foreground guard refuses");
         Assert.AreEqual(1, _fakeForeground.Calls.Count);
-        StringAssert.Contains(TestAnsiConsole.Output, "refusing to scroll --wheel",
+        StringAssert.Contains(ConsoleStdErr.ToString(), "refusing to scroll --wheel",
             "the refusal must name the action the command was attempting");
     }
 

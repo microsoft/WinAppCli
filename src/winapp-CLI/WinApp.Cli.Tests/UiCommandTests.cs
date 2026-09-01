@@ -813,7 +813,7 @@ public partial class UiCommandTests : BaseCommandTests
         Assert.AreEqual(1, exitCode);
         Assert.AreEqual(0, _fakeMouse.ClickCalls.Count, "no click should be injected when the foreground guard refuses");
         Assert.AreEqual(1, _fakeForeground.Calls.Count);
-        StringAssert.Contains(TestAnsiConsole.Output, "refusing to click",
+        StringAssert.Contains(ConsoleStdErr.ToString(), "refusing to click",
             "the refusal must name the action the command was attempting");
     }
 
@@ -830,7 +830,7 @@ public partial class UiCommandTests : BaseCommandTests
         Assert.AreEqual(1, exitCode);
         Assert.AreEqual(0, _fakeMouse.HoverCalls.Count, "no hover should be injected when the foreground guard refuses");
         Assert.AreEqual(1, _fakeForeground.Calls.Count);
-        StringAssert.Contains(TestAnsiConsole.Output, "refusing to hover",
+        StringAssert.Contains(ConsoleStdErr.ToString(), "refusing to hover",
             "the refusal must name the action the command was attempting");
     }
 

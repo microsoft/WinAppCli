@@ -8,7 +8,16 @@ using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
 
+/// <summary>
+/// Real-recording coverage: drives the CLI recording service against a live in-process window,
+/// with frame capture and the video encoder swapped for deterministic fakes.
+/// </summary>
+/// <remarks>
+/// Not parallelized: these tests drive a live desktop window and mutate the process-wide encoder
+/// and frame-writer seams, so concurrent cases would interfere with each other.
+/// </remarks>
 [TestClass]
+[DoNotParallelize]
 public partial class RealRecordingTests
 {
     [TestMethod]
