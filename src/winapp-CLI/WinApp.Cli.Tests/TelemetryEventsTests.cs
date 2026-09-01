@@ -149,19 +149,6 @@ public sealed class TelemetryEventsTests
     }
 
     [TestMethod]
-    public void ProjectContextEvent_StaticLogEmitsMeasureEvent()
-    {
-        using var listener = new NameCapturingEventListener("Microsoft.Windows.WinAppDevCLI");
-
-        ProjectContextEvent.Log(
-            "restore",
-            ProjectContext.Unknown(ProjectTargetKind.Workspace));
-
-        var names = listener.WaitForEventNames(1);
-        CollectionAssert.Contains(names, "ProjectContext_Event");
-    }
-
-    [TestMethod]
     public void TimeTakenEvent_StoresDurationAndSanitizesName()
     {
         var telemetryEvent = new TimeTakenEvent("deploy-secret", 987);

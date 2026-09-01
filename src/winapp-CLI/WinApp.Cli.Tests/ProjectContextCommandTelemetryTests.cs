@@ -46,7 +46,7 @@ public sealed class ProjectContextCommandTelemetryTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task Init_EmitsSelectedProjectContextWithoutInventingPackaging()
+    public async Task Init_ExplicitDefaults_PreservesExactMarkerContext()
     {
         CreateWpfProject();
 
@@ -59,8 +59,52 @@ public sealed class ProjectContextCommandTelemetryTests : BaseCommandTests
         Assert.AreEqual("init", context.Command);
         Assert.AreEqual("dotnet", context.ProjectFamily);
         Assert.AreEqual("wpf", context.AppFramework);
-        Assert.AreEqual("selected-project", context.DetectionSource);
+        Assert.AreEqual("exact-marker", context.DetectionSource);
+        Assert.AreEqual("high", context.Confidence);
         Assert.AreEqual("unknown", context.Packaging);
+    }
+
+    [TestMethod]
+    public async Task Init_InteractiveDetection_EmitsSelectedProjectContext()
+    {
+        CreateWpfProject();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            GetRequiredService<InitCommand>(),
+            []);
+
+        Assert.AreEqual(0, exitCode);
+        var context = GetProjectContextEvent();
+        Assert.AreEqual("selected-project", context.DetectionSource);
+        Assert.AreEqual("high", context.Confidence);
+    }
+
+    [TestMethod]
+    public async Task Init_ExplicitNestedDirectory_PreservesAncestorConfidence()
+    {
+        CreateWpfProject();
+        var nestedDirectory = Directory.CreateDirectory(
+            Path.Join(_tempDirectory.FullName, "bin", "Debug"));
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            GetRequiredService<InitCommand>(),
+            [nestedDirectory.FullName, "--use-defaults"]);
+
+        Assert.AreEqual(0, exitCode);
+        var context = GetProjectContextEvent();
+        Assert.AreEqual("ancestor-marker", context.DetectionSource);
+        Assert.AreEqual("medium", context.Confidence);
+    }
+
+    [TestMethod]
+    public void EnabledTelemetry_EmitsProjectContextAtMeasureLevel()
+    {
+        ProjectContextEvent.Log(
+            "restore",
+            ProjectContext.Unknown(ProjectTargetKind.Workspace));
+
+        Assert.AreEqual("ProjectContext_Event", _telemetry.EventNames.Single());
+        Assert.AreEqual(LogLevel.Measure, _telemetry.Levels.Single());
     }
 
     [TestMethod]
@@ -184,6 +228,10 @@ public sealed class ProjectContextCommandTelemetryTests : BaseCommandTests
     {
         public List<EventBase> Events { get; } = [];
 
+        public List<string> EventNames { get; } = [];
+
+        public List<LogLevel> Levels { get; } = [];
+
         public bool IsTelemetryOn { get; set; } = true;
 
         public bool IsDiagnosticTelemetryOn { get; set; }
@@ -212,6 +260,8 @@ public sealed class ProjectContextCommandTelemetryTests : BaseCommandTests
             where T : EventBase
         {
             Events.Add(data);
+            EventNames.Add(eventName);
+            Levels.Add(level);
         }
 
         public void LogError<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] T>(

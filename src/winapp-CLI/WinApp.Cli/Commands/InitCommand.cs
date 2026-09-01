@@ -210,6 +210,7 @@ internal class InitCommand : Command, IShortDescription
             }
 
             DirectoryInfo? selectedDirectory;
+            var detectedProjectSelected = false;
 
             if (baseDirectoryExplicit)
             {
@@ -230,8 +231,10 @@ internal class InitCommand : Command, IShortDescription
             else
             {
                 // No directory specified: search for compatible projects
-                selectedDirectory = await DetectAndSelectProjectAsync(
+                var selection = await DetectAndSelectProjectAsync(
                     baseDirectory, cancellationToken);
+                selectedDirectory = selection.Directory;
+                detectedProjectSelected = selection.DetectedProjectSelected;
             }
 
             if (selectedDirectory == null)
@@ -245,7 +248,7 @@ internal class InitCommand : Command, IShortDescription
                 var projectContext = projectContextDetector.DetectDirectory(
                     selectedDirectory,
                     ProjectTargetKind.Workspace);
-                if (projectContext.IsKnown)
+                if (detectedProjectSelected && projectContext.IsKnown)
                 {
                     projectContext = projectContext with
                     {
@@ -404,9 +407,10 @@ internal class InitCommand : Command, IShortDescription
         /// <summary>
         /// Detects compatible projects in the directory tree and prompts the user to select one.
         /// Only called when no directory argument was provided and --use-defaults is not set.
-        /// Returns the selected directory, or null if the user declines.
+        /// Returns the selected directory and whether it came from a detected project,
+        /// or a null directory if the user declines.
         /// </summary>
-        private async Task<DirectoryInfo?> DetectAndSelectProjectAsync(
+        private async Task<(DirectoryInfo? Directory, bool DetectedProjectSelected)> DetectAndSelectProjectAsync(
             DirectoryInfo searchRoot,
             CancellationToken cancellationToken)
         {
@@ -437,7 +441,7 @@ internal class InitCommand : Command, IShortDescription
             // Handle results based on count
             if (results.Count == 0)
             {
-                return await HandleNoProjectsFoundAsync(searchRoot, cancellationToken);
+                return (await HandleNoProjectsFoundAsync(searchRoot, cancellationToken), false);
             }
 
             // If the only result is at the search root, use it directly
@@ -445,12 +449,13 @@ internal class InitCommand : Command, IShortDescription
             {
                 logger.LogInformation("{Check} {TypeLabel} project detected ({FilePath})",
                     UiSymbols.Check, results[0].TypeLabel, results[0].DisplayFilePath);
-                return results[0].Directory;
+                return (results[0].Directory, true);
             }
 
             if (results.Count == 1)
             {
-                return await HandleSingleProjectAsync(results[0], cancellationToken);
+                var selected = await HandleSingleProjectAsync(results[0], cancellationToken);
+                return (selected, selected is not null);
             }
 
             return await HandleMultipleProjectsAsync(results, searchRoot, results.Count >= maxProjects, cancellationToken);
@@ -539,7 +544,7 @@ internal class InitCommand : Command, IShortDescription
             return project.Directory;
         }
 
-        private async Task<DirectoryInfo?> HandleMultipleProjectsAsync(
+        private async Task<(DirectoryInfo Directory, bool DetectedProjectSelected)> HandleMultipleProjectsAsync(
             IReadOnlyList<DetectedProject> projects,
             DirectoryInfo searchRoot,
             bool searchLimitReached,
@@ -572,12 +577,12 @@ internal class InitCommand : Command, IShortDescription
             if (!currentDirIsListed && selectedIndex == projects.Count)
             {
                 ansiConsole.MarkupLine("Which project would you like to initialize with winapp? [underline]Current directory (./)[/]");
-                return searchRoot;
+                return (searchRoot, false);
             }
 
             var selectedProject = projects[selectedIndex];
             ansiConsole.MarkupLineInterpolated($"Which project would you like to initialize with winapp? [underline]{selectedProject.TypeLabel} project ({selectedProject.DisplayFilePath})[/]");
-            return selectedProject.Directory;
+            return (selectedProject.Directory, true);
         }
     }
 }
