@@ -33,6 +33,12 @@ internal sealed partial class ProjectRunService(
         "PublishTrimmed",
         "PublishAot",
         "SelfContained",
+        "PublishProfile",
+        "PublishProfileName",
+        "PublishProfileFullPath",
+        "WebPublishProfileFile",
+        "PublishProfileImported",
+        "_PublishProfileRootFolder",
     ];
 
     /// <summary>

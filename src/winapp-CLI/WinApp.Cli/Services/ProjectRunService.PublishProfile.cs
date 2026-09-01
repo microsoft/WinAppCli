@@ -30,13 +30,46 @@ internal sealed partial class ProjectRunService
         string? csWinRTMetadataFolder,
         CancellationToken cancellationToken)
     {
-        var candidate = ResolvePublishProfileFallback(csproj, options);
-        if (string.IsNullOrWhiteSpace(candidate.PublishProfile)
-            || UserSpecifiesProperty(options.Properties, "SelfContained"))
+        if (!CanInferPublishProfile(options)
+            || !DeclaresPlatformDependentPublishProfile(csproj))
         {
             return options;
         }
 
+        var currentProperties = await TryEvaluatePublishProfilePropertiesAsync(
+            csproj,
+            options,
+            workingDirectory,
+            csWinRTMetadataFolder,
+            cancellationToken);
+
+        if (currentProperties is null
+            || !RequiresSelfContainedProfile(currentProperties)
+            || HasAuthoritativeProfileSelector(currentProperties))
+        {
+            return options;
+        }
+
+        var platform = FindArchPlatformToken(csproj, options.Architecture) ?? options.Architecture;
+        var platformProperties = await TryEvaluatePublishProfilePropertiesAsync(
+            csproj,
+            options with { Platform = platform },
+            workingDirectory,
+            csWinRTMetadataFolder,
+            cancellationToken);
+
+        return platformProperties is null
+            ? options
+            : ResolvePublishProfileFallback(csproj, options, currentProperties, platformProperties);
+    }
+
+    private async Task<IReadOnlyDictionary<string, string>?> TryEvaluatePublishProfilePropertiesAsync(
+        FileInfo csproj,
+        ProjectRunOptions options,
+        DirectoryInfo workingDirectory,
+        string? csWinRTMetadataFolder,
+        CancellationToken cancellationToken)
+    {
         var arguments = BuildEvaluateArguments(csproj, options, csWinRTMetadataFolder);
         logger.LogDebug("{UISymbol} dotnet {Arguments}", UiSymbols.Note, RedactSecretsForDisplay(arguments));
 
@@ -58,14 +91,14 @@ internal sealed partial class ProjectRunService
             logger.LogDebug(
                 "{UISymbol} Could not start publish-profile requirement evaluation; keeping RID-only inputs.",
                 UiSymbols.Note);
-            return options;
+            return null;
         }
         catch (InvalidOperationException)
         {
             logger.LogDebug(
                 "{UISymbol} Could not evaluate whether an architecture-specific publish profile is required; keeping RID-only inputs.",
                 UiSymbols.Note);
-            return options;
+            return null;
         }
 
         if (exitCode != 0)
@@ -74,136 +107,165 @@ internal sealed partial class ProjectRunService
                 "{UISymbol} Publish-profile requirement evaluation exited {ExitCode}; keeping RID-only inputs.",
                 UiSymbols.Note,
                 exitCode);
-            return options;
+            return null;
         }
 
-        var properties = MsBuildPropertyReader.Parse(output, RequestedProperties);
-        var publishTrimmed = IsTrue(GetProp(properties, "PublishTrimmed"));
-        var publishAot = IsTrue(GetProp(properties, "PublishAot"));
-        var selfContained = IsTrue(GetProp(properties, "SelfContained"));
-
-        return publishTrimmed && !publishAot && !selfContained
-            ? candidate
-            : options;
+        return MsBuildPropertyReader.Parse(output, RequestedProperties);
     }
 
-    internal static ProjectRunOptions ResolvePublishProfileFallback(FileInfo csproj, ProjectRunOptions options)
+    internal static ProjectRunOptions ResolvePublishProfileFallback(
+        FileInfo csproj,
+        ProjectRunOptions options,
+        IReadOnlyDictionary<string, string> currentProperties,
+        IReadOnlyDictionary<string, string> platformProperties)
     {
-        if (!string.IsNullOrWhiteSpace(options.PublishProfile)
-            || !string.IsNullOrWhiteSpace(options.Platform)
-            || UserSpecifiesProperty(options.Properties, "Platform")
-            || UserSpecifiesProperty(options.Properties, "PublishProfile")
-            || UserSpecifiesProperty(options.Properties, "PublishProfileFullPath"))
+        if (!CanInferPublishProfile(options)
+            || !RequiresSelfContainedProfile(currentProperties)
+            || HasAuthoritativeProfileSelector(currentProperties)
+            || HasAuthoritativeProfileSelector(platformProperties))
         {
             return options;
         }
 
-        var declarations = ReadPlatformDependentPublishProfiles(csproj);
-        if (declarations.Count == 0)
+        var currentProfile = GetProp(currentProperties, "PublishProfile");
+        var candidateProfile = GetProp(platformProperties, "PublishProfile");
+        if (string.IsNullOrWhiteSpace(candidateProfile)
+            || string.Equals(currentProfile, candidateProfile, StringComparison.OrdinalIgnoreCase)
+            || !IsTrue(GetProp(platformProperties, "PublishProfileImported"))
+            || !IsTrue(GetProp(platformProperties, "SelfContained"))
+            || IsTrue(GetProp(platformProperties, "PublishAot"))
+            || !TryGetImportedPublishProfileFile(csproj, platformProperties, out var profile)
+            || !PublishProfileTargetsArchitecture(profile, options.Architecture))
         {
             return options;
         }
 
-        var platformToken = FindArchPlatformToken(csproj, options.Architecture) ?? options.Architecture;
-        var matches = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var declaration in declarations)
+        var profileToken = Path.GetFileName(profile.FullName);
+        if (ProjectReferenceClosureContainsPublishProfile(csproj, profileToken))
         {
-            var expanded = ExpandPublishProfile(declaration, platformToken, options.Configuration);
-            if (expanded is null
-                || !TryResolvePublishProfileFile(csproj, expanded, out var profile)
-                || !PublishProfileTargetsArchitecture(profile, options.Architecture)
-                || !PublishProfileEnablesSelfContained(profile)
-                || ProjectReferenceClosureContainsPublishProfile(csproj, expanded))
-            {
-                continue;
-            }
-
-            matches.Add(expanded);
+            return options;
         }
 
-        return matches.Count == 1
-            ? options with { PublishProfile = matches.Single() }
-            : options;
+        return options with { PublishProfile = profileToken };
     }
 
-    private static List<string> ReadPlatformDependentPublishProfiles(FileInfo project)
+    private static bool CanInferPublishProfile(ProjectRunOptions options) =>
+        string.IsNullOrWhiteSpace(options.PublishProfile)
+        && string.IsNullOrWhiteSpace(options.Platform)
+        && !UserSpecifiesProperty(options.Properties, "Platform")
+        && !UserSpecifiesProperty(options.Properties, "SelfContained")
+        && !UserSpecifiesProperty(options.Properties, "PublishProfile")
+        && !UserSpecifiesProperty(options.Properties, "PublishProfileName")
+        && !UserSpecifiesProperty(options.Properties, "PublishProfileFullPath")
+        && !UserSpecifiesProperty(options.Properties, "WebPublishProfileFile");
+
+    private static bool DeclaresPlatformDependentPublishProfile(FileInfo project)
     {
-        XDocument document;
         try
         {
-            document = XDocument.Load(project.FullName);
+            return XDocument
+                .Load(project.FullName)
+                .Descendants()
+                .Any(element =>
+                    element.Name.LocalName == "PublishProfile"
+                    && element.Value.Contains("$(Platform", StringComparison.OrdinalIgnoreCase));
         }
         catch (IOException)
         {
-            return [];
+            return false;
         }
         catch (UnauthorizedAccessException)
         {
-            return [];
+            return false;
         }
         catch (XmlException)
         {
-            return [];
+            return false;
+        }
+    }
+
+    private static bool RequiresSelfContainedProfile(IReadOnlyDictionary<string, string> properties) =>
+        IsTrue(GetProp(properties, "PublishTrimmed"))
+        && !IsTrue(GetProp(properties, "PublishAot"))
+        && !IsTrue(GetProp(properties, "SelfContained"));
+
+    private static bool HasAuthoritativeProfileSelector(IReadOnlyDictionary<string, string> properties)
+    {
+        var publishProfile = GetProp(properties, "PublishProfile");
+        var publishProfileName = GetProp(properties, "PublishProfileName");
+        var publishProfileFullPath = GetProp(properties, "PublishProfileFullPath");
+        var webPublishProfileFile = GetProp(properties, "WebPublishProfileFile");
+
+        if (string.IsNullOrWhiteSpace(publishProfile))
+        {
+            return !string.IsNullOrWhiteSpace(publishProfileName)
+                || !string.IsNullOrWhiteSpace(publishProfileFullPath)
+                || !string.IsNullOrWhiteSpace(webPublishProfileFile);
         }
 
-        return document
-            .Descendants()
-            .Where(element => element.Name.LocalName == "PublishProfile")
-            .Select(element => element.Value.Trim())
-            .Where(value => value.Contains("$(Platform", StringComparison.OrdinalIgnoreCase))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        try
+        {
+            var expectedName = Path.GetFileNameWithoutExtension(publishProfile);
+            if (!string.Equals(publishProfileName, expectedName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var profileRoot = GetProp(properties, "_PublishProfileRootFolder");
+            if (string.IsNullOrWhiteSpace(profileRoot))
+            {
+                return !string.IsNullOrWhiteSpace(publishProfileFullPath)
+                    || !string.IsNullOrWhiteSpace(webPublishProfileFile);
+            }
+
+            var expectedFullPath = Path.GetFullPath(Path.Join(profileRoot, expectedName + ".pubxml"));
+            if (!PathsEqual(publishProfileFullPath, expectedFullPath))
+            {
+                return true;
+            }
+
+            return !string.IsNullOrWhiteSpace(webPublishProfileFile)
+                && !PathsEqual(webPublishProfileFile, publishProfileFullPath);
+        }
+        catch (ArgumentException)
+        {
+            return true;
+        }
+        catch (NotSupportedException)
+        {
+            return true;
+        }
     }
 
-    private static string? ExpandPublishProfile(string value, string platform, string configuration)
-    {
-        var expanded = ReplacePropertyTransforms(value, "Platform", platform);
-        expanded = ReplacePropertyTransforms(expanded, "Configuration", configuration);
-
-        return expanded.Contains("$(", StringComparison.Ordinal)
-            ? null
-            : expanded.Trim();
-    }
-
-    private static string ReplacePropertyTransforms(string value, string property, string replacement)
-    {
-        var expanded = value
-            .Replace($"$({property}.ToLowerInvariant())", replacement.ToLowerInvariant(), StringComparison.OrdinalIgnoreCase)
-            .Replace($"$({property}.ToLower())", replacement.ToLowerInvariant(), StringComparison.OrdinalIgnoreCase)
-            .Replace($"$({property}.ToUpperInvariant())", replacement.ToUpperInvariant(), StringComparison.OrdinalIgnoreCase)
-            .Replace($"$({property}.ToUpper())", replacement.ToUpperInvariant(), StringComparison.OrdinalIgnoreCase);
-
-        return expanded.Replace($"$({property})", replacement, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool TryResolvePublishProfileFile(FileInfo project, string publishProfile, out FileInfo profile)
+    private static bool TryGetImportedPublishProfileFile(
+        FileInfo project,
+        IReadOnlyDictionary<string, string> properties,
+        out FileInfo profile)
     {
         profile = null!;
         var projectDirectory = project.Directory;
-        if (projectDirectory is null || string.IsNullOrWhiteSpace(publishProfile))
+        var publishProfileFullPath = GetProp(properties, "PublishProfileFullPath");
+        var webPublishProfileFile = GetProp(properties, "WebPublishProfileFile");
+        if (projectDirectory is null
+            || string.IsNullOrWhiteSpace(publishProfileFullPath)
+            || !PathsEqual(publishProfileFullPath, webPublishProfileFile))
         {
             return false;
         }
 
         try
         {
-            // Microsoft.NET.Sdk.ImportPublishProfile.targets discards directory components from
-            // $(PublishProfile) and resolves the basename under Properties\PublishProfiles.
-            var profileName = Path.GetFileNameWithoutExtension(publishProfile);
-            if (string.IsNullOrWhiteSpace(profileName))
+            var fullPath = Path.GetFullPath(publishProfileFullPath);
+            var projectRoot = Path.GetFullPath(projectDirectory.FullName)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                + Path.DirectorySeparatorChar;
+            if (!fullPath.StartsWith(projectRoot, StringComparison.OrdinalIgnoreCase))
             {
                 return false;
             }
 
-            var candidate = new FileInfo(Path.Join(
-                projectDirectory.FullName,
-                "Properties",
-                "PublishProfiles",
-                profileName + ".pubxml"));
-
-            profile = candidate;
-            return candidate.Exists;
+            profile = new FileInfo(fullPath);
+            return profile.Exists;
         }
         catch (ArgumentException)
         {
@@ -251,30 +313,6 @@ internal sealed partial class ProjectRunService
                 value.Equals(architecture, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static bool PublishProfileEnablesSelfContained(FileInfo profile)
-    {
-        try
-        {
-            var document = XDocument.Load(profile.FullName);
-            return document
-                .Descendants()
-                .Where(element => element.Name.LocalName == "SelfContained")
-                .Any(element => IsTrue(element.Value.Trim()));
-        }
-        catch (IOException)
-        {
-            return false;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return false;
-        }
-        catch (XmlException)
-        {
-            return false;
-        }
-    }
-
     private static bool ProjectReferenceClosureContainsPublishProfile(
         FileInfo start,
         string publishProfile)
@@ -293,7 +331,18 @@ internal sealed partial class ProjectRunService
                     return true;
                 }
 
-                if (TryResolvePublishProfileFile(reference, publishProfile, out _))
+                var referenceDirectory = reference.Directory;
+                if (referenceDirectory is null)
+                {
+                    return true;
+                }
+
+                var candidate = new FileInfo(Path.Join(
+                    referenceDirectory.FullName,
+                    "Properties",
+                    "PublishProfiles",
+                    publishProfile));
+                if (candidate.Exists)
                 {
                     return true;
                 }
@@ -315,4 +364,28 @@ internal sealed partial class ProjectRunService
 
     private static bool IsTrue(string value) =>
         value.Equals("true", StringComparison.OrdinalIgnoreCase);
+
+    private static bool PathsEqual(string left, string right)
+    {
+        if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
+        {
+            return false;
+        }
+
+        try
+        {
+            return string.Equals(
+                Path.GetFullPath(left),
+                Path.GetFullPath(right),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (NotSupportedException)
+        {
+            return false;
+        }
+    }
 }
