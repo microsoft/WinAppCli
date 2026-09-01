@@ -1792,6 +1792,103 @@ public class DotNetServiceTests : BaseCommandTests
         }
     }
 
+    [TestMethod]
+    public async Task RunDotnetProcessAsync_StreamsStdoutAndStderrLive_WhileTaskStillPending()
+    {
+        // Guards the live-streaming contract that FakeDotNetService structurally cannot: the fake
+        // replays every line synchronously *after* the run has produced its result, so a regression
+        // where the real OutputDataReceived/ErrorDataReceived callbacks stop firing live — or stderr
+        // stops being forwarded — would leave every fake-backed test (including the NewCommand verbose
+        // scaffold tests) green. This drives a real child that writes one stdout line and one stderr
+        // line, flushes, then blocks reading stdin. Both callbacks MUST therefore fire while the run
+        // task is still pending, and the exact streamed text MUST also survive in the returned buffers.
+        const string stdoutMarker = "WINAPP_STREAM_STDOUT_a1b2c3";
+        const string stderrMarker = "WINAPP_STREAM_STDERR_a1b2c3";
+
+        var script =
+            $"[Console]::Out.WriteLine('{stdoutMarker}'); " +
+            $"[Console]::Error.WriteLine('{stderrMarker}'); " +
+            "[Console]::Out.Flush(); [Console]::Error.Flush(); " +
+            "[void][Console]::In.ReadLine()";
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "powershell.exe",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            RedirectStandardInput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        startInfo.ArgumentList.Add("-NoProfile");
+        startInfo.ArgumentList.Add("-NonInteractive");
+        startInfo.ArgumentList.Add("-Command");
+        startInfo.ArgumentList.Add(script);
+
+        var stdoutTcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stderrTcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Process? child = null;
+        int? childPid = null;
+
+        var runTask = DotNetService.RunDotnetProcessAsync(
+            startInfo,
+            TestContext.CancellationToken,
+            onProcessStarted: p =>
+            {
+                child = p;
+                childPid = p.Id;
+            },
+            onOutputLine: line =>
+            {
+                if (line.Contains(stdoutMarker, StringComparison.Ordinal))
+                {
+                    stdoutTcs.TrySetResult(line);
+                }
+            },
+            onErrorLine: line =>
+            {
+                if (line.Contains(stderrMarker, StringComparison.Ordinal))
+                {
+                    stderrTcs.TrySetResult(line);
+                }
+            });
+
+        try
+        {
+            // Both callbacks must fire from the live pipe readers...
+            var streamedStdout = await stdoutTcs.Task.WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
+            var streamedStderr = await stderrTcs.Task.WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
+
+            // ...*before* the run completes. The child is blocked reading stdin, so the run task cannot
+            // have finished. If it had, the callbacks would be a post-completion replay (the fake's
+            // behavior) rather than the live streaming this feature promises.
+            Assert.IsFalse(
+                runTask.IsCompleted,
+                "Callbacks must fire while the run task is still pending (live streaming), not after it completes.");
+
+            // Unblock the child so it exits cleanly (write a line, then close stdin to guarantee EOF).
+            Assert.IsNotNull(child, "onProcessStarted must have supplied the child process.");
+            await child!.StandardInput.WriteLineAsync();
+            child.StandardInput.Close();
+
+            var (exitCode, output, error) = await runTask.WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
+
+            Assert.AreEqual(0, exitCode, $"Child should exit 0. stderr was: {error}");
+            StringAssert.Contains(
+                output,
+                streamedStdout,
+                "The exact stdout line streamed live must also remain in the returned Output buffer.");
+            StringAssert.Contains(
+                error,
+                streamedStderr,
+                "The exact stderr line streamed live must also remain in the returned Error buffer.");
+        }
+        finally
+        {
+            KillProcessTreeIfRunning(childPid);
+        }
+    }
+
     /// <summary>
     /// Builds the root script for the tree-kill test: start <paramref name="childExe"/>, publish its PID
     /// to <paramref name="pidFile"/>, then block until it exits.
