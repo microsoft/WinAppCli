@@ -17,8 +17,9 @@ namespace Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation;
 /// <item><see cref="KeyTransport.PostMessage"/> posts to a window's message queue and cannot trigger
 /// <c>WH_KEYBOARD_LL</c> global hotkeys (low-level hooks tap upstream of any HWND queue). Apps that read
 /// raw key state via <c>GetAsyncKeyState</c> may not observe held modifiers.</item>
-/// <item><see cref="KeyTransport.SendInput"/> is blocked by UIPI when injecting from an elevated process
-/// into a lower-integrity (e.g., AppContainer / AppX) target.</item>
+/// <item><see cref="KeyTransport.SendInput"/> is subject to UIPI: input injected from a lower-integrity
+/// process does not reach a higher-integrity window, so a normal process cannot drive an elevated app.
+/// Run at an integrity level at least as high as the target.</item>
 /// </list>
 /// </remarks>
 public static class KeyboardInput

@@ -44,6 +44,14 @@ public sealed partial class UiRecordingService(
     /// </remarks>
     public async Task<RecordCaptureResult> RecordAsync(UiTarget uiTarget, string? elementId, RecordOptions options, CancellationToken ct, Action<bool>? onRecordingStarted = null)
     {
+        // Validate before touching a window or creating output. The CLI rejects these at the command
+        // layer, but that guard does not travel with the package: a direct library caller passing
+        // Fps = 0 divided by zero computing the frame interval, and a negative DurationSec recorded
+        // without end.
+        ArgumentOutOfRangeException.ThrowIfNegative(options.DurationSec, nameof(options.DurationSec));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(options.Fps, nameof(options.Fps));
+        ArgumentOutOfRangeException.ThrowIfNegative(options.MaxEdge, nameof(options.MaxEdge));
+
         _logger.LogDebug("Recording process {Pid} (duration={Dur}s, fps={Fps}, maxEdge={MaxEdge}, captureScreen={Screen})",
             uiTarget.ProcessId, options.DurationSec, options.Fps, options.MaxEdge, options.CaptureScreen);
 

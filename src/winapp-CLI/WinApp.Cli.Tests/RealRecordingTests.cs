@@ -36,6 +36,35 @@ public partial class RealRecordingTests
     }
 
     [TestMethod]
+    [DataRow(-1, 15, 0, nameof(RecordOptions.DurationSec))]
+    [DataRow(10, 0, 0, nameof(RecordOptions.Fps))]
+    [DataRow(10, -1, 0, nameof(RecordOptions.Fps))]
+    [DataRow(10, 15, -1, nameof(RecordOptions.MaxEdge))]
+    public async Task RecordAsync_InvalidOptions_ThrowsBeforeTouchingTheWindow(
+        int durationSec, int fps, int maxEdge, string expectedParameter)
+    {
+        // Direct library calls skip the CLI's command-layer validation. Without this guard fps 0
+        // divided by zero when computing the frame interval, and a negative duration recorded
+        // without end.
+        using var fx = new UiaTestFixture();
+        var capture = new FakeWindowCapture();
+        var recording = NewRecordingService(NewAutomation(), capture);
+        var output = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"), "invalid.mp4");
+
+        var exception = await Assert.ThrowsExactlyAsync<ArgumentOutOfRangeException>(
+            () => recording.RecordAsync(SessionFor(fx), null, new RecordOptions
+            {
+                OutputPath = output,
+                DurationSec = durationSec,
+                Fps = fps,
+                MaxEdge = maxEdge,
+            }, CancellationToken.None));
+
+        StringAssert.Contains(exception.ParamName, expectedParameter);
+        Assert.IsFalse(File.Exists(output), "Validation must run before any output file is created.");
+    }
+
+    [TestMethod]
     public async Task RecordAsync_WgcSeams_EncodesTimedFramesAndReportsResult()
     {
         using var fx = new UiaTestFixture();

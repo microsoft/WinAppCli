@@ -8,10 +8,17 @@ namespace Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation;
 /// <summary>Transport used to deliver synthetic keyboard input.</summary>
 public enum KeyTransport
 {
-    /// <summary>Posts WM_KEYDOWN/WM_KEYUP/WM_CHAR to a specific window's message queue. Bypasses UIPI.</summary>
+    /// <summary>
+    /// Posts WM_KEYDOWN/WM_KEYUP/WM_CHAR straight to a specific window's message queue, bypassing the
+    /// global input stream — so it never triggers low-level keyboard hooks or global hotkeys. Still
+    /// subject to UIPI: a lower-integrity process cannot post to a higher-integrity window.
+    /// </summary>
     PostMessage,
 
-    /// <summary>Injects OS-wide input via SendInput. Hits low-level hooks; subject to UIPI.</summary>
+    /// <summary>
+    /// Injects OS-wide input via SendInput, so low-level hooks and global hotkeys see it. Subject to
+    /// UIPI: input from a lower-integrity process does not reach a higher-integrity window.
+    /// </summary>
     SendInput,
 }
 
