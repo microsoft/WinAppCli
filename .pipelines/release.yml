@@ -56,10 +56,8 @@ extends:
   template: v1/1ES.Official.PipelineTemplate.yml@1esPipelines
   parameters:
     settings:
-      # CFSClean sinkholes the public package feeds, so this pipeline restores only from
-      # the internal feed in release-nuget.config. Pushing to nuget.org cannot run under
-      # CFSClean, so it lives in the separate .pipelines/release-nuget.yml pipeline.
-      networkIsolationPolicy: Permissive,CFSClean
+      # CFSClean blocks NuGet endpoints, including publishing to api.nuget.org.
+      networkIsolationPolicy: Permissive,CFSClean2
     sdl:
       policheck:
         enabled: true
@@ -449,6 +447,34 @@ extends:
                 serviceendpointurl: 'https://api.esrp.microsoft.com'
                 mainpublisher: 'ESRPRELPACMAN'
                 domaintenantid: ${{ parameters.signingIdentity.tenantId }}
+
+    - ${{ if eq(parameters.DoEsrp, 'true') }}:
+      - stage: Release_NuGet
+        displayName: Publish the NuGet Release
+        dependsOn: Release_GitHub
+        jobs:
+        - job: create_nuget_release
+          pool:
+            name: Azure-Pipelines-1ESPT-ExDShared
+            image: windows-latest
+            os: windows
+            hostArchitecture: amd64
+          displayName: NuGet Release
+          templateContext:
+            type: releaseJob
+            isProduction: true
+            inputs:
+            - input: pipelineArtifact
+              artifactName: nuget-packages
+              targetPath: $(Pipeline.Workspace)/nuget-packages
+          steps:
+            - task: 1ES.PublishNuget@1
+              displayName: 'NuGet push to nuget.org'
+              inputs:
+                packagesToPush: '$(Pipeline.Workspace)/nuget-packages/*.nupkg'
+                packageParentPath: '$(Pipeline.Workspace)/nuget-packages'
+                nuGetFeedType: external
+                publishFeedCredentials: 'NuGet-WinAppCLI'
 
     - stage: Release_WinGet
       displayName: Create WinGet Release
