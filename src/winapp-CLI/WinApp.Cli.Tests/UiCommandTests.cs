@@ -14,7 +14,7 @@ public partial class UiCommandTests : BaseCommandTests
 {
     private FakeUiAutomationService _fakeUia = null!;
     private FakeUiRecordingService _fakeRecording = null!;
-    private FakeUiSessionService _fakeSession = null!;
+    private FakeUiTargetResolver _fakeTargetResolver = null!;
     private FakeMouseInput _fakeMouse = null!;
     private FakeKeyboardInput _fakeKeyboard = null!;
     private FakeForegroundGuard _fakeForeground = null!;
@@ -39,7 +39,7 @@ public partial class UiCommandTests : BaseCommandTests
     {
         _fakeUia = new FakeUiAutomationService();
         _fakeRecording = new FakeUiRecordingService();
-        _fakeSession = new FakeUiSessionService();
+        _fakeTargetResolver = new FakeUiTargetResolver();
         _fakeMouse = new FakeMouseInput();
         _fakeKeyboard = new FakeKeyboardInput();
         _fakeForeground = new FakeForegroundGuard();
@@ -50,7 +50,7 @@ public partial class UiCommandTests : BaseCommandTests
         return services
             .AddSingleton<IUiAutomation>(_fakeUia)
             .AddSingleton<IUiRecordingService>(_fakeRecording)
-            .AddSingleton<IUiTargetResolver>(_fakeSession)
+            .AddSingleton<IUiTargetResolver>(_fakeTargetResolver)
             .AddSingleton<IMouseInput>(_fakeMouse)
             .AddSingleton<IKeyboardInput>(_fakeKeyboard)
             .AddSingleton<IForegroundGuard>(_fakeForeground)

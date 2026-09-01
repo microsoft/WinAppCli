@@ -29,34 +29,34 @@ internal sealed partial class UiAutomationService
     /// foreground policy transitions, WGC cancellation timing, or UIA elements without native handles
     /// that cannot be forced safely on the shared desktop.
     /// </remarks>
-    public async Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiTarget session, string? elementId, bool captureScreen, bool focus, CancellationToken ct)
+    public async Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiTarget uiTarget, string? elementId, bool captureScreen, bool focus, CancellationToken ct)
     {
-        _logger.LogDebug("Taking screenshot of process {Pid} (captureScreen={CaptureScreen}, focus={Focus})", session.ProcessId, captureScreen, focus);
+        _logger.LogDebug("Taking screenshot of process {Pid} (captureScreen={CaptureScreen}, focus={Focus})", uiTarget.ProcessId, captureScreen, focus);
 
-        var root = GetRootElement(session);
+        var root = GetRootElement(uiTarget);
         if (root is null)
         {
-            throw new InvalidOperationException($"No UIA window found for {session.ProcessName} (PID {session.ProcessId}).");
+            throw new InvalidOperationException($"No UIA window found for {uiTarget.ProcessName} (PID {uiTarget.ProcessId}).");
         }
 
         // Get the actual window title from UIA (not session cache, which may be stale)
         var rootName = SafeGetBstr(() => root.get_CurrentName());
         if (rootName is not null)
         {
-            session.WindowTitle = rootName;
+            uiTarget.WindowTitle = rootName;
         }
 
         var hwnd = root.get_CurrentNativeWindowHandle();
-        if (hwnd.IsNull && session.WindowHandle != 0)
+        if (hwnd.IsNull && uiTarget.WindowHandle != 0)
         {
             // UIA element may lack a native handle (e.g. Electron content pane),
             // but the session already has a validated HWND from -w flag or window enumeration.
-            hwnd = new global::Windows.Win32.Foundation.HWND((nint)session.WindowHandle);
-            _logger.LogDebug("UIA element has no native handle; using session HWND {Hwnd}", session.WindowHandle);
+            hwnd = new global::Windows.Win32.Foundation.HWND((nint)uiTarget.WindowHandle);
+            _logger.LogDebug("UIA element has no native handle; using target HWND {Hwnd}", uiTarget.WindowHandle);
         }
         if (hwnd.IsNull)
         {
-            throw new InvalidOperationException($"No native window handle for {session.ProcessName}. Is the window visible?");
+            throw new InvalidOperationException($"No native window handle for {uiTarget.ProcessName}. Is the window visible?");
         }
 
         // Check if window is minimized
@@ -128,7 +128,7 @@ internal sealed partial class UiAutomationService
         // If a selector was provided, crop to the element's bounding rectangle
         if (!string.IsNullOrEmpty(elementId))
         {
-            var cropped = CropToElement(pixelData, width, height, elementId, session, root, cropOriginLeft, cropOriginTop);
+            var cropped = CropToElement(pixelData, width, height, elementId, uiTarget, root, cropOriginLeft, cropOriginTop);
             if (cropped is not null)
             {
                 return cropped.Value;
@@ -384,7 +384,7 @@ internal sealed partial class UiAutomationService
     /// </remarks>
     private (byte[] Pixels, int Width, int Height)? CropToElement(
         byte[] fullPixels, int fullWidth, int fullHeight,
-        string selector, UiTarget session, IUIAutomationElement root,
+        string selector, UiTarget uiTarget, IUIAutomationElement root,
         int windowLeft, int windowTop)
     {
         // Find the element — try slug first, then legacy selector
@@ -396,12 +396,12 @@ internal sealed partial class UiAutomationService
             var slugResult = FindElementBySlug(selector, root);
             if (slugResult is not null)
             {
-                target = ResolveComElement(session, slugResult);
+                target = ResolveComElement(uiTarget, slugResult);
             }
         }
         else
         {
-            var parsed = _selectorService.Parse(selector);
+            var parsed = _selectorParser.Parse(selector);
             var condition = BuildCondition(parsed);
             if (condition is not null)
             {

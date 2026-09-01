@@ -43,7 +43,7 @@ public partial class UiCommandTests
     public async Task SendKeys_ViaSendInput_SetsTransport()
     {
         // send-input now requires a resolvable target window (M9); give the session one.
-        _fakeSession.SessionResult.WindowHandle = 4242;
+        _fakeTargetResolver.TargetResult.WindowHandle = 4242;
         var command = GetRequiredService<UiSendKeysCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["enter", "-a", "TestApp", "--via", "send-input"]);
         Assert.AreEqual(0, exitCode);
@@ -138,7 +138,7 @@ public partial class UiCommandTests
     {
         // send-input is OS-wide, so a system-reserved combo (win+l) acts on the shell, not just the
         // target — the command must refuse it and never reach the keyboard transport.
-        _fakeSession.SessionResult.WindowHandle = 4242; // a resolvable target so we reach the system-combo guard (M9)
+        _fakeTargetResolver.TargetResult.WindowHandle = 4242; // a resolvable target so we reach the system-combo guard (M9)
         var command = GetRequiredService<UiSendKeysCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             ["win+l", "-a", "TestApp", "--via", "send-input", "--json"]);
@@ -204,7 +204,7 @@ public partial class UiCommandTests
     {
         // With --verbatim, "win+l" is literal text (a TextInput), not a chord — the system-combo guard
         // only inspects key chords, so the text is typed rather than refused even via send-input.
-        _fakeSession.SessionResult.WindowHandle = 4242; // a resolvable target for send-input (M9)
+        _fakeTargetResolver.TargetResult.WindowHandle = 4242; // a resolvable target for send-input (M9)
         var command = GetRequiredService<UiSendKeysCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             ["win+l", "-a", "TestApp", "--via", "send-input", "--verbatim", "--json"]);
@@ -268,7 +268,7 @@ public partial class UiCommandTests
     {
         // send-input verifies the foreground before injecting OS-wide; if the guard refuses (e.g. a locked
         // desktop or a wrong-window foreground), no keys are sent (M5).
-        _fakeSession.SessionResult.WindowHandle = 4242; // resolvable target → reach the foreground gate
+        _fakeTargetResolver.TargetResult.WindowHandle = 4242; // resolvable target → reach the foreground gate
         _fakeForeground.Allow = false;
         _fakeForeground.DenyReason = ForegroundCheck.ForegroundNotTarget;
 
@@ -291,7 +291,7 @@ public partial class UiCommandTests
         // that with a ForegroundLostException; the command must map it to the SAME foreground_not_target
         // contract as the pre-send gate (not a generic error) so callers get a precise, actionable code.
         // The command writes the JSON error straight to Console.Error, so capture that stream directly.
-        _fakeSession.SessionResult.WindowHandle = 4242; // resolvable target → reach the send path
+        _fakeTargetResolver.TargetResult.WindowHandle = 4242; // resolvable target → reach the send path
         _fakeKeyboard.SendException = new ForegroundLostException("focus drifted mid-injection");
 
         var command = GetRequiredService<UiSendKeysCommand>();
@@ -318,7 +318,7 @@ public partial class UiCommandTests
         // M1 (issue #657 follow-up): a literal-text payload larger than one chunk is auto-throttled (paced)
         // so it lands reliably, which blocks synchronously for a while. The command surfaces an advisory that
         // the throttling is intentional and that set-value is faster for bulk text.
-        _fakeSession.SessionResult.WindowHandle = 4242;
+        _fakeTargetResolver.TargetResult.WindowHandle = 4242;
         var longText = new string('a', KeyboardInput.DefaultTextChunkChars + 1);
 
         var command = GetRequiredService<UiSendKeysCommand>();
@@ -338,7 +338,7 @@ public partial class UiCommandTests
         // M1 boundary: a payload of exactly one chunk is a single SendInput call with no added pacing, so the
         // throttle advisory must NOT fire — it is scoped to payloads that actually get chunked, to avoid
         // warning on every short send-input.
-        _fakeSession.SessionResult.WindowHandle = 4242;
+        _fakeTargetResolver.TargetResult.WindowHandle = 4242;
         var boundaryText = new string('a', KeyboardInput.DefaultTextChunkChars);
 
         var command = GetRequiredService<UiSendKeysCommand>();
@@ -381,7 +381,7 @@ public partial class UiCommandTests
     {
         // A COMException surfacing from session/element resolution is a stale-element signal: the command
         // maps it to the stale error envelope and never reaches the keyboard transport.
-        _fakeSession.ResolveThrow = FakeComException;
+        _fakeTargetResolver.ResolveThrow = FakeComException;
 
         var command = GetRequiredService<UiSendKeysCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["enter", "-a", "TestApp", "--json"]);
@@ -395,7 +395,7 @@ public partial class UiCommandTests
     {
         // A non-COM exception during resolution falls through to the catch-all → generic-error envelope,
         // and no keys are sent (mirrors the COMException stale-element path above).
-        _fakeSession.ResolveThrow = FakeGenericException;
+        _fakeTargetResolver.ResolveThrow = FakeGenericException;
 
         var command = GetRequiredService<UiSendKeysCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["enter", "-a", "TestApp", "--json"]);
@@ -413,7 +413,7 @@ public partial class UiCommandTests
         // by the XAML input pipeline. The warning is advisory: the keys are still posted. Non-error
         // logger output routes through the static ambient AnsiConsole (TextWriterLogger), so we swap it
         // to a capturing console for the invoke; [DoNotParallelize] keeps that global swap isolated.
-        _fakeSession.SessionResult.WindowHandle = 0xABC;
+        _fakeTargetResolver.TargetResult.WindowHandle = 0xABC;
         _fakeSystemQuery.WindowClassNameByHwnd[0xABC] = "WinUIDesktopWin32WindowClass";
 
         var command = GetRequiredService<UiSendKeysCommand>();
@@ -442,7 +442,7 @@ public partial class UiCommandTests
         // Same literal-text-via-post-message shape, but a Win32 window (non-XAML class) consumes WM_CHAR,
         // so the XAML warning must NOT fire — it is scoped to XAML to avoid false-alarming other stacks.
         // We capture the ambient console the same way so the negative assertion is real, not vacuous.
-        _fakeSession.SessionResult.WindowHandle = 0xABC;
+        _fakeTargetResolver.TargetResult.WindowHandle = 0xABC;
         _fakeSystemQuery.WindowClassNameByHwnd[0xABC] = "Notepad";
 
         var command = GetRequiredService<UiSendKeysCommand>();
@@ -472,7 +472,7 @@ public partial class UiCommandTests
         // #655: a named key (Enter) — not just literal text — is also dropped by the XAML input
         // pipeline when posted, because WinUI/UWP controls are windowless. The broadened warning must
         // fire for any post-message payload to a XAML target, not only text=.
-        _fakeSession.SessionResult.WindowHandle = 0xABC;
+        _fakeTargetResolver.TargetResult.WindowHandle = 0xABC;
         _fakeSystemQuery.WindowClassNameByHwnd[0xABC] = "Windows.UI.Core.CoreWindow";
 
         var command = GetRequiredService<UiSendKeysCommand>();
@@ -500,7 +500,7 @@ public partial class UiCommandTests
     {
         // The honest-reporting warning must also surface in the structured --json warnings[] so
         // automation (not just a human reading the console) can see the delivery caveat.
-        _fakeSession.SessionResult.WindowHandle = 0xABC;
+        _fakeTargetResolver.TargetResult.WindowHandle = 0xABC;
         _fakeSystemQuery.WindowClassNameByHwnd[0xABC] = "WinUIDesktopWin32WindowClass";
 
         var command = GetRequiredService<UiSendKeysCommand>();
@@ -521,7 +521,7 @@ public partial class UiCommandTests
         // #655 root cause: the resolved target is the top-level window, but a top-level window does not
         // route posted keyboard messages to its focused child control. The command must retarget to the
         // thread's focused child HWND (resolved via ISystemUiQuery) so the keys reach the real control.
-        _fakeSession.SessionResult.WindowHandle = 0xABC;          // top-level window
+        _fakeTargetResolver.TargetResult.WindowHandle = 0xABC;          // top-level window
         _fakeSystemQuery.FocusedWindowByHwnd[0xABC] = 0x789;      // focused child edit control
         _fakeSystemQuery.RootWindowByHwnd[0x789] = 0xABC;         // child's top-level root is the target
 
@@ -545,7 +545,7 @@ public partial class UiCommandTests
         // *different* top-level window on that thread. Retargeting there would post the keys to the wrong
         // window despite an explicit target, so the command must keep the resolved target when the focused
         // HWND's top-level root differs.
-        _fakeSession.SessionResult.WindowHandle = 0xABC;          // target top-level window (its own root)
+        _fakeTargetResolver.TargetResult.WindowHandle = 0xABC;          // target top-level window (its own root)
         _fakeSystemQuery.FocusedWindowByHwnd[0xABC] = 0x999;      // focus is on the thread, but...
         _fakeSystemQuery.RootWindowByHwnd[0x999] = 0xDDD;         // ...it belongs to a different top-level window
 
@@ -568,7 +568,7 @@ public partial class UiCommandTests
         // Focused-child retargeting is a PostMessage-only concern (a top-level window doesn't forward
         // posted messages). send-input is OS-wide and lands on the foreground window, so it must keep
         // the resolved target HWND even when a focused child is available.
-        _fakeSession.SessionResult.WindowHandle = 0xABC;
+        _fakeTargetResolver.TargetResult.WindowHandle = 0xABC;
         _fakeSystemQuery.FocusedWindowByHwnd[0xABC] = 0x789;      // present, but must be ignored for send-input
 
         var command = GetRequiredService<UiSendKeysCommand>();
@@ -585,7 +585,7 @@ public partial class UiCommandTests
     {
         // The may-not-deliver caveat is specific to post-message. send-input delivers real input to
         // XAML apps, so it must not carry the post-message warning even when the target looks like XAML.
-        _fakeSession.SessionResult.WindowHandle = 0xABC;
+        _fakeTargetResolver.TargetResult.WindowHandle = 0xABC;
         _fakeSystemQuery.WindowClassNameByHwnd[0xABC] = "WinUIDesktopWin32WindowClass";
 
         var command = GetRequiredService<UiSendKeysCommand>();
@@ -605,7 +605,7 @@ public partial class UiCommandTests
         // target is NOT XAML, but post-message retargets to the thread's focused child and *that child*
         // is a windowless XAML control. Classifying only the top-level target would miss it, so the
         // command must also inspect the effective (retargeted) HWND, warn, and post to the child.
-        _fakeSession.SessionResult.WindowHandle = 0xABC;                                // top-level window (its own root)
+        _fakeTargetResolver.TargetResult.WindowHandle = 0xABC;                                // top-level window (its own root)
         _fakeSystemQuery.WindowClassNameByHwnd[0xABC] = "Notepad";                      // non-XAML top-level
         _fakeSystemQuery.FocusedWindowByHwnd[0xABC] = 0x789;                            // focused child...
         _fakeSystemQuery.RootWindowByHwnd[0x789] = 0xABC;                               // ...whose root is the target -> retarget
@@ -632,7 +632,7 @@ public partial class UiCommandTests
     {
         // Console parity for the second-clause warning: non-XAML top-level, XAML retargeted child. The
         // advisory must surface on the console (not only --json), and the keys are still posted to the child.
-        _fakeSession.SessionResult.WindowHandle = 0xABC;
+        _fakeTargetResolver.TargetResult.WindowHandle = 0xABC;
         _fakeSystemQuery.WindowClassNameByHwnd[0xABC] = "Notepad";                      // non-XAML top-level
         _fakeSystemQuery.FocusedWindowByHwnd[0xABC] = 0x789;                            // focused child...
         _fakeSystemQuery.RootWindowByHwnd[0x789] = 0xABC;                               // ...whose root is the target -> retarget
@@ -655,7 +655,7 @@ public partial class UiCommandTests
         // Retarget guard fall-through #1: a different HWND is focused, but the target's own GA_ROOT can't
         // be resolved (returns 0). With no root to compare against, the command must NOT adopt the focused
         // HWND — it keeps the resolved target.
-        _fakeSession.SessionResult.WindowHandle = 0xABC;
+        _fakeTargetResolver.TargetResult.WindowHandle = 0xABC;
         _fakeSystemQuery.FocusedWindowByHwnd[0xABC] = 0x789;   // a different focused HWND...
         _fakeSystemQuery.RootWindowByHwnd[0xABC] = 0;          // ...but the target's own root is unresolvable (0)
 
@@ -674,7 +674,7 @@ public partial class UiCommandTests
     {
         // Retarget guard fall-through #2: GetGUIThreadInfo reports the target window itself as focused
         // (focused == target). There is no distinct child to adopt, so the command keeps the target.
-        _fakeSession.SessionResult.WindowHandle = 0xABC;
+        _fakeTargetResolver.TargetResult.WindowHandle = 0xABC;
         _fakeSystemQuery.FocusedWindowByHwnd[0xABC] = 0xABC;   // focus resolves to the target itself
 
         var command = GetRequiredService<UiSendKeysCommand>();
@@ -694,7 +694,7 @@ public partial class UiCommandTests
         // The human success line reports the transport honestly: post-message is fire-and-forget (it only
         // queues the message and can't confirm delivery) so it reads "Posted", while send-input is real
         // synthesized input and reads "Sent".
-        _fakeSession.SessionResult.WindowHandle = 0xABC;
+        _fakeTargetResolver.TargetResult.WindowHandle = 0xABC;
         var command = GetRequiredService<UiSendKeysCommand>();
 
         var (postExit, postOutput) = await InvokeWithAmbientConsoleCaptureAsync(command,
@@ -714,7 +714,7 @@ public partial class UiCommandTests
     {
         // --allow-system-keys opts in to OS/shell-wide combos (e.g. driving a global hotkey such as
         // PowerToys' win+shift+v): the guard is bypassed and the combo reaches the keyboard transport.
-        _fakeSession.SessionResult.WindowHandle = 4242; // resolvable target + default foreground allow → reach the guard
+        _fakeTargetResolver.TargetResult.WindowHandle = 4242; // resolvable target + default foreground allow → reach the guard
         var command = GetRequiredService<UiSendKeysCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             ["win+shift+v", "-a", "TestApp", "--via", "send-input", "--allow-system-keys", "--json"]);
@@ -729,7 +729,7 @@ public partial class UiCommandTests
     {
         // The flag only relaxes system-reserved combos; an ordinary combo behaves identically with or
         // without it (no accidental change to the normal path).
-        _fakeSession.SessionResult.WindowHandle = 4242;
+        _fakeTargetResolver.TargetResult.WindowHandle = 4242;
         var command = GetRequiredService<UiSendKeysCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             ["ctrl+a", "-a", "TestApp", "--via", "send-input", "--allow-system-keys"]);
@@ -743,7 +743,7 @@ public partial class UiCommandTests
     {
         // Default (no flag) still refuses system combos on send-input — the opt-in must not weaken the
         // default safety posture.
-        _fakeSession.SessionResult.WindowHandle = 4242;
+        _fakeTargetResolver.TargetResult.WindowHandle = 4242;
         var command = GetRequiredService<UiSendKeysCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             ["win+l", "-a", "TestApp", "--via", "send-input", "--json"]);
@@ -767,7 +767,7 @@ public partial class UiCommandTests
         // win+l triggers LockWorkStation() via the shell hook and is unrecoverable from automation.
         // It must be blocked EVEN when --allow-system-keys is passed — the never-bypassable guard
         // must fire before the soft-combo/allow path and prevent injection.
-        _fakeSession.SessionResult.WindowHandle = 4242;
+        _fakeTargetResolver.TargetResult.WindowHandle = 4242;
         var command = GetRequiredService<UiSendKeysCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             ["win+l", "-a", "TestApp", "--via", "send-input", "--allow-system-keys", "--json"]);
@@ -783,7 +783,7 @@ public partial class UiCommandTests
         // win+r (Run dialog) is a soft-blocked system combo that the caller can opt into with
         // --allow-system-keys. It must pass the never-bypassable guard (only win+l is hard-blocked)
         // and reach the keyboard transport.
-        _fakeSession.SessionResult.WindowHandle = 4242;
+        _fakeTargetResolver.TargetResult.WindowHandle = 4242;
         var command = GetRequiredService<UiSendKeysCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             ["win+r", "-a", "TestApp", "--via", "send-input", "--allow-system-keys"]);
@@ -832,7 +832,7 @@ public partial class UiCommandTests
     public async Task SendKeys_AllowSystemKeys_SendInput_Json_AuditWarningInResult()
     {
         // --json consumers see the injection audit trail even though the global logger is suppressed.
-        _fakeSession.SessionResult.WindowHandle = 4242;
+        _fakeTargetResolver.TargetResult.WindowHandle = 4242;
         var command = GetRequiredService<UiSendKeysCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             ["win+shift+v", "-a", "TestApp", "--via", "send-input", "--allow-system-keys", "--json"]);
@@ -864,7 +864,7 @@ public partial class UiCommandTests
     public async Task SendKeys_CmdL_ViaSendInput_WithAllowSystemKeys_IsStillRefused()
     {
         // cmd is an alias for win in the key grammar; cmd+l must be blocked unconditionally.
-        _fakeSession.SessionResult.WindowHandle = 4242;
+        _fakeTargetResolver.TargetResult.WindowHandle = 4242;
         var command = GetRequiredService<UiSendKeysCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             ["cmd+l", "-a", "TestApp", "--via", "send-input", "--allow-system-keys", "--json"]);
@@ -878,7 +878,7 @@ public partial class UiCommandTests
     public async Task SendKeys_WinShiftL_ViaSendInput_WithAllowSystemKeys_IsStillRefused()
     {
         // Extra modifiers do not defeat the win+l hard block — the guard sees win modifier + VkL.
-        _fakeSession.SessionResult.WindowHandle = 4242;
+        _fakeTargetResolver.TargetResult.WindowHandle = 4242;
         var command = GetRequiredService<UiSendKeysCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             ["win+shift+l", "-a", "TestApp", "--via", "send-input", "--allow-system-keys", "--json"]);
@@ -894,7 +894,7 @@ public partial class UiCommandTests
         // ctrl+alt+del is a Secure Attention Sequence: Windows drops synthesized SAS input regardless of
         // privilege or flag, so it can never take effect. It must be refused (exit 1) rather than report a
         // misleading success — even when --allow-system-keys is passed — and never reach the transport.
-        _fakeSession.SessionResult.WindowHandle = 4242;
+        _fakeTargetResolver.TargetResult.WindowHandle = 4242;
         var command = GetRequiredService<UiSendKeysCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             ["ctrl+alt+del", "-a", "TestApp", "--via", "send-input", "--allow-system-keys", "--json"]);
@@ -926,7 +926,7 @@ public partial class UiCommandTests
     {
         // Without --allow-system-keys the never-bypassable guard still fires first, and the error must
         // explain the SAS block (not just "pass --allow-system-keys", which would never help here).
-        _fakeSession.SessionResult.WindowHandle = 4242;
+        _fakeTargetResolver.TargetResult.WindowHandle = 4242;
         var command = GetRequiredService<UiSendKeysCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             ["ctrl+alt+del", "-a", "TestApp", "--via", "send-input"]);
@@ -958,7 +958,7 @@ public partial class UiCommandTests
     [TestMethod]
     public async Task SendKeys_CtrlAltDelAndWinL_ViaSendInput_ComposesBothNamesAndReasons()
     {
-        _fakeSession.SessionResult.WindowHandle = 4242;
+        _fakeTargetResolver.TargetResult.WindowHandle = 4242;
         var command = GetRequiredService<UiSendKeysCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             ["ctrl+alt+del win+l", "-a", "TestApp", "--via", "send-input", "--allow-system-keys"]);
@@ -977,7 +977,7 @@ public partial class UiCommandTests
     public async Task SendKeys_LoneRWin_ViaSendInput_WithoutAllow_IsBlocked()
     {
         // The right-Win key (VkRWin = 0x5c) opens Start — refused without --allow-system-keys.
-        _fakeSession.SessionResult.WindowHandle = 4242;
+        _fakeTargetResolver.TargetResult.WindowHandle = 4242;
         var command = GetRequiredService<UiSendKeysCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             ["vk=0x5c", "-a", "TestApp", "--via", "send-input", "--json"]);
@@ -990,7 +990,7 @@ public partial class UiCommandTests
     [TestMethod]
     public async Task SendKeys_LoneRWin_ViaSendInput_WithAllow_Sends()
     {
-        _fakeSession.SessionResult.WindowHandle = 4242;
+        _fakeTargetResolver.TargetResult.WindowHandle = 4242;
         var command = GetRequiredService<UiSendKeysCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             ["vk=0x5c", "-a", "TestApp", "--via", "send-input", "--allow-system-keys", "--json"]);
@@ -1005,7 +1005,7 @@ public partial class UiCommandTests
     public async Task SendKeys_SystemCombo_Refused_ErrorMentionsAllowFlag()
     {
         // The logged error message must guide the caller to --allow-system-keys so the fix is actionable.
-        _fakeSession.SessionResult.WindowHandle = 4242;
+        _fakeTargetResolver.TargetResult.WindowHandle = 4242;
         var command = GetRequiredService<UiSendKeysCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             ["win+r", "-a", "TestApp", "--via", "send-input"]);

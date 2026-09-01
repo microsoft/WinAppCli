@@ -17,7 +17,7 @@ public sealed class UiTargetResolver(
     // point at the same OS boundary; tests inject a fake for the instance path.
     private static readonly SystemUiQuery s_sharedQuery = new();
 
-    public Task<UiTarget> ResolveSessionAsync(string? app, long? hwnd, CancellationToken ct)
+    public Task<UiTarget> ResolveAsync(string? app, long? hwnd, CancellationToken ct)
     {
         // Direct HWND targeting — most stable, used after discovery
         if (hwnd is not null and > 0)
@@ -47,7 +47,7 @@ public sealed class UiTargetResolver(
             }
             // Single match
             var match = windows[0];
-            return Task.FromResult(CreateSession(match.Pid, match.Hwnd, match.Title));
+            return Task.FromResult(CreateTarget(match.Pid, match.Hwnd, match.Title));
         }
 
         var resolved = process.Value;
@@ -61,7 +61,7 @@ public sealed class UiTargetResolver(
 
         if (processWindows.Count == 1)
         {
-            return Task.FromResult(CreateSession(resolved.Id, processWindows[0].Hwnd, processWindows[0].Title));
+            return Task.FromResult(CreateTarget(resolved.Id, processWindows[0].Hwnd, processWindows[0].Title));
         }
 
         return Task.FromResult(new UiTarget
@@ -85,7 +85,7 @@ public sealed class UiTargetResolver(
         var reason = foreground != default ? "foreground" : "largest";
         logger.LogInformation("Auto-selected HWND {Hwnd} ({Reason}) from {Count} windows for '{App}' — pass -w {ExplicitHwnd} to target this window explicitly.", selected.Hwnd, reason, windows.Count, app, selected.Hwnd);
 
-        return CreateSession(selected.Pid, selected.Hwnd, selected.Title);
+        return CreateTarget(selected.Pid, selected.Hwnd, selected.Title);
     }
 
     /// <summary>Pick the window with the largest area (queried through the OS-boundary seam).</summary>
@@ -153,13 +153,13 @@ public sealed class UiTargetResolver(
             throw new AppNotFoundException($"Window HWND {hwnd} not found or not accessible.");
         }
 
-        var session = CreateSession((int)pid, (nint)hwnd, null);
-        session.IsExplicitWindow = true;
-        RefreshWindowTitle(session);
-        return session;
+        var uiTarget = CreateTarget((int)pid, (nint)hwnd, null);
+        uiTarget.IsExplicitWindow = true;
+        RefreshWindowTitle(uiTarget);
+        return uiTarget;
     }
 
-    private UiTarget CreateSession(int pid, nint hwnd, string? title)
+    private UiTarget CreateTarget(int pid, nint hwnd, string? title)
     {
         var processName = systemQuery.GetProcessById(pid)?.ProcessName;
         if (string.IsNullOrEmpty(processName)) { processName = "Unknown"; }
@@ -177,12 +177,12 @@ public sealed class UiTargetResolver(
     /// Refresh the window title from the session's explicit HWND. Only ever called after
     /// <see cref="ResolveByHwnd"/>, which always sets a non-zero <see cref="UiTarget.WindowHandle"/>.
     /// </summary>
-    private void RefreshWindowTitle(UiTarget session)
+    private void RefreshWindowTitle(UiTarget uiTarget)
     {
-        var title = systemQuery.GetWindowText(session.WindowHandle);
+        var title = systemQuery.GetWindowText(uiTarget.WindowHandle);
         if (!string.IsNullOrEmpty(title))
         {
-            session.WindowTitle = title;
+            uiTarget.WindowTitle = title;
         }
     }
 

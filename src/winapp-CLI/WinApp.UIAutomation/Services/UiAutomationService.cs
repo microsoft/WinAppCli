@@ -23,12 +23,12 @@ internal sealed partial class UiAutomationService : IUiAutomation
 {
     private readonly ILogger<UiAutomationService> _logger;
     private readonly IUIAutomation _automation;
-    private readonly IUiSelectorParser _selectorService;
+    private readonly IUiSelectorParser _selectorParser;
 
-    internal static Func<UiAutomationService, UiTarget, IUIAutomationElement?> s_getRootElement = (service, session) => service.GetRootElementCore(session);
+    internal static Func<UiAutomationService, UiTarget, IUIAutomationElement?> s_getRootElement = (service, uiTarget) => service.GetRootElementCore(uiTarget);
     internal static Func<UiAutomationService, nint, IUIAutomationElement?> s_getRootElementForHwnd = (service, hwnd) => service.GetRootElementForHwndCore(hwnd);
-    internal static Func<UiAutomationService, UiTarget, List<(nint Hwnd, int Pid, string Title)>> s_getAllAppWindows = (service, session) => service.GetAllAppWindowsCore(session);
-    internal static Func<UiAutomationService, UiTarget, UiSelector, UiElement?> s_findElementOnOtherWindows = (service, session, selector) => service.FindElementOnOtherWindowsCore(session, selector);
+    internal static Func<UiAutomationService, UiTarget, List<(nint Hwnd, int Pid, string Title)>> s_getAllAppWindows = (service, uiTarget) => service.GetAllAppWindowsCore(uiTarget);
+    internal static Func<UiAutomationService, UiTarget, UiSelector, UiElement?> s_findElementOnOtherWindows = (service, uiTarget, selector) => service.FindElementOnOtherWindowsCore(uiTarget, selector);
     internal static Func<UiAutomationService, IUIAutomationElement, string, int, List<IUIAutomationElement>> s_manualTreeSearch = (service, root, query, maxResults) => service.ManualTreeSearchCore(root, query, maxResults);
     internal static Func<UiAutomationService, IUIAutomationElement, IUIAutomationElement, IUIAutomationElement?> s_findInvokableAncestor = (service, element, root) => service.FindInvokableAncestorCore(element, root);
     internal static Func<UiAutomationService, IUIAutomationElement?> s_getFocusedElement = service => service._automation.GetFocusedElement();
@@ -39,10 +39,10 @@ internal sealed partial class UiAutomationService : IUiAutomation
 
     internal static void ResetNativeSeams()
     {
-        s_getRootElement = (service, session) => service.GetRootElementCore(session);
+        s_getRootElement = (service, uiTarget) => service.GetRootElementCore(uiTarget);
         s_getRootElementForHwnd = (service, hwnd) => service.GetRootElementForHwndCore(hwnd);
-        s_getAllAppWindows = (service, session) => service.GetAllAppWindowsCore(session);
-        s_findElementOnOtherWindows = (service, session, selector) => service.FindElementOnOtherWindowsCore(session, selector);
+        s_getAllAppWindows = (service, uiTarget) => service.GetAllAppWindowsCore(uiTarget);
+        s_findElementOnOtherWindows = (service, uiTarget, selector) => service.FindElementOnOtherWindowsCore(uiTarget, selector);
         s_manualTreeSearch = (service, root, query, maxResults) => service.ManualTreeSearchCore(root, query, maxResults);
         s_findInvokableAncestor = (service, element, root) => service.FindInvokableAncestorCore(element, root);
         s_getFocusedElement = service => service._automation.GetFocusedElement();
@@ -56,10 +56,10 @@ internal sealed partial class UiAutomationService : IUiAutomation
         s_sleepForBlankRetry = Thread.Sleep;
     }
 
-    public UiAutomationService(ILogger<UiAutomationService> logger, IUiSelectorParser selectorService)
+    public UiAutomationService(ILogger<UiAutomationService> logger, IUiSelectorParser selectorParser)
     {
         _logger = logger;
-        _selectorService = selectorService;
+        _selectorParser = selectorParser;
         _automation = CUIAutomation8.CreateInstance<IUIAutomation>();
     }
 
@@ -156,12 +156,12 @@ internal sealed partial class UiAutomationService : IUiAutomation
         return results;
     }
 
-    public Task<UiElement[]> InspectAsync(UiTarget session, string? elementId, int depth, CancellationToken ct)
+    public Task<UiElement[]> InspectAsync(UiTarget uiTarget, string? elementId, int depth, CancellationToken ct)
     {
-        _logger.LogDebug("Inspecting process {Pid} at depth {Depth}", session.ProcessId, depth);
+        _logger.LogDebug("Inspecting process {Pid} at depth {Depth}", uiTarget.ProcessId, depth);
         var nextElementId = 0;
 
-        var root = GetRootElement(session);
+        var root = GetRootElement(uiTarget);
         if (root is null)
         {
             return Task.FromResult<UiElement[]>([]);
@@ -181,14 +181,14 @@ internal sealed partial class UiAutomationService : IUiAutomation
                 if (slugResult is not null)
                 {
                     // Re-find the COM element
-                    target = ResolveComElement(session, slugResult);
+                    target = ResolveComElement(uiTarget, slugResult);
                 }
             }
             else
             {
                 // Try as a legacy selector
-                var selectorService = _selectorService;
-                var selector = selectorService.Parse(elementId);
+                var selectorParser = _selectorParser;
+                var selector = selectorParser.Parse(elementId);
                 var condition = BuildCondition(selector);
                 if (condition is not null)
                 {
@@ -208,15 +208,15 @@ internal sealed partial class UiAutomationService : IUiAutomation
         // Set WindowHandle on all elements from main window
         foreach (var el in elements)
         {
-            el.WindowHandle = session.WindowHandle;
+            el.WindowHandle = uiTarget.WindowHandle;
         }
 
         // Also walk popup/owned windows (when inspecting full tree, not scoped to element,
         // and the user did not explicitly target a single HWND — see issue #472).
-        if (string.IsNullOrEmpty(elementId) && !session.IsExplicitWindow)
+        if (string.IsNullOrEmpty(elementId) && !uiTarget.IsExplicitWindow)
         {
-            var mainHwnd = (nint)session.WindowHandle;
-            var allWindows = GetAllAppWindows(session);
+            var mainHwnd = (nint)uiTarget.WindowHandle;
+            var allWindows = GetAllAppWindows(uiTarget);
 
             // Filter out windows whose UIA root is already in the main tree (e.g., modal dialogs)
             var independentWindows = new List<(nint Hwnd, int Pid, string Title)>();
@@ -247,7 +247,7 @@ internal sealed partial class UiAutomationService : IUiAutomation
             if (independentWindows.Count > 0)
             {
                 var mainInfo = UiTargetResolver.GetWindowInfo(mainHwnd);
-                var mainTitle = session.WindowTitle ?? "";
+                var mainTitle = uiTarget.WindowTitle ?? "";
                 elements.Insert(0, new UiElement
                 {
                     Id = $"--- HWND {mainHwnd}",
@@ -286,18 +286,18 @@ internal sealed partial class UiAutomationService : IUiAutomation
         }
 
         // Promote unique AutomationIds to selectors (more stable than slugs)
-        PromoteUniqueAutomationIds(root, elements, session.WindowHandle);
+        PromoteUniqueAutomationIds(root, elements, uiTarget.WindowHandle);
 
         var result = elements.ToArray();
         return Task.FromResult(result);
     }
 
-    public Task<UiElement[]> InspectAncestorsAsync(UiTarget session, string elementId, CancellationToken ct)
+    public Task<UiElement[]> InspectAncestorsAsync(UiTarget uiTarget, string elementId, CancellationToken ct)
     {
         _logger.LogDebug("Inspecting ancestors of {ElementId}", elementId);
         var nextElementId = 0;
 
-        var root = GetRootElement(session);
+        var root = GetRootElement(uiTarget);
         if (root is null)
         {
             return Task.FromResult<UiElement[]>([]);
@@ -312,12 +312,12 @@ internal sealed partial class UiAutomationService : IUiAutomation
             var slugResult = FindElementBySlug(elementId, root);
             if (slugResult is not null)
             {
-                target = ResolveComElement(session, slugResult);
+                target = ResolveComElement(uiTarget, slugResult);
             }
         }
         else
         {
-            var selector = _selectorService.Parse(elementId);
+            var selector = _selectorParser.Parse(elementId);
             var condition = BuildCondition(selector);
             if (condition is not null)
             {
@@ -385,12 +385,12 @@ internal sealed partial class UiAutomationService : IUiAutomation
         return Task.FromResult(result);
     }
 
-    public Task<UiElement[]> SearchAsync(UiTarget session, UiSelector selector, int maxResults, CancellationToken ct)
+    public Task<UiElement[]> SearchAsync(UiTarget uiTarget, UiSelector selector, int maxResults, CancellationToken ct)
     {
-        _logger.LogDebug("Searching in process {Pid}", session.ProcessId);
+        _logger.LogDebug("Searching in process {Pid}", uiTarget.ProcessId);
         var nextElementId = 0;
 
-        var root = GetRootElement(session);
+        var root = GetRootElement(uiTarget);
         if (root is null)
         {
             return Task.FromResult<UiElement[]>([]);
@@ -411,7 +411,7 @@ internal sealed partial class UiAutomationService : IUiAutomation
                 {
                     var el = exactMatches.GetElement(i);
                     var uiEl = ToUiElement(el, "", ref nextElementId);
-                    uiEl.WindowHandle = session.WindowHandle;
+                    uiEl.WindowHandle = uiTarget.WindowHandle;
                     mainResults.Add(uiEl);
                 }
             }
@@ -431,7 +431,7 @@ internal sealed partial class UiAutomationService : IUiAutomation
                     {
                         var el = found.GetElement(i);
                         var uiEl = ToUiElement(el, "", ref nextElementId);
-                        uiEl.WindowHandle = session.WindowHandle;
+                        uiEl.WindowHandle = uiTarget.WindowHandle;
 
                         if (!IsInvokable(el))
                         {
@@ -455,7 +455,7 @@ internal sealed partial class UiAutomationService : IUiAutomation
             foreach (var el in manualResults)
             {
                 var uiEl = ToUiElement(el, "", ref nextElementId);
-                uiEl.WindowHandle = session.WindowHandle;
+                uiEl.WindowHandle = uiTarget.WindowHandle;
                 if (!IsInvokable(el))
                 {
                     var ancestor = FindInvokableAncestor(el, root);
@@ -470,10 +470,10 @@ internal sealed partial class UiAutomationService : IUiAutomation
 
         // If no results on main window, search popup/owned windows — unless the user
         // explicitly scoped the session to a single HWND via --window (issue #472).
-        if (mainResults.Count == 0 && !session.IsExplicitWindow)
+        if (mainResults.Count == 0 && !uiTarget.IsExplicitWindow)
         {
-            var allWindows = GetAllAppWindows(session);
-            var mainHwnd = (nint)session.WindowHandle;
+            var allWindows = GetAllAppWindows(uiTarget);
+            var mainHwnd = (nint)uiTarget.WindowHandle;
             foreach (var (hwnd, pid, title) in allWindows)
             {
                 if (hwnd == mainHwnd) { continue; }
@@ -524,16 +524,16 @@ internal sealed partial class UiAutomationService : IUiAutomation
         var results = mainResults.ToArray();
 
         // Promote unique AutomationIds to selectors (more stable than slugs)
-        PromoteUniqueAutomationIds(root, results, session.WindowHandle);
+        PromoteUniqueAutomationIds(root, results, uiTarget.WindowHandle);
 
         return Task.FromResult(results);
     }
 
-    public Task<UiElement?> FindSingleElementAsync(UiTarget session, UiSelector selector, CancellationToken ct)
+    public Task<UiElement?> FindSingleElementAsync(UiTarget uiTarget, UiSelector selector, CancellationToken ct)
     {
-        _logger.LogDebug("Finding single element in process {Pid}", session.ProcessId);
+        _logger.LogDebug("Finding single element in process {Pid}", uiTarget.ProcessId);
 
-        var root = GetRootElement(session);
+        var root = GetRootElement(uiTarget);
         if (root is null)
         {
             return Task.FromResult<UiElement?>(null);
@@ -545,13 +545,13 @@ internal sealed partial class UiAutomationService : IUiAutomation
             var slugResult = FindElementBySlug(selector.Slug!, root);
             if (slugResult is not null)
             {
-                slugResult.WindowHandle = session.WindowHandle;
+                slugResult.WindowHandle = uiTarget.WindowHandle;
                 return Task.FromResult<UiElement?>(slugResult);
             }
             // Not found on main window — search other windows (unless --window scoped us to one)
-            if (!session.IsExplicitWindow)
+            if (!uiTarget.IsExplicitWindow)
             {
-                var otherResult = FindElementOnOtherWindows(session, selector);
+                var otherResult = FindElementOnOtherWindows(uiTarget, selector);
                 if (otherResult is not null)
                 {
                     return Task.FromResult<UiElement?>(otherResult);
@@ -571,7 +571,7 @@ internal sealed partial class UiAutomationService : IUiAutomation
             {
                 var nextId = 0;
                 var exactResult = ToUiElement(exactMatch, "", ref nextId);
-                exactResult.WindowHandle = session.WindowHandle;
+                exactResult.WindowHandle = uiTarget.WindowHandle;
                 return Task.FromResult<UiElement?>(exactResult);
             }
         }
@@ -603,16 +603,16 @@ return Task.FromResult<UiElement?>(null);
                 {
                     var nextId = 0;
                     var manualResult = ToUiElement(manualResults[0], "", ref nextId);
-                    manualResult.WindowHandle = session.WindowHandle;
+                    manualResult.WindowHandle = uiTarget.WindowHandle;
                     return Task.FromResult<UiElement?>(manualResult);
                 }
             }
 
             // Element not found on main window — search popup/owned windows
             // (unless --window scoped us to a single HWND).
-            if (!session.IsExplicitWindow)
+            if (!uiTarget.IsExplicitWindow)
             {
-                var otherResult = FindElementOnOtherWindows(session, selector);
+                var otherResult = FindElementOnOtherWindows(uiTarget, selector);
                 if (otherResult is not null)
                 {
                     return Task.FromResult<UiElement?>(otherResult);
@@ -642,7 +642,7 @@ return Task.FromResult<UiElement?>(null);
                 _logger.LogDebug("Disambiguated {Count} matches by picking the only invokable element", found.get_Length());
                 var nextId = 0;
                 var invokableResult = ToUiElement(invokableMatch, "", ref nextId);
-                invokableResult.WindowHandle = session.WindowHandle;
+                invokableResult.WindowHandle = uiTarget.WindowHandle;
                 return Task.FromResult<UiElement?>(invokableResult);
             }
 
@@ -682,7 +682,7 @@ return Task.FromResult<UiElement?>(null);
         var element = found.GetElement(0);
         var nextElementId = 0;
         var result = ToUiElement(element, "", ref nextElementId);
-        result.WindowHandle = session.WindowHandle;
+        result.WindowHandle = uiTarget.WindowHandle;
 
         // Surface invokable ancestor for non-invokable elements
         if (!IsInvokable(element))
@@ -697,7 +697,7 @@ return Task.FromResult<UiElement?>(null);
         return Task.FromResult<UiElement?>(result);
     }
 
-    public Task<Dictionary<string, object?>> GetPropertiesAsync(UiTarget session, UiElement element, string? propertyName, CancellationToken ct)
+    public Task<Dictionary<string, object?>> GetPropertiesAsync(UiTarget uiTarget, UiElement element, string? propertyName, CancellationToken ct)
     {
         // Basic properties from the UiElement model
         var props = new Dictionary<string, object?>
@@ -718,7 +718,7 @@ return Task.FromResult<UiElement?>(null);
         }
 
         // Query the live COM element for additional properties
-        var comElement = ResolveComElement(session, element);
+        var comElement = ResolveComElement(uiTarget, element);
         if (comElement is not null)
         {
             // General UIA properties (convert COM BOOL to C# bool)
@@ -803,11 +803,11 @@ return Task.FromResult<UiElement?>(null);
         return Task.FromResult(props);
     }
 
-    public Task<string> InvokeAsync(UiTarget session, UiElement element, CancellationToken ct)
+    public Task<string> InvokeAsync(UiTarget uiTarget, UiElement element, CancellationToken ct)
     {
         _logger.LogDebug("Invoking element {ElementId}", element.Id);
 
-        var comElement = ResolveComElement(session, element);
+        var comElement = ResolveComElement(uiTarget, element);
         if (comElement is null)
         {
             throw new InvalidOperationException($"Element {element.Id} is stale. Re-run 'inspect' or 'search'.");
@@ -857,11 +857,11 @@ return Task.FromResult<UiElement?>(null);
             $"Element {element.Selector ?? element.Id} ({element.Type}) does not support any invoke pattern. {hint}");
     }
 
-    public Task SetValueAsync(UiTarget session, UiElement element, string text, CancellationToken ct)
+    public Task SetValueAsync(UiTarget uiTarget, UiElement element, string text, CancellationToken ct)
     {
         _logger.LogDebug("Setting value on element {ElementId}", element.Id);
 
-        var comElement = ResolveComElement(session, element);
+        var comElement = ResolveComElement(uiTarget, element);
         if (comElement is null)
         {
             throw new InvalidOperationException($"Element {element.Id} is stale. Re-run 'inspect' or 'search'.");
@@ -874,11 +874,11 @@ return Task.FromResult<UiElement?>(null);
         return Task.CompletedTask;
     }
 
-    public Task FocusAsync(UiTarget session, UiElement element, CancellationToken ct)
+    public Task FocusAsync(UiTarget uiTarget, UiElement element, CancellationToken ct)
     {
         _logger.LogDebug("Focusing element {ElementId}", element.Id);
 
-        var comElement = ResolveComElement(session, element);
+        var comElement = ResolveComElement(uiTarget, element);
         if (comElement is null)
         {
             throw new InvalidOperationException($"Element {element.Id} is stale. Re-run 'inspect' or 'search'.");
@@ -888,11 +888,11 @@ return Task.FromResult<UiElement?>(null);
         return Task.CompletedTask;
     }
 
-    public Task<string?> GetTextAsync(UiTarget session, UiElement element, CancellationToken ct)
+    public Task<string?> GetTextAsync(UiTarget uiTarget, UiElement element, CancellationToken ct)
     {
         _logger.LogDebug("Getting text from element {ElementId}", element.Id);
 
-        var comElement = ResolveComElement(session, element);
+        var comElement = ResolveComElement(uiTarget, element);
         if (comElement is null)
         {
             throw new InvalidOperationException($"Element {element.Id} is stale. Re-run 'inspect' or 'search'.");
@@ -964,11 +964,11 @@ return Task.FromResult<UiElement?>(null);
         return Task.FromResult<string?>(null);
     }
 
-    public Task ScrollIntoViewAsync(UiTarget session, UiElement element, CancellationToken ct)
+    public Task ScrollIntoViewAsync(UiTarget uiTarget, UiElement element, CancellationToken ct)
     {
         _logger.LogDebug("Scrolling element {ElementId} into view", element.Id);
 
-        var comElement = ResolveComElement(session, element);
+        var comElement = ResolveComElement(uiTarget, element);
         if (comElement is null)
         {
             throw new InvalidOperationException($"Element {element.Id} is stale. Re-run 'inspect' or 'search'.");
@@ -1034,11 +1034,11 @@ return Task.FromResult<UiElement?>(null);
         }
     }
 
-    public Task ScrollContainerAsync(UiTarget session, UiElement element, string? direction, string? destination, CancellationToken ct)
+    public Task ScrollContainerAsync(UiTarget uiTarget, UiElement element, string? direction, string? destination, CancellationToken ct)
     {
         _logger.LogDebug("Scrolling container {ElementId}", element.Id);
 
-        var comElement = ResolveComElement(session, element);
+        var comElement = ResolveComElement(uiTarget, element);
         if (comElement is null)
         {
             throw new InvalidOperationException($"Element {element.Id} is stale. Re-run 'inspect' or 'search'.");
@@ -1152,9 +1152,9 @@ return Task.FromResult<UiElement?>(null);
         return Task.CompletedTask;
     }
 
-    public Task<UiElement?> GetFocusedElementAsync(UiTarget session, CancellationToken ct)
+    public Task<UiElement?> GetFocusedElementAsync(UiTarget uiTarget, CancellationToken ct)
     {
-        _logger.LogDebug("Getting focused element for process {Pid}", session.ProcessId);
+        _logger.LogDebug("Getting focused element for process {Pid}", uiTarget.ProcessId);
 
         IUIAutomationElement? focused;
         try
@@ -1175,7 +1175,7 @@ return Task.FromResult<UiElement?>(null);
         try
         {
             var pid = s_getElementProcessId(focused);
-            if (pid != session.ProcessId)
+            if (pid != uiTarget.ProcessId)
             {
                 return Task.FromResult<UiElement?>(null);
             }
@@ -1323,18 +1323,18 @@ return Task.FromResult<UiElement?>(null);
     /// Uses slug-based resolution first (most precise), then falls back to
     /// AutomationId or Name+Type property matching.
     /// </summary>
-    private IUIAutomationElement? ResolveComElement(UiTarget session, UiElement element)
+    private IUIAutomationElement? ResolveComElement(UiTarget uiTarget, UiElement element)
     {
         // Use the element's source HWND if it came from a different window (popup/dialog)
         IUIAutomationElement? root;
-        if (element.WindowHandle is { } elHwnd && elHwnd != 0 && elHwnd != session.WindowHandle)
+        if (element.WindowHandle is { } elHwnd && elHwnd != 0 && elHwnd != uiTarget.WindowHandle)
         {
             root = GetRootElementForHwnd((nint)elHwnd);
             _logger.LogDebug("Resolving element on source HWND {Hwnd}", elHwnd);
         }
         else
         {
-            root = GetRootElement(session);
+            root = GetRootElement(uiTarget);
         }
 
         if (root is null)
@@ -1400,14 +1400,14 @@ return Task.FromResult<UiElement?>(null);
     /// Get all windows associated with an app: same-PID windows + cross-process owned windows.
     /// Excludes internal system windows (PseudoConsoleWindow, IME, etc.).
     /// </summary>
-    private List<(nint Hwnd, int Pid, string Title)> GetAllAppWindows(UiTarget session)
+    private List<(nint Hwnd, int Pid, string Title)> GetAllAppWindows(UiTarget uiTarget)
     {
-        return s_getAllAppWindows(this, session);
+        return s_getAllAppWindows(this, uiTarget);
     }
 
-    private List<(nint Hwnd, int Pid, string Title)> GetAllAppWindowsCore(UiTarget session)
+    private List<(nint Hwnd, int Pid, string Title)> GetAllAppWindowsCore(UiTarget uiTarget)
     {
-        var windows = FindWindowsByPid(session.ProcessId);
+        var windows = FindWindowsByPid(uiTarget.ProcessId);
 
         // Remove internal system windows from same-PID results
         windows.RemoveAll(w => IsInternalWindow(UiTargetResolver.GetWindowClassName(w.Hwnd)));
@@ -1482,15 +1482,15 @@ return Task.FromResult<UiElement?>(null);
     /// Search for an element across all popup/owned windows of the app.
     /// Called when FindSingleElementAsync fails to find the element on the main window.
     /// </summary>
-    private UiElement? FindElementOnOtherWindows(UiTarget session, UiSelector selector)
+    private UiElement? FindElementOnOtherWindows(UiTarget uiTarget, UiSelector selector)
     {
-        return s_findElementOnOtherWindows(this, session, selector);
+        return s_findElementOnOtherWindows(this, uiTarget, selector);
     }
 
-    private UiElement? FindElementOnOtherWindowsCore(UiTarget session, UiSelector selector)
+    private UiElement? FindElementOnOtherWindowsCore(UiTarget uiTarget, UiSelector selector)
     {
-        var allWindows = GetAllAppWindows(session);
-        var mainHwnd = (nint)session.WindowHandle;
+        var allWindows = GetAllAppWindows(uiTarget);
+        var mainHwnd = (nint)uiTarget.WindowHandle;
 
         foreach (var (hwnd, pid, title) in allWindows)
         {
@@ -1569,29 +1569,29 @@ return Task.FromResult<UiElement?>(null);
         return null;
     }
 
-    private IUIAutomationElement? GetRootElement(UiTarget session)
+    private IUIAutomationElement? GetRootElement(UiTarget uiTarget)
     {
-        return s_getRootElement(this, session);
+        return s_getRootElement(this, uiTarget);
     }
 
-    private IUIAutomationElement? GetRootElementCore(UiTarget session)
+    private IUIAutomationElement? GetRootElementCore(UiTarget uiTarget)
     {
         // If we have a specific window handle, use it directly
-        if (session.WindowHandle != 0)
+        if (uiTarget.WindowHandle != 0)
         {
             try
             {
-                var element = s_elementFromHandle(this, (nint)session.WindowHandle);
+                var element = s_elementFromHandle(this, (nint)uiTarget.WindowHandle);
                 if (element is not null)
                 {
                     var name = SafeGetBstr(() => element.get_CurrentName());
-                    _logger.LogDebug("ElementFromHandle(stored HWND {Hwnd}): \"{Name}\"", session.WindowHandle, name ?? "(null)");
+                    _logger.LogDebug("ElementFromHandle(stored HWND {Hwnd}): \"{Name}\"", uiTarget.WindowHandle, name ?? "(null)");
                     return element;
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogDebug("Stored HWND {Hwnd} failed: {Error}", session.WindowHandle, ex.Message);
+                _logger.LogDebug("Stored HWND {Hwnd} failed: {Error}", uiTarget.WindowHandle, ex.Message);
             }
         }
 
@@ -1606,11 +1606,11 @@ return Task.FromResult<UiElement?>(null);
 
         var condition = _automation.CreatePropertyCondition(
             UIA_PROPERTY_ID.UIA_ProcessIdPropertyId,
-            ComVariant.Create(session.ProcessId));
+            ComVariant.Create(uiTarget.ProcessId));
 
         var all = root.FindAll(TreeScope.TreeScope_Children, condition);
         var count = all?.get_Length() ?? 0;
-        _logger.LogDebug("UIA FindAll for PID {Pid}: {Count} top-level elements", session.ProcessId, count);
+        _logger.LogDebug("UIA FindAll for PID {Pid}: {Count} top-level elements", uiTarget.ProcessId, count);
 
         if (count > 0)
         {
@@ -1629,7 +1629,7 @@ return Task.FromResult<UiElement?>(null);
             }
 
             // Multiple top-level elements — try matching by window title
-            var titleQuery = session.WindowTitle;
+            var titleQuery = uiTarget.WindowTitle;
             if (titleQuery is not null && !int.TryParse(titleQuery, out _))
             {
                 for (int i = 0; i < count; i++)
@@ -1661,7 +1661,7 @@ return Task.FromResult<UiElement?>(null);
         _logger.LogDebug("PID search returned 0 elements, trying ElementFromHandle fallback");
         try
         {
-            var mainWindowHandle = s_getMainWindowHandleForProcessId(session.ProcessId);
+            var mainWindowHandle = s_getMainWindowHandleForProcessId(uiTarget.ProcessId);
             if (mainWindowHandle != 0)
             {
                 var element = s_elementFromHandle(this, mainWindowHandle);

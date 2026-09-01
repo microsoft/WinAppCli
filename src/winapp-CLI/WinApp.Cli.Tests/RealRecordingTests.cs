@@ -27,8 +27,8 @@ public partial class RealRecordingTests
         var capture = new FakeWindowCapture();
         var svc = NewAutomation();
         var recording = NewRecordingService(svc, capture);
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "btnInvoke");
+        var uiTarget = SessionFor(fx);
+        await ResolveAsync(svc, uiTarget, "btnInvoke");
 
         var output = Path.Combine(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"), "record.mp4");
         Directory.CreateDirectory(Path.GetDirectoryName(output)!);
@@ -50,7 +50,7 @@ public partial class RealRecordingTests
             return encoder;
         };
 
-        var result = await recording.RecordAsync(session, null, new RecordOptions
+        var result = await recording.RecordAsync(uiTarget, null, new RecordOptions
         {
             OutputPath = output,
             DurationSec = 1,
@@ -78,8 +78,8 @@ public partial class RealRecordingTests
         var capture = new FakeWindowCapture();
         var svc = NewAutomation();
         var recording = NewRecordingService(svc, capture);
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "btnInvoke");
+        var uiTarget = SessionFor(fx);
+        await ResolveAsync(svc, uiTarget, "btnInvoke");
 
         var output = Path.Combine(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"), "closed.mp4");
         Directory.CreateDirectory(Path.GetDirectoryName(output)!);
@@ -92,7 +92,7 @@ public partial class RealRecordingTests
         capture.StartGrabberCallback = (_, _) => grabber;
         Mp4SinkWriterEncoder.s_create = (path, width, height, _, _) => new FakeVideoEncoder(path, width, height);
 
-        var result = await recording.RecordAsync(session, null, new RecordOptions
+        var result = await recording.RecordAsync(uiTarget, null, new RecordOptions
         {
             OutputPath = output,
             DurationSec = 10,
@@ -113,8 +113,8 @@ public partial class RealRecordingTests
         var capture = new FakeWindowCapture();
         var svc = NewAutomation();
         var recording = NewRecordingService(svc, capture);
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "btnInvoke");
+        var uiTarget = SessionFor(fx);
+        await ResolveAsync(svc, uiTarget, "btnInvoke");
 
         var output = Path.Combine(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"), "screen.mp4");
         Directory.CreateDirectory(Path.GetDirectoryName(output)!);
@@ -126,7 +126,7 @@ public partial class RealRecordingTests
         };
         Mp4SinkWriterEncoder.s_create = (path, width, height, _, _) => new FakeVideoEncoder(path, width, height);
 
-        var result = await recording.RecordAsync(session, null, new RecordOptions
+        var result = await recording.RecordAsync(uiTarget, null, new RecordOptions
         {
             OutputPath = output,
             DurationSec = 1,
@@ -147,8 +147,8 @@ public partial class RealRecordingTests
         var capture = new FakeWindowCapture();
         var svc = NewAutomation();
         var recording = NewRecordingService(svc, capture);
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "btnInvoke");
+        var uiTarget = SessionFor(fx);
+        await ResolveAsync(svc, uiTarget, "btnInvoke");
 
         var output = Path.Combine(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"), "printwindow.mp4");
         Directory.CreateDirectory(Path.GetDirectoryName(output)!);
@@ -161,7 +161,7 @@ public partial class RealRecordingTests
         };
         Mp4SinkWriterEncoder.s_create = (path, width, height, _, _) => new FakeVideoEncoder(path, width, height);
 
-        var result = await recording.RecordAsync(session, null, new RecordOptions
+        var result = await recording.RecordAsync(uiTarget, null, new RecordOptions
         {
             OutputPath = output,
             DurationSec = 1,
@@ -182,8 +182,8 @@ public partial class RealRecordingTests
         var capture = new FakeWindowCapture();
         var svc = NewAutomation();
         var recording = NewRecordingService(svc, capture);
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "btnInvoke");
+        var uiTarget = SessionFor(fx);
+        await ResolveAsync(svc, uiTarget, "btnInvoke");
 
         var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -196,7 +196,7 @@ public partial class RealRecordingTests
         Mp4SinkWriterEncoder.s_createNoClobber =
             (path, width, height, _, _) => new FakeVideoEncoder(path, width, height);
 
-        var result = await recording.RecordAsync(session, null, new RecordOptions
+        var result = await recording.RecordAsync(uiTarget, null, new RecordOptions
         {
             OutputPath = output,
             FramesDirectory = framesDirectory,
@@ -223,8 +223,8 @@ public partial class RealRecordingTests
         var capture = new FakeWindowCapture();
         var svc = NewAutomation();
         var recording = NewRecordingService(svc, capture);
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "btnInvoke");
+        var uiTarget = SessionFor(fx);
+        await ResolveAsync(svc, uiTarget, "btnInvoke");
 
         var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -239,7 +239,7 @@ public partial class RealRecordingTests
             };
 
         var exception = await Assert.ThrowsExactlyAsync<RecordPartialOutputException>(
-            () => recording.RecordAsync(session, null, new RecordOptions
+            () => recording.RecordAsync(uiTarget, null, new RecordOptions
             {
                 OutputPath = Path.Join(root, "partial.mp4"),
                 FramesDirectory = framesDirectory,
@@ -266,8 +266,8 @@ public partial class RealRecordingTests
         var capture = new FakeWindowCapture();
         var svc = NewAutomation();
         var recording = NewRecordingService(svc, capture);
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "btnInvoke");
+        var uiTarget = SessionFor(fx);
+        await ResolveAsync(svc, uiTarget, "btnInvoke");
 
         var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -287,7 +287,7 @@ public partial class RealRecordingTests
             };
 
         var exception = await Assert.ThrowsExactlyAsync<RecordPartialOutputException>(
-            () => recording.RecordAsync(session, null, new RecordOptions
+            () => recording.RecordAsync(uiTarget, null, new RecordOptions
             {
                 OutputPath = output,
                 FramesDirectory = framesDirectory,
@@ -310,8 +310,8 @@ public partial class RealRecordingTests
         var capture = new FakeWindowCapture();
         var svc = NewAutomation();
         var recording = NewRecordingService(svc, capture);
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "btnInvoke");
+        var uiTarget = SessionFor(fx);
+        await ResolveAsync(svc, uiTarget, "btnInvoke");
 
         var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -329,7 +329,7 @@ public partial class RealRecordingTests
         };
 
         var exception = await Assert.ThrowsExactlyAsync<RecordFrameOutputException>(
-            () => recording.RecordAsync(session, null, new RecordOptions
+            () => recording.RecordAsync(uiTarget, null, new RecordOptions
             {
                 OutputPath = Path.Join(root, "failed.mp4"),
                 FramesDirectory = Path.Join(root, "failed.frames"),
@@ -349,8 +349,8 @@ public partial class RealRecordingTests
         var capture = new FakeWindowCapture();
         var svc = NewAutomation();
         var recording = NewRecordingService(svc, capture);
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "btnInvoke");
+        var uiTarget = SessionFor(fx);
+        await ResolveAsync(svc, uiTarget, "btnInvoke");
 
         var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -372,7 +372,7 @@ public partial class RealRecordingTests
             encoder = new FakeVideoEncoder(path, width, height);
         RecordFrameBundleWriter.s_create = _ => frameSink;
 
-        var result = await recording.RecordAsync(session, null, new RecordOptions
+        var result = await recording.RecordAsync(uiTarget, null, new RecordOptions
         {
             OutputPath = output,
             FramesDirectory = Path.Join(root, "drained.frames"),
@@ -396,8 +396,8 @@ public partial class RealRecordingTests
         var capture = new FakeWindowCapture();
         var svc = NewAutomation();
         var recording = NewRecordingService(svc, capture);
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "btnInvoke");
+        var uiTarget = SessionFor(fx);
+        await ResolveAsync(svc, uiTarget, "btnInvoke");
 
         var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -412,7 +412,7 @@ public partial class RealRecordingTests
             throw new IOException("simulated JPEG worker failure");
 
         var exception = await Assert.ThrowsExactlyAsync<RecordPartialOutputException>(
-            () => recording.RecordAsync(session, null, new RecordOptions
+            () => recording.RecordAsync(uiTarget, null, new RecordOptions
             {
                 OutputPath = output,
                 FramesDirectory = framesDirectory,
@@ -439,8 +439,8 @@ public partial class RealRecordingTests
         var capture = new FakeWindowCapture();
         var svc = NewAutomation();
         var recording = NewRecordingService(svc, capture);
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "btnInvoke");
+        var uiTarget = SessionFor(fx);
+        await ResolveAsync(svc, uiTarget, "btnInvoke");
 
         var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -462,7 +462,7 @@ public partial class RealRecordingTests
         };
 
         var exception = await Assert.ThrowsExactlyAsync<RecordPartialOutputException>(
-            () => recording.RecordAsync(session, null, new RecordOptions
+            () => recording.RecordAsync(uiTarget, null, new RecordOptions
             {
                 OutputPath = output,
                 FramesDirectory = framesDirectory,
@@ -483,8 +483,8 @@ public partial class RealRecordingTests
         var capture = new FakeWindowCapture();
         var svc = NewAutomation();
         var recording = NewRecordingService(svc, capture);
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "btnInvoke");
+        var uiTarget = SessionFor(fx);
+        await ResolveAsync(svc, uiTarget, "btnInvoke");
 
         var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -499,7 +499,7 @@ public partial class RealRecordingTests
             ByteLimit = RecordFrameBundleConfiguration.DefaultMaximumBundleBytes,
         };
 
-        var result = await recording.RecordAsync(session, null, new RecordOptions
+        var result = await recording.RecordAsync(uiTarget, null, new RecordOptions
         {
             OutputPath = Path.Join(root, "truncated.mp4"),
             FramesDirectory = Path.Join(root, "truncated.frames"),

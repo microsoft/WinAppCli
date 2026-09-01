@@ -85,12 +85,12 @@ public partial class RealRecordingTests
         IsExplicitWindow = explicitWindow,
     };
 
-    private static async Task<UiElement> ResolveAsync(TestAutomation svc, UiTarget session, string automationId)
+    private static async Task<UiElement> ResolveAsync(TestAutomation svc, UiTarget uiTarget, string automationId)
     {
         var deadline = Environment.TickCount64 + ReadyTimeoutMs;
         while (Environment.TickCount64 < deadline)
         {
-            var el = await svc.FindSingleElementAsync(session, new UiSelector { Query = automationId }, CancellationToken.None);
+            var el = await svc.FindSingleElementAsync(uiTarget, new UiSelector { Query = automationId }, CancellationToken.None);
             if (el is not null)
             {
                 return el;

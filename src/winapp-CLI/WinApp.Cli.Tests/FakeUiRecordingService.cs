@@ -24,7 +24,7 @@ internal sealed class FakeUiRecordingService : IUiRecordingService
 
     public bool? RecordingStartedFrameArtifactsActiveOverride { get; set; }
 
-    public async Task<RecordCaptureResult> RecordAsync(UiTarget session, string? elementId, RecordOptions options, CancellationToken ct, Action<bool>? onRecordingStarted = null)
+    public async Task<RecordCaptureResult> RecordAsync(UiTarget uiTarget, string? elementId, RecordOptions options, CancellationToken ct, Action<bool>? onRecordingStarted = null)
     {
         LastRecordOptions = options;
         if (RecordException is not null)

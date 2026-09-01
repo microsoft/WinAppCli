@@ -51,7 +51,7 @@ public static class GestureTargeting
     /// </summary>
     public static async Task<StableTarget> ResolveStableAsync(
         IUiAutomation uiAutomation,
-        UiTarget session,
+        UiTarget uiTarget,
         UiSelector selector,
         UiElement initial,
         int maxReads,
@@ -66,7 +66,7 @@ public static class GestureTargeting
         {
             await delay(readDelayMs, cancellationToken);
 
-            var current = await uiAutomation.FindSingleElementAsync(session, selector, cancellationToken);
+            var current = await uiAutomation.FindSingleElementAsync(uiTarget, selector, cancellationToken);
             if (current is null)
             {
                 return new StableTarget(TargetStatus.NotFound, initial, 0, 0);
@@ -108,12 +108,12 @@ public static class GestureTargeting
     /// </summary>
     public static async Task<StableTarget> ConfirmStillAsync(
         IUiAutomation uiAutomation,
-        UiTarget session,
+        UiTarget uiTarget,
         UiSelector selector,
         UiElement expected,
         CancellationToken cancellationToken)
     {
-        var current = await uiAutomation.FindSingleElementAsync(session, selector, cancellationToken);
+        var current = await uiAutomation.FindSingleElementAsync(uiTarget, selector, cancellationToken);
         if (current is null)
         {
             return new StableTarget(TargetStatus.NotFound, expected, 0, 0);

@@ -14,17 +14,17 @@ public partial class RealUiAutomationTests
     // Helpers
     // -----------------------------------------------------------------------------
 
-    private static async Task<double> VerticalPercentAsync(UiAutomationService svc, UiTarget session, string aid)
+    private static async Task<double> VerticalPercentAsync(UiAutomationService svc, UiTarget uiTarget, string aid)
     {
-        var el = await ResolveAsync(svc, session, aid);
-        var props = await svc.GetPropertiesAsync(session, el, "ScrollVerticalPercent", CancellationToken.None);
+        var el = await ResolveAsync(svc, uiTarget, aid);
+        var props = await svc.GetPropertiesAsync(uiTarget, el, "ScrollVerticalPercent", CancellationToken.None);
         return Convert.ToDouble(props["ScrollVerticalPercent"], System.Globalization.CultureInfo.InvariantCulture);
     }
 
-    private static async Task<double> HorizontalPercentAsync(UiAutomationService svc, UiTarget session, string aid)
+    private static async Task<double> HorizontalPercentAsync(UiAutomationService svc, UiTarget uiTarget, string aid)
     {
-        var el = await ResolveAsync(svc, session, aid);
-        var props = await svc.GetPropertiesAsync(session, el, "ScrollHorizontalPercent", CancellationToken.None);
+        var el = await ResolveAsync(svc, uiTarget, aid);
+        var props = await svc.GetPropertiesAsync(uiTarget, el, "ScrollHorizontalPercent", CancellationToken.None);
         return Convert.ToDouble(props["ScrollHorizontalPercent"], System.Globalization.CultureInfo.InvariantCulture);
     }
 
@@ -47,12 +47,12 @@ public partial class RealUiAutomationTests
     };
 
     /// <summary>Polls SearchAsync until at least one result appears (owned window takes a moment to register with UIA).</summary>
-    private static async Task<UiElement[]> PollSearchAsync(UiAutomationService svc, UiTarget session, string query)
+    private static async Task<UiElement[]> PollSearchAsync(UiAutomationService svc, UiTarget uiTarget, string query)
     {
         var deadline = Environment.TickCount64 + ReadyTimeoutMs;
         while (Environment.TickCount64 < deadline)
         {
-            var results = await svc.SearchAsync(session, new UiSelector { Query = query }, 20, CancellationToken.None);
+            var results = await svc.SearchAsync(uiTarget, new UiSelector { Query = query }, 20, CancellationToken.None);
             if (results.Length > 0)
             {
                 return results;
@@ -63,12 +63,12 @@ public partial class RealUiAutomationTests
     }
 
     /// <summary>Polls FindSingleElementAsync (via the other-windows path) until the element resolves.</summary>
-    private static async Task<UiElement> PollFindOtherWindowAsync(UiAutomationService svc, UiTarget session, string query)
+    private static async Task<UiElement> PollFindOtherWindowAsync(UiAutomationService svc, UiTarget uiTarget, string query)
     {
         var deadline = Environment.TickCount64 + ReadyTimeoutMs;
         while (Environment.TickCount64 < deadline)
         {
-            var found = await svc.FindSingleElementAsync(session, new UiSelector { Query = query }, CancellationToken.None);
+            var found = await svc.FindSingleElementAsync(uiTarget, new UiSelector { Query = query }, CancellationToken.None);
             if (found is not null)
             {
                 return found;

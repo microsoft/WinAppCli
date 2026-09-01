@@ -74,8 +74,8 @@ internal static partial class WgcCapture
                 DirectXPixelFormat.B8G8R8A8UIntNormalized,
                 numberOfBuffers: 2,
                 item.Size);
-            using var session = pool.CreateCaptureSession(item);
-            session.IsCursorCaptureEnabled = false;
+            using var uiTarget = pool.CreateCaptureSession(item);
+            uiTarget.IsCursorCaptureEnabled = false;
 
             using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
@@ -105,7 +105,7 @@ internal static partial class WgcCapture
                 }
             };
 
-            session.StartCapture();
+            uiTarget.StartCapture();
 
             while (true)
             {

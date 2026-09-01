@@ -78,16 +78,16 @@ public partial class UiCommandTests
     {
         // When the element's WindowHandle matches the session HWND, the method must return
         // the session HWND unchanged and leave all capture params untouched.
-        var sessionHwnd = (nint)0x1000;
+        var targetWindowHwnd = (nint)0x1000;
         int originLeft = 100, originTop = 200, srcW = 500, srcH = 375;
 
         var result = UiRecordingService.ResolvePopupCaptureHwnd(
-            elementWindowHandle: (long)sessionHwnd,
-            sessionHwnd: sessionHwnd,
+            elementWindowHandle: (long)targetWindowHwnd,
+            targetWindowHwnd: targetWindowHwnd,
             captureOriginLeft: ref originLeft, captureOriginTop: ref originTop,
             srcWidth: ref srcW, srcHeight: ref srcH);
 
-        Assert.AreEqual(sessionHwnd, result, "same-window element must return session HWND");
+        Assert.AreEqual(targetWindowHwnd, result, "same-window element must return the target window HWND");
         Assert.AreEqual(100, originLeft, "captureOriginLeft must be unchanged");
         Assert.AreEqual(200, originTop, "captureOriginTop must be unchanged");
         Assert.AreEqual(500, srcW, "srcWidth must be unchanged");
@@ -98,16 +98,16 @@ public partial class UiCommandTests
     public void ResolvePopupCaptureHwnd_NullWindowHandle_NoRetarget()
     {
         // A null WindowHandle must leave all params unchanged and return the session HWND.
-        var sessionHwnd = (nint)0x1000;
+        var targetWindowHwnd = (nint)0x1000;
         int originLeft = 100, originTop = 200, srcW = 500, srcH = 375;
 
         var result = UiRecordingService.ResolvePopupCaptureHwnd(
             elementWindowHandle: null,
-            sessionHwnd: sessionHwnd,
+            targetWindowHwnd: targetWindowHwnd,
             captureOriginLeft: ref originLeft, captureOriginTop: ref originTop,
             srcWidth: ref srcW, srcHeight: ref srcH);
 
-        Assert.AreEqual(sessionHwnd, result, "null WindowHandle must return session HWND");
+        Assert.AreEqual(targetWindowHwnd, result, "null WindowHandle must return the target window HWND");
         Assert.AreEqual(100, originLeft, "captureOriginLeft must be unchanged");
         Assert.AreEqual(200, originTop, "captureOriginTop must be unchanged");
         Assert.AreEqual(500, srcW, "srcWidth must be unchanged");
@@ -124,7 +124,7 @@ public partial class UiCommandTests
         //   3. Update srcWidth/srcHeight to the popup window's pixel dimensions.
         // Before the fix, the crop would be clamped against the main window's frame, producing
         // a truncated sliver (e.g. "width":64,"height":100 instead of 200×100).
-        var sessionHwnd = (nint)0x1000;
+        var targetWindowHwnd = (nint)0x1000;
         var popupHwnd = (nint)0x2000;
 
         // Main window at (100,100), size 500×375.
@@ -133,7 +133,7 @@ public partial class UiCommandTests
         // Popup window at (550,30), size 220×130 (partly outside main window).
         var result = UiRecordingService.ResolvePopupCaptureHwnd(
             elementWindowHandle: (long)popupHwnd,
-            sessionHwnd: sessionHwnd,
+            targetWindowHwnd: targetWindowHwnd,
             captureOriginLeft: ref originLeft, captureOriginTop: ref originTop,
             srcWidth: ref srcW, srcHeight: ref srcH,
             getAncestorRoot: h => h,                             // popup IS already the root
@@ -154,14 +154,14 @@ public partial class UiCommandTests
         // cropW=200, cropH=100 — not the clamped sliver from using the main window origin.
         // Without the fix, using the main window's origin (100,100) with srcW=500 would
         // give cropX=499 (clamped), cropW=1 — a 1-pixel sliver.
-        var sessionHwnd = (nint)0x1000;
+        var targetWindowHwnd = (nint)0x1000;
         var popupHwnd = (nint)0x2000;
         int originLeft = 100, originTop = 100, srcW = 500, srcH = 375;
 
         // Popup window at (550,30), size 260×120 — large enough to fully contain the element.
         UiRecordingService.ResolvePopupCaptureHwnd(
             elementWindowHandle: (long)popupHwnd,
-            sessionHwnd: sessionHwnd,
+            targetWindowHwnd: targetWindowHwnd,
             captureOriginLeft: ref originLeft, captureOriginTop: ref originTop,
             srcWidth: ref srcW, srcHeight: ref srcH,
             getAncestorRoot: h => h,
@@ -185,22 +185,22 @@ public partial class UiCommandTests
     {
         // If GetAncestor(GA_ROOT) of the element's HWND returns the session HWND, the element's
         // HWND is a child control inside the session window — no retarget is needed.
-        var sessionHwnd = (nint)0x1000;
+        var targetWindowHwnd = (nint)0x1000;
         var childHwnd = (nint)0x2000; // a child HWND inside the session window
 
         int originLeft = 100, originTop = 100, srcW = 500, srcH = 375;
 
         var result = UiRecordingService.ResolvePopupCaptureHwnd(
             elementWindowHandle: (long)childHwnd,
-            sessionHwnd: sessionHwnd,
+            targetWindowHwnd: targetWindowHwnd,
             captureOriginLeft: ref originLeft, captureOriginTop: ref originTop,
             srcWidth: ref srcW, srcHeight: ref srcH,
-            getAncestorRoot: _ => sessionHwnd,            // GA_ROOT resolves to the session window
+            getAncestorRoot: _ => targetWindowHwnd,            // GA_ROOT resolves to the session window
             getWindowRect: _ => throw new InvalidOperationException("must not be called"));
 
-        Assert.AreEqual(sessionHwnd, result, "when GA_ROOT = session HWND, no retarget should occur");
-        Assert.AreEqual(100, originLeft, "params must be unchanged when GA_ROOT = session HWND");
-        Assert.AreEqual(500, srcW, "params must be unchanged when GA_ROOT = session HWND");
+        Assert.AreEqual(targetWindowHwnd, result, "when GA_ROOT = the target window HWND, no retarget should occur");
+        Assert.AreEqual(100, originLeft, "params must be unchanged when GA_ROOT = the target window HWND");
+        Assert.AreEqual(500, srcW, "params must be unchanged when GA_ROOT = the target window HWND");
     }
 
     [TestMethod]
@@ -209,13 +209,13 @@ public partial class UiCommandTests
         // H2 regression test: the element's UIA native-window ancestor resolves to a top-level
         // popup/dialog window distinct from the session window. Expected: retarget to that HWND
         // and update the capture origin/size to the popup window's rect.
-        var sessionHwnd   = (nint)0x1000;
+        var targetWindowHwnd   = (nint)0x1000;
         var popupRootHwnd = (nint)0x2000;
 
         int originLeft = 100, originTop = 100, srcW = 500, srcH = 375;
 
         var result = UiRecordingService.DeriveElementCaptureHwnd(
-            sessionHwnd: sessionHwnd,
+            targetWindowHwnd: targetWindowHwnd,
             captureOriginLeft: ref originLeft, captureOriginTop: ref originTop,
             srcWidth: ref srcW, srcHeight: ref srcH,
             getElementTopLevelHwnd: () => popupRootHwnd,
@@ -236,18 +236,18 @@ public partial class UiCommandTests
         // This is also the overlap-safety case — an unrelated window overlapping the element
         // center is never a UIA ancestor, so the ancestor walk still returns the session window
         // and no retarget occurs (the round-11 geometry/z-order bug is structurally impossible).
-        var sessionHwnd = (nint)0x1000;
+        var targetWindowHwnd = (nint)0x1000;
         int originLeft = 100, originTop = 100, srcW = 500, srcH = 375;
 
         var result = UiRecordingService.DeriveElementCaptureHwnd(
-            sessionHwnd: sessionHwnd,
+            targetWindowHwnd: targetWindowHwnd,
             captureOriginLeft: ref originLeft, captureOriginTop: ref originTop,
             srcWidth: ref srcW, srcHeight: ref srcH,
-            getElementTopLevelHwnd: () => sessionHwnd,
+            getElementTopLevelHwnd: () => targetWindowHwnd,
             getWindowRect:          _ => throw new InvalidOperationException("must not be called"));
 
-        Assert.AreEqual(sessionHwnd, result,
-            "element whose top-level is the session window must not retarget");
+        Assert.AreEqual(targetWindowHwnd, result,
+            "element whose top-level is the target window must not retarget");
         Assert.AreEqual(100, originLeft, "params must be unchanged for in-window element");
         Assert.AreEqual(500, srcW,       "params must be unchanged for in-window element");
     }
@@ -257,17 +257,17 @@ public partial class UiCommandTests
     {
         // The element could not be re-resolved or has no native-window ancestor (getter returns 0).
         // Expected: leave capture on the session window; do not read a window rect.
-        var sessionHwnd = (nint)0x1000;
+        var targetWindowHwnd = (nint)0x1000;
         int originLeft = 100, originTop = 100, srcW = 500, srcH = 375;
 
         var result = UiRecordingService.DeriveElementCaptureHwnd(
-            sessionHwnd: sessionHwnd,
+            targetWindowHwnd: targetWindowHwnd,
             captureOriginLeft: ref originLeft, captureOriginTop: ref originTop,
             srcWidth: ref srcW, srcHeight: ref srcH,
             getElementTopLevelHwnd: () => 0,
             getWindowRect:          _ => throw new InvalidOperationException("must not be called"));
 
-        Assert.AreEqual(sessionHwnd, result, "no derivable top-level window must not retarget");
+        Assert.AreEqual(targetWindowHwnd, result, "no derivable top-level window must not retarget");
         Assert.AreEqual(100, originLeft, "params must be unchanged when no ancestor is derived");
         Assert.AreEqual(500, srcW,       "params must be unchanged when no ancestor is derived");
     }

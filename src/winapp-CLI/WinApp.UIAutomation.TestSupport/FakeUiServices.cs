@@ -113,25 +113,25 @@ public class FakeUiAutomationService : IUiAutomation
         return true;
     }
 
-    public Task<UiElement[]> InspectAsync(UiTarget session, string? elementId, int depth, CancellationToken ct)
+    public Task<UiElement[]> InspectAsync(UiTarget uiTarget, string? elementId, int depth, CancellationToken ct)
     {
         if (InspectThrow is not null) { throw InspectThrow; }
         return Task.FromResult(InspectResult);
     }
 
-    public Task<UiElement[]> InspectAncestorsAsync(UiTarget session, string elementId, CancellationToken ct)
+    public Task<UiElement[]> InspectAncestorsAsync(UiTarget uiTarget, string elementId, CancellationToken ct)
     {
         if (InspectThrow is not null) { throw InspectThrow; }
         return Task.FromResult(InspectResult);
     }
 
-    public Task<UiElement[]> SearchAsync(UiTarget session, UiSelector selector, int maxResults, CancellationToken ct)
+    public Task<UiElement[]> SearchAsync(UiTarget uiTarget, UiSelector selector, int maxResults, CancellationToken ct)
     {
         if (SearchThrow is not null) { throw SearchThrow; }
         return Task.FromResult(SearchResult.Take(maxResults).ToArray());
     }
 
-    public Task<UiElement?> FindSingleElementAsync(UiTarget session, UiSelector selector, CancellationToken ct)
+    public Task<UiElement?> FindSingleElementAsync(UiTarget uiTarget, UiSelector selector, CancellationToken ct)
     {
         if (FindSingleElementThrowException is not null) { throw FindSingleElementThrowException; }
         if (FindSingleThrow is not null) { throw FindSingleThrow; }
@@ -168,13 +168,13 @@ public class FakeUiAutomationService : IUiAutomation
         return Task.FromResult(FindSingleResult);
     }
 
-    public Task<Dictionary<string, object?>> GetPropertiesAsync(UiTarget session, UiElement element, string? propertyName, CancellationToken ct)
+    public Task<Dictionary<string, object?>> GetPropertiesAsync(UiTarget uiTarget, UiElement element, string? propertyName, CancellationToken ct)
     {
         if (PropertiesThrow is not null) { throw PropertiesThrow; }
         return Task.FromResult(PropertiesResult);
     }
 
-    public Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiTarget session, string? elementId, bool captureScreen, bool focus, CancellationToken ct)
+    public Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiTarget uiTarget, string? elementId, bool captureScreen, bool focus, CancellationToken ct)
     {
         if (ScreenshotThrow is not null) { throw ScreenshotThrow; }
         return Task.FromResult(ScreenshotResult);
@@ -208,7 +208,7 @@ public class FakeUiAutomationService : IUiAutomation
         int displayWidth, int displayHeight)
         => new byte[Math.Max(0, encoderWidth * encoderHeight * 4)];
 
-    public Task<string> InvokeAsync(UiTarget session, UiElement element, CancellationToken ct)
+    public Task<string> InvokeAsync(UiTarget uiTarget, UiElement element, CancellationToken ct)
     {
         if (InvokeThrow is not null) { throw InvokeThrow; }
         if (InvokeThrowsForAncestorFallback && element.InvokableAncestor is not null)
@@ -218,25 +218,25 @@ public class FakeUiAutomationService : IUiAutomation
         return Task.FromResult(InvokeResult);
     }
 
-    public Task SetValueAsync(UiTarget session, UiElement element, string text, CancellationToken ct)
+    public Task SetValueAsync(UiTarget uiTarget, UiElement element, string text, CancellationToken ct)
     {
         if (SetValueThrow is not null) { throw SetValueThrow; }
         return Task.CompletedTask;
     }
 
-    public Task FocusAsync(UiTarget session, UiElement element, CancellationToken ct)
+    public Task FocusAsync(UiTarget uiTarget, UiElement element, CancellationToken ct)
     {
         if (FocusThrow is not null) { throw FocusThrow; }
         return Task.CompletedTask;
     }
 
-    public Task ScrollIntoViewAsync(UiTarget session, UiElement element, CancellationToken ct)
+    public Task ScrollIntoViewAsync(UiTarget uiTarget, UiElement element, CancellationToken ct)
     {
         if (ScrollIntoViewThrow is not null) { throw ScrollIntoViewThrow; }
         return Task.CompletedTask;
     }
 
-    public Task ScrollContainerAsync(UiTarget session, UiElement element, string? direction, string? destination, CancellationToken ct)
+    public Task ScrollContainerAsync(UiTarget uiTarget, UiElement element, string? direction, string? destination, CancellationToken ct)
     {
         if (ScrollContainerThrow is not null) { throw ScrollContainerThrow; }
         return Task.CompletedTask;
@@ -244,13 +244,13 @@ public class FakeUiAutomationService : IUiAutomation
 
     public UiElement? FocusedResult { get; set; } = new UiElement { Id = "e0", Type = "Edit", Name = "FocusedElement" };
 
-    public Task<UiElement?> GetFocusedElementAsync(UiTarget session, CancellationToken ct)
+    public Task<UiElement?> GetFocusedElementAsync(UiTarget uiTarget, CancellationToken ct)
     {
         if (GetFocusedThrow is not null) { throw GetFocusedThrow; }
         return Task.FromResult(FocusedResult);
     }
 
-    public Task<string?> GetTextAsync(UiTarget session, UiElement element, CancellationToken ct)
+    public Task<string?> GetTextAsync(UiTarget uiTarget, UiElement element, CancellationToken ct)
     {
         if (GetTextThrow is not null) { throw GetTextThrow; }
         if (GetTextResults.Count > 0) { return Task.FromResult(GetTextResults.Dequeue()); }
@@ -261,28 +261,28 @@ public class FakeUiAutomationService : IUiAutomation
 /// <summary>
 /// Fake session service for testing — returns a configurable session without process resolution.
 /// </summary>
-public class FakeUiSessionService : IUiTargetResolver
+public class FakeUiTargetResolver : IUiTargetResolver
 {
-    public UiTarget SessionResult { get; set; } = new()
+    public UiTarget TargetResult { get; set; } = new()
     {
         ProcessId = 1234,
         ProcessName = "TestApp",
         WindowTitle = "Test Window"
     };
 
-    /// <summary>When non-null, <see cref="ResolveSessionAsync"/> throws this exception instead
-    /// of returning <see cref="SessionResult"/>. Use to test command-level exception handling.</summary>
+    /// <summary>When non-null, <see cref="ResolveAsync"/> throws this exception instead
+    /// of returning <see cref="TargetResult"/>. Use to test command-level exception handling.</summary>
     public Exception? ThrowException { get; set; }
 
-    /// <summary>When set, <see cref="ResolveSessionAsync"/> throws this — drives a command's generic
+    /// <summary>When set, <see cref="ResolveAsync"/> throws this — drives a command's generic
     /// (or COMException) catch from inside its <c>try</c>, before any element work. Default null = no-op.</summary>
     public Exception? ResolveThrow { get; set; }
 
-    public Task<UiTarget> ResolveSessionAsync(string? app, long? hwnd, CancellationToken ct)
+    public Task<UiTarget> ResolveAsync(string? app, long? hwnd, CancellationToken ct)
     {
         if (ThrowException is not null) { throw ThrowException; }
         if (ResolveThrow is not null) { throw ResolveThrow; }
-        return Task.FromResult(SessionResult);
+        return Task.FromResult(TargetResult);
     }
 }
 
@@ -447,7 +447,7 @@ public sealed class FakeSystemUiQuery : ISystemUiQuery
     public Dictionary<int, UiProcessInfo?> ProcessesById { get; } = [];
 
     /// <summary>When set, any PID not in <see cref="ProcessesById"/> resolves to this snapshot
-    /// (with its <see cref="UiProcessInfo.Id"/> swapped to the requested PID). Lets CreateSession's
+    /// (with its <see cref="UiProcessInfo.Id"/> swapped to the requested PID). Lets CreateTarget's
     /// name lookup succeed for arbitrary PIDs without seeding each one.</summary>
     public UiProcessInfo? DefaultProcessById { get; set; }
 

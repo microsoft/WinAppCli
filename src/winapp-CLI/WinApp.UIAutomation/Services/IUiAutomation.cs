@@ -30,20 +30,20 @@ public interface IUiAutomation
     bool TryGetWindowRect(long hwnd, out PointerRect rect);
 
     
-    Task<UiElement[]> InspectAsync(UiTarget session, string? elementId, int depth, CancellationToken ct);
-    Task<UiElement[]> InspectAncestorsAsync(UiTarget session, string elementId, CancellationToken ct);
-    Task<UiElement[]> SearchAsync(UiTarget session, UiSelector selector, int maxResults, CancellationToken ct);
-    Task<UiElement?> FindSingleElementAsync(UiTarget session, UiSelector selector, CancellationToken ct);
-    Task<Dictionary<string, object?>> GetPropertiesAsync(UiTarget session, UiElement element, string? propertyName, CancellationToken ct);
-    Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiTarget session, string? elementId, bool captureScreen, bool focus, CancellationToken ct);
+    Task<UiElement[]> InspectAsync(UiTarget uiTarget, string? elementId, int depth, CancellationToken ct);
+    Task<UiElement[]> InspectAncestorsAsync(UiTarget uiTarget, string elementId, CancellationToken ct);
+    Task<UiElement[]> SearchAsync(UiTarget uiTarget, UiSelector selector, int maxResults, CancellationToken ct);
+    Task<UiElement?> FindSingleElementAsync(UiTarget uiTarget, UiSelector selector, CancellationToken ct);
+    Task<Dictionary<string, object?>> GetPropertiesAsync(UiTarget uiTarget, UiElement element, string? propertyName, CancellationToken ct);
+    Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiTarget uiTarget, string? elementId, bool captureScreen, bool focus, CancellationToken ct);
 
-    Task<string> InvokeAsync(UiTarget session, UiElement element, CancellationToken ct);
-    Task SetValueAsync(UiTarget session, UiElement element, string text, CancellationToken ct);
-    Task FocusAsync(UiTarget session, UiElement element, CancellationToken ct);
-    Task ScrollIntoViewAsync(UiTarget session, UiElement element, CancellationToken ct);
-    Task ScrollContainerAsync(UiTarget session, UiElement element, string? direction, string? destination, CancellationToken ct);
-    Task<UiElement?> GetFocusedElementAsync(UiTarget session, CancellationToken ct);
-    Task<string?> GetTextAsync(UiTarget session, UiElement element, CancellationToken ct);
+    Task<string> InvokeAsync(UiTarget uiTarget, UiElement element, CancellationToken ct);
+    Task SetValueAsync(UiTarget uiTarget, UiElement element, string text, CancellationToken ct);
+    Task FocusAsync(UiTarget uiTarget, UiElement element, CancellationToken ct);
+    Task ScrollIntoViewAsync(UiTarget uiTarget, UiElement element, CancellationToken ct);
+    Task ScrollContainerAsync(UiTarget uiTarget, UiElement element, string? direction, string? destination, CancellationToken ct);
+    Task<UiElement?> GetFocusedElementAsync(UiTarget uiTarget, CancellationToken ct);
+    Task<string?> GetTextAsync(UiTarget uiTarget, UiElement element, CancellationToken ct);
 
     /// <summary>
     /// Resolves the target's root UIA window. Returns <see langword="false"/> when no UIA window

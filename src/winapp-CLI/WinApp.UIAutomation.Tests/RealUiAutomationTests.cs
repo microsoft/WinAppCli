@@ -69,12 +69,12 @@ public partial class RealUiAutomationTests
     };
 
     /// <summary>Polls until the given AutomationId is resolvable via the real service (UIA ready).</summary>
-    private static async Task<UiElement> ResolveAsync(UiAutomationService svc, UiTarget session, string automationId)
+    private static async Task<UiElement> ResolveAsync(UiAutomationService svc, UiTarget uiTarget, string automationId)
     {
         var deadline = Environment.TickCount64 + ReadyTimeoutMs;
         while (Environment.TickCount64 < deadline)
         {
-            var el = await svc.FindSingleElementAsync(session, new UiSelector { Query = automationId }, CancellationToken.None);
+            var el = await svc.FindSingleElementAsync(uiTarget, new UiSelector { Query = automationId }, CancellationToken.None);
             if (el is not null)
             {
                 return el;
@@ -146,10 +146,10 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "btnInvoke");
+        var uiTarget = SessionFor(fx);
+        await ResolveAsync(svc, uiTarget, "btnInvoke");
 
-        var tree = await svc.InspectAsync(session, null, 4, CancellationToken.None);
+        var tree = await svc.InspectAsync(uiTarget, null, 4, CancellationToken.None);
 
         Assert.IsTrue(tree.Any(e => e.Type == "Window" && e.Depth == 0), "root Window expected at depth 0");
         Assert.IsTrue(tree.Any(e => e.AutomationId == "btnInvoke" && e.Type == "Button" && e.Depth == 1));
@@ -165,10 +165,10 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "btnInvoke");
+        var uiTarget = SessionFor(fx);
+        await ResolveAsync(svc, uiTarget, "btnInvoke");
 
-        var tree = await svc.InspectAsync(session, null, 0, CancellationToken.None);
+        var tree = await svc.InspectAsync(uiTarget, null, 0, CancellationToken.None);
 
         Assert.AreEqual(1, tree.Length, "depth 0 must return only the root element");
         Assert.AreEqual("Window", tree[0].Type);
@@ -180,10 +180,10 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "pnlScroll");
+        var uiTarget = SessionFor(fx);
+        await ResolveAsync(svc, uiTarget, "pnlScroll");
 
-        var tree = await svc.InspectAsync(session, "pnlScroll", 3, CancellationToken.None);
+        var tree = await svc.InspectAsync(uiTarget, "pnlScroll", 3, CancellationToken.None);
 
         Assert.AreEqual("Pane", tree[0].Type, "scoped inspect should root at the panel");
         Assert.AreEqual("pnlScroll", tree[0].AutomationId);
@@ -196,10 +196,10 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "btnInvoke");
+        var uiTarget = SessionFor(fx);
+        await ResolveAsync(svc, uiTarget, "btnInvoke");
 
-        var chain = await svc.InspectAncestorsAsync(session, "btnInvoke", CancellationToken.None);
+        var chain = await svc.InspectAncestorsAsync(uiTarget, "btnInvoke", CancellationToken.None);
 
         Assert.IsTrue(chain.Length >= 2, "expected at least the window and the button");
         Assert.AreEqual("btnInvoke", chain[^1].AutomationId, "target should be last (deepest) in the chain");
@@ -211,11 +211,11 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "btnInvoke");
+        var uiTarget = SessionFor(fx);
+        await ResolveAsync(svc, uiTarget, "btnInvoke");
 
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(
-            () => svc.InspectAncestorsAsync(session, "no-such-element-xyz", CancellationToken.None));
+            () => svc.InspectAncestorsAsync(uiTarget, "no-such-element-xyz", CancellationToken.None));
     }
 
     [TestMethod]
@@ -223,9 +223,9 @@ public partial class RealUiAutomationTests
     {
         var svc = NewService();
         // A session pointing at a non-existent window/process yields no root -> empty result.
-        var session = new UiTarget { ProcessId = 0x7FFFFFFE, WindowHandle = 0, IsExplicitWindow = true };
+        var uiTarget = new UiTarget { ProcessId = 0x7FFFFFFE, WindowHandle = 0, IsExplicitWindow = true };
 
-        var tree = await svc.InspectAsync(session, null, 3, CancellationToken.None);
+        var tree = await svc.InspectAsync(uiTarget, null, 3, CancellationToken.None);
 
         Assert.AreEqual(0, tree.Length);
     }
@@ -235,16 +235,16 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
+        var uiTarget = SessionFor(fx);
 
         // First discover the scroll panel's slug from a full inspect, then scope a second inspect to
         // that slug. Passing a slug (not a legacy selector) exercises the slug-scope branch of
         // InspectAsync (ParseSlug -> FindElementBySlug -> ResolveComElement).
-        var full = await svc.InspectAsync(session, null, 4, CancellationToken.None);
+        var full = await svc.InspectAsync(uiTarget, null, 4, CancellationToken.None);
         var panel = full.First(e => e.AutomationId == "pnlScroll");
         Assert.IsNotNull(panel.Selector, "expected a promoted slug/selector on the scroll panel");
 
-        var subtree = await svc.InspectAsync(session, panel.Selector, 3, CancellationToken.None);
+        var subtree = await svc.InspectAsync(uiTarget, panel.Selector, 3, CancellationToken.None);
 
         // The scoped walk starts at the panel: its scrollable children are present, but unrelated
         // top-level controls (the invoke button) are not part of this subtree.
@@ -259,7 +259,7 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = NonExplicitSession(fx);
+        var uiTarget = NonExplicitSession(fx);
         fx.OpenOwnedWindow("Fixture Sibling Window");
 
         // With a non-explicit session and a second independent (non-owned) top-level window open, a
@@ -271,7 +271,7 @@ public partial class RealUiAutomationTests
         UiElement[] tree = [];
         while (Environment.TickCount64 < deadline)
         {
-            tree = await svc.InspectAsync(session, null, 6, CancellationToken.None);
+            tree = await svc.InspectAsync(uiTarget, null, 6, CancellationToken.None);
             if (tree.Any(e => e.AutomationId == "btnOwned"))
             {
                 break;
@@ -296,10 +296,10 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "btnInvoke");
+        var uiTarget = SessionFor(fx);
+        await ResolveAsync(svc, uiTarget, "btnInvoke");
 
-        var results = await svc.SearchAsync(session, new UiSelector { Query = "btnInvoke" }, 10, CancellationToken.None);
+        var results = await svc.SearchAsync(uiTarget, new UiSelector { Query = "btnInvoke" }, 10, CancellationToken.None);
 
         Assert.AreEqual(1, results.Length);
         Assert.AreEqual("Button", results[0].Type);
@@ -311,10 +311,10 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "pnlChild00");
+        var uiTarget = SessionFor(fx);
+        await ResolveAsync(svc, uiTarget, "pnlChild00");
 
-        var results = await svc.SearchAsync(session, new UiSelector { Query = "Child 1" }, 50, CancellationToken.None);
+        var results = await svc.SearchAsync(uiTarget, new UiSelector { Query = "Child 1" }, 50, CancellationToken.None);
 
         // "Child 1" matches Child 10..19 by name (10 controls).
         Assert.IsTrue(results.Length >= 10, $"expected >=10 matches, got {results.Length}");
@@ -326,10 +326,10 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "btnInvoke");
+        var uiTarget = SessionFor(fx);
+        await ResolveAsync(svc, uiTarget, "btnInvoke");
 
-        var results = await svc.SearchAsync(session, new UiSelector { Query = "zzz-does-not-exist" }, 10, CancellationToken.None);
+        var results = await svc.SearchAsync(uiTarget, new UiSelector { Query = "zzz-does-not-exist" }, 10, CancellationToken.None);
 
         Assert.AreEqual(0, results.Length);
     }
@@ -339,13 +339,13 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "lblText");
+        var uiTarget = SessionFor(fx);
+        await ResolveAsync(svc, uiTarget, "lblText");
 
         // A Label supports no InvokePattern, so the FindAll loop takes the !IsInvokable branch and
         // looks for an invokable ancestor. The label sits directly on the form (no invokable parent),
         // so the element is returned with a null InvokableAncestor.
-        var results = await svc.SearchAsync(session, new UiSelector { Query = "Hello Label" }, 10, CancellationToken.None);
+        var results = await svc.SearchAsync(uiTarget, new UiSelector { Query = "Hello Label" }, 10, CancellationToken.None);
 
         var label = results.SingleOrDefault(r => r.AutomationId == "lblText");
         Assert.IsNotNull(label, "expected the non-invokable label to be returned by search");
@@ -358,12 +358,12 @@ public partial class RealUiAutomationTests
         using var fx = new UiaTestFixture();
         var svc = NewService();
         fx.OpenOwnedWindow("Fixture Owned Window");
-        var session = NonExplicitSession(fx);
+        var uiTarget = NonExplicitSession(fx);
 
         // "Owned Button" is the accessible Name (not the AutomationId), so the exact-AutomationId probe
         // on the owned window misses and the search falls through to the substring BuildCondition
         // branch of the owned-window search loop.
-        var results = await PollSearchAsync(svc, session, "Owned Button");
+        var results = await PollSearchAsync(svc, uiTarget, "Owned Button");
 
         Assert.IsTrue(results.Any(r => r.AutomationId == "btnOwned"),
             "expected the owned window's button to be found via the substring branch");
@@ -374,14 +374,14 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
+        var uiTarget = SessionFor(fx);
         // Get a slug from a list item (list items have no AutomationId, so they get slug selectors).
-        await ResolveAsync(svc, session, "lstItems");
-        var tree = await svc.InspectAsync(session, "lstItems", 2, CancellationToken.None);
+        await ResolveAsync(svc, uiTarget, "lstItems");
+        var tree = await svc.InspectAsync(uiTarget, "lstItems", 2, CancellationToken.None);
         var item = tree.First(e => e.Type == "ListItem" && e.Name == "Item 07");
         Assert.IsNotNull(item.Selector);
 
-        var found = await svc.FindSingleElementAsync(session, new UiSelector { Slug = item.Selector }, CancellationToken.None);
+        var found = await svc.FindSingleElementAsync(uiTarget, new UiSelector { Slug = item.Selector }, CancellationToken.None);
 
         Assert.IsNotNull(found);
         Assert.AreEqual("Item 07", found.Name);
@@ -392,10 +392,10 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "btnInvoke");
+        var uiTarget = SessionFor(fx);
+        await ResolveAsync(svc, uiTarget, "btnInvoke");
 
-        var found = await svc.FindSingleElementAsync(session, new UiSelector { Query = "nope-xyz-123" }, CancellationToken.None);
+        var found = await svc.FindSingleElementAsync(uiTarget, new UiSelector { Query = "nope-xyz-123" }, CancellationToken.None);
 
         Assert.IsNull(found);
     }
@@ -405,12 +405,12 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "pnlChild00");
+        var uiTarget = SessionFor(fx);
+        await ResolveAsync(svc, uiTarget, "pnlChild00");
 
         // "Child" matches 40 buttons by name; all are invokable so it cannot be disambiguated.
         var ex = await Assert.ThrowsExactlyAsync<UiAmbiguousSelectorException>(
-            () => svc.FindSingleElementAsync(session, new UiSelector { Query = "Child" }, CancellationToken.None));
+            () => svc.FindSingleElementAsync(uiTarget, new UiSelector { Query = "Child" }, CancellationToken.None));
         StringAssert.Contains(ex.Message, "matched");
     }
 
@@ -423,10 +423,10 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
-        var check = await ResolveAsync(svc, session, "chkToggle");
+        var uiTarget = SessionFor(fx);
+        var check = await ResolveAsync(svc, uiTarget, "chkToggle");
 
-        var props = await svc.GetPropertiesAsync(session, check, null, CancellationToken.None);
+        var props = await svc.GetPropertiesAsync(uiTarget, check, null, CancellationToken.None);
 
         Assert.AreEqual("CheckBox", props["ControlType"]);
         Assert.AreEqual("Toggle Me", props["Name"]);
@@ -440,10 +440,10 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
-        var btn = await ResolveAsync(svc, session, "btnInvoke");
+        var uiTarget = SessionFor(fx);
+        var btn = await ResolveAsync(svc, uiTarget, "btnInvoke");
 
-        var props = await svc.GetPropertiesAsync(session, btn, "Name", CancellationToken.None);
+        var props = await svc.GetPropertiesAsync(uiTarget, btn, "Name", CancellationToken.None);
 
         Assert.AreEqual(1, props.Count);
         Assert.AreEqual("Click Me", props["Name"]);
@@ -454,10 +454,10 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
-        var btn = await ResolveAsync(svc, session, "btnInvoke");
+        var uiTarget = SessionFor(fx);
+        var btn = await ResolveAsync(svc, uiTarget, "btnInvoke");
 
-        var props = await svc.GetPropertiesAsync(session, btn, "NoSuchProperty", CancellationToken.None);
+        var props = await svc.GetPropertiesAsync(uiTarget, btn, "NoSuchProperty", CancellationToken.None);
 
         Assert.AreEqual(1, props.Count);
         Assert.IsNull(props["NoSuchProperty"]);
@@ -468,10 +468,10 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
-        var panel = await ResolveAsync(svc, session, "pnlScroll");
+        var uiTarget = SessionFor(fx);
+        var panel = await ResolveAsync(svc, uiTarget, "pnlScroll");
 
-        var props = await svc.GetPropertiesAsync(session, panel, null, CancellationToken.None);
+        var props = await svc.GetPropertiesAsync(uiTarget, panel, null, CancellationToken.None);
 
         Assert.IsTrue(props.ContainsKey("VerticallyScrollable"));
         Assert.IsTrue(props.ContainsKey("ScrollVerticalPercent"));

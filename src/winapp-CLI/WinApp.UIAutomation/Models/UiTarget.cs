@@ -7,7 +7,7 @@ namespace Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation;
 
 /// <summary>
 /// The app window that automation calls act on. Obtain one from
-/// <see cref="IUiTargetResolver.ResolveSessionAsync"/>, or from a window handle you already have
+/// <see cref="IUiTargetResolver.ResolveAsync"/>, or from a window handle you already have
 /// via <see cref="FromWindowHandle"/>.
 /// </summary>
 public sealed class UiTarget

@@ -12,7 +12,7 @@ public sealed partial class UiRecordingService
     /// <summary>Retargets capture to an element's popup or owned top-level window.</summary>
     internal static nint ResolvePopupCaptureHwnd(
         long? elementWindowHandle,
-        nint sessionHwnd,
+        nint targetWindowHwnd,
         ref int captureOriginLeft,
         ref int captureOriginTop,
         ref int srcWidth,
@@ -20,9 +20,9 @@ public sealed partial class UiRecordingService
         Func<nint, nint>? getAncestorRoot = null,
         Func<nint, (int left, int top, int right, int bottom)>? getWindowRect = null)
     {
-        if (!elementWindowHandle.HasValue || elementWindowHandle.Value == sessionHwnd)
+        if (!elementWindowHandle.HasValue || elementWindowHandle.Value == targetWindowHwnd)
         {
-            return sessionHwnd;
+            return targetWindowHwnd;
         }
 
         var rawElementHwnd = (nint)elementWindowHandle.Value;
@@ -40,9 +40,9 @@ public sealed partial class UiRecordingService
             elementOwnerHwnd = rootHwnd.IsNull ? rawElementHwnd : (nint)rootHwnd;
         }
 
-        if (elementOwnerHwnd == sessionHwnd)
+        if (elementOwnerHwnd == targetWindowHwnd)
         {
-            return sessionHwnd;
+            return targetWindowHwnd;
         }
 
         if (getWindowRect is not null)
@@ -91,7 +91,7 @@ public sealed partial class UiRecordingService
 
     /// <summary>Retargets capture to a resolved element window.</summary>
     internal static nint DeriveElementCaptureHwnd(
-        nint sessionHwnd,
+        nint targetWindowHwnd,
         ref int captureOriginLeft,
         ref int captureOriginTop,
         ref int srcWidth,
@@ -100,9 +100,9 @@ public sealed partial class UiRecordingService
         Func<nint, (int left, int top, int right, int bottom)>? getWindowRect = null)
     {
         var derived = getElementTopLevelHwnd();
-        if (derived == 0 || derived == sessionHwnd)
+        if (derived == 0 || derived == targetWindowHwnd)
         {
-            return sessionHwnd;
+            return targetWindowHwnd;
         }
 
         if (getWindowRect is not null)

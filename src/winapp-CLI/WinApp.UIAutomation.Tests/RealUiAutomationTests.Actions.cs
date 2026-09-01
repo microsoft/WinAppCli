@@ -19,16 +19,16 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
-        var button = await ResolveAsync(svc, session, "btnInvoke");
-        var resultBefore = await svc.GetTextAsync(session, await ResolveAsync(svc, session, "txtResult"), CancellationToken.None);
+        var uiTarget = SessionFor(fx);
+        var button = await ResolveAsync(svc, uiTarget, "btnInvoke");
+        var resultBefore = await svc.GetTextAsync(uiTarget, await ResolveAsync(svc, uiTarget, "txtResult"), CancellationToken.None);
         Assert.AreEqual("unclicked", resultBefore);
 
-        var pattern = await svc.InvokeAsync(session, button, CancellationToken.None);
+        var pattern = await svc.InvokeAsync(uiTarget, button, CancellationToken.None);
 
         Assert.AreEqual("InvokePattern", pattern);
         await WaitForAsync(async () =>
-            await svc.GetTextAsync(session, await ResolveAsync(svc, session, "txtResult"), CancellationToken.None) == "clicked",
+            await svc.GetTextAsync(uiTarget, await ResolveAsync(svc, uiTarget, "txtResult"), CancellationToken.None) == "clicked",
             "result box never became 'clicked' after invoking the button");
     }
 
@@ -37,17 +37,17 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
-        var check = await ResolveAsync(svc, session, "chkToggle");
-        Assert.AreEqual("Off", (await svc.GetPropertiesAsync(session, check, "ToggleState", CancellationToken.None))["ToggleState"]);
+        var uiTarget = SessionFor(fx);
+        var check = await ResolveAsync(svc, uiTarget, "chkToggle");
+        Assert.AreEqual("Off", (await svc.GetPropertiesAsync(uiTarget, check, "ToggleState", CancellationToken.None))["ToggleState"]);
 
         // A WinForms CheckBox exposes InvokePattern (clicking it), which the service tries first and
         // which still flips the toggle state — the observable effect we assert on.
-        var pattern = await svc.InvokeAsync(session, check, CancellationToken.None);
+        var pattern = await svc.InvokeAsync(uiTarget, check, CancellationToken.None);
 
         Assert.AreEqual("InvokePattern", pattern);
         await WaitForAsync(async () =>
-            (string?)(await svc.GetPropertiesAsync(session, await ResolveAsync(svc, session, "chkToggle"), "ToggleState", CancellationToken.None))["ToggleState"] == "On",
+            (string?)(await svc.GetPropertiesAsync(uiTarget, await ResolveAsync(svc, uiTarget, "chkToggle"), "ToggleState", CancellationToken.None))["ToggleState"] == "On",
             "checkbox never toggled to On");
     }
 
@@ -56,22 +56,22 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "lstItems");
-        var tree = await svc.InspectAsync(session, "lstItems", 2, CancellationToken.None);
+        var uiTarget = SessionFor(fx);
+        await ResolveAsync(svc, uiTarget, "lstItems");
+        var tree = await svc.InspectAsync(uiTarget, "lstItems", 2, CancellationToken.None);
         var item = tree.First(e => e.Type == "ListItem" && e.Name == "Item 04");
-        Assert.IsFalse(await IsSelectedAsync(svc, session, item), "item should start unselected");
+        Assert.IsFalse(await IsSelectedAsync(svc, uiTarget, item), "item should start unselected");
 
-        var pattern = await svc.InvokeAsync(session, item, CancellationToken.None);
+        var pattern = await svc.InvokeAsync(uiTarget, item, CancellationToken.None);
 
         Assert.IsFalse(string.IsNullOrEmpty(pattern), "invoke should report which pattern it used");
-        await WaitForAsync(() => IsSelectedAsync(svc, session, item),
+        await WaitForAsync(() => IsSelectedAsync(svc, uiTarget, item),
             "list item never became selected after invoke");
     }
 
-    private static async Task<bool> IsSelectedAsync(UiAutomationService svc, UiTarget session, UiElement item)
+    private static async Task<bool> IsSelectedAsync(UiAutomationService svc, UiTarget uiTarget, UiElement item)
     {
-        var props = await svc.GetPropertiesAsync(session, item, "IsSelected", CancellationToken.None);
+        var props = await svc.GetPropertiesAsync(uiTarget, item, "IsSelected", CancellationToken.None);
         return props.TryGetValue("IsSelected", out var sel) && sel is bool b && b;
     }
 
@@ -80,11 +80,11 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
-        var label = await ResolveAsync(svc, session, "lblText");
+        var uiTarget = SessionFor(fx);
+        var label = await ResolveAsync(svc, uiTarget, "lblText");
 
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(
-            () => svc.InvokeAsync(session, label, CancellationToken.None));
+            () => svc.InvokeAsync(uiTarget, label, CancellationToken.None));
     }
 
     [TestMethod]
@@ -92,14 +92,14 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
-        var box = await ResolveAsync(svc, session, "txtValue");
+        var uiTarget = SessionFor(fx);
+        var box = await ResolveAsync(svc, uiTarget, "txtValue");
         var newValue = "roundtrip-" + Guid.NewGuid().ToString("N")[..6];
 
-        await svc.SetValueAsync(session, box, newValue, CancellationToken.None);
+        await svc.SetValueAsync(uiTarget, box, newValue, CancellationToken.None);
 
         await WaitForAsync(async () =>
-            await svc.GetTextAsync(session, await ResolveAsync(svc, session, "txtValue"), CancellationToken.None) == newValue,
+            await svc.GetTextAsync(uiTarget, await ResolveAsync(svc, uiTarget, "txtValue"), CancellationToken.None) == newValue,
             "text box value never reflected the SetValue call");
         // Confirm the real control (not just UIA) holds the value.
         Assert.AreEqual(newValue, fx.OnUiThread(() => fx.ValueBox.Text));
@@ -110,10 +110,10 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
-        var box = await ResolveAsync(svc, session, "txtValue");
+        var uiTarget = SessionFor(fx);
+        var box = await ResolveAsync(svc, uiTarget, "txtValue");
 
-        var text = await svc.GetTextAsync(session, box, CancellationToken.None);
+        var text = await svc.GetTextAsync(uiTarget, box, CancellationToken.None);
 
         Assert.AreEqual("initial", text);
     }
@@ -123,10 +123,10 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
-        var label = await ResolveAsync(svc, session, "lblText");
+        var uiTarget = SessionFor(fx);
+        var label = await ResolveAsync(svc, uiTarget, "lblText");
 
-        var text = await svc.GetTextAsync(session, label, CancellationToken.None);
+        var text = await svc.GetTextAsync(uiTarget, label, CancellationToken.None);
 
         Assert.AreEqual("Hello Label", text);
     }
@@ -136,15 +136,15 @@ public partial class RealUiAutomationTests
     {
         var svc = NewService();
         UiElement button;
-        UiTarget session;
+        UiTarget uiTarget;
         using (var fx = new UiaTestFixture())
         {
-            session = SessionFor(fx);
-            button = await ResolveAsync(svc, session, "btnInvoke");
+            uiTarget = SessionFor(fx);
+            button = await ResolveAsync(svc, uiTarget, "btnInvoke");
         }
         // Window is now closed; the previously-resolved element can no longer be re-resolved.
         var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
-            () => svc.InvokeAsync(session, button, CancellationToken.None));
+            () => svc.InvokeAsync(uiTarget, button, CancellationToken.None));
         StringAssert.Contains(ex.Message, "stale");
     }
 
@@ -157,8 +157,8 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
-        var btn = await ResolveAsync(svc, session, "btnInvoke");
+        var uiTarget = SessionFor(fx);
+        var btn = await ResolveAsync(svc, uiTarget, "btnInvoke");
 
         // FocusAsync resolves the element to a live UIA COM element and calls SetFocus on it. The
         // *visible* effect (system-wide keyboard focus / the HasKeyboardFocus property) cannot be
@@ -168,12 +168,12 @@ public partial class RealUiAutomationTests
         // observable effect on a background window. See the class <remarks> honest-ceiling note.
         // We still drive the real happy path end-to-end and prove SetFocus ran against a genuine,
         // still-live provider element — a stale element instead throws (covered by the test below).
-        await svc.FocusAsync(session, btn, CancellationToken.None);
+        await svc.FocusAsync(uiTarget, btn, CancellationToken.None);
 
         // The element FocusAsync operated on is real and still addressable: reading a live property
         // back returns the true control identity, proving ResolveComElement produced a valid element
         // (not a silent no-op) that SetFocus was actually invoked on.
-        var props = await svc.GetPropertiesAsync(session, btn, "Name", CancellationToken.None);
+        var props = await svc.GetPropertiesAsync(uiTarget, btn, "Name", CancellationToken.None);
         Assert.AreEqual("Click Me", props["Name"]);
     }
 
@@ -182,14 +182,14 @@ public partial class RealUiAutomationTests
     {
         var svc = NewService();
         UiElement box;
-        UiTarget session;
+        UiTarget uiTarget;
         using (var fx = new UiaTestFixture())
         {
-            session = SessionFor(fx);
-            box = await ResolveAsync(svc, session, "txtValue");
+            uiTarget = SessionFor(fx);
+            box = await ResolveAsync(svc, uiTarget, "txtValue");
         }
         var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
-            () => svc.FocusAsync(session, box, CancellationToken.None));
+            () => svc.FocusAsync(uiTarget, box, CancellationToken.None));
         StringAssert.Contains(ex.Message, "stale");
     }
 
@@ -213,13 +213,13 @@ public partial class RealUiAutomationTests
             {
                 return false;
             }
-            var session = new UiTarget
+            var uiTarget = new UiTarget
             {
                 ProcessId = pid.Value,
                 ProcessName = "focus-owner",
                 IsExplicitWindow = false,
             };
-            focused = await svc.GetFocusedElementAsync(session, CancellationToken.None);
+            focused = await svc.GetFocusedElementAsync(uiTarget, CancellationToken.None);
             return focused is not null;
         }, "no process ever reported a focused element", timeoutMs: 10_000);
 
@@ -234,14 +234,14 @@ public partial class RealUiAutomationTests
 
         // A session whose PID owns nothing on-screen can never match the system focused element, so
         // the service must reject it and return null (the PID-guard / not-in-target-process path).
-        var session = new UiTarget
+        var uiTarget = new UiTarget
         {
             ProcessId = 0x7FFF_FFFE,
             ProcessName = "no-such-process",
             IsExplicitWindow = false,
         };
 
-        var focused = await svc.GetFocusedElementAsync(session, CancellationToken.None);
+        var focused = await svc.GetFocusedElementAsync(uiTarget, CancellationToken.None);
 
         Assert.IsNull(focused, "focused element from a foreign PID must be filtered out");
     }
@@ -255,14 +255,14 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
-        var panel = await ResolveAsync(svc, session, "pnlScroll");
-        var before = await VerticalPercentAsync(svc, session, "pnlScroll");
+        var uiTarget = SessionFor(fx);
+        var panel = await ResolveAsync(svc, uiTarget, "pnlScroll");
+        var before = await VerticalPercentAsync(svc, uiTarget, "pnlScroll");
         Assert.AreEqual(0.0, before, 0.001, "panel should start scrolled to top");
 
-        await svc.ScrollContainerAsync(session, panel, "down", null, CancellationToken.None);
+        await svc.ScrollContainerAsync(uiTarget, panel, "down", null, CancellationToken.None);
 
-        var after = await VerticalPercentAsync(svc, session, "pnlScroll");
+        var after = await VerticalPercentAsync(svc, uiTarget, "pnlScroll");
         Assert.IsTrue(after > before, $"expected vertical percent to increase (before={before}, after={after})");
     }
 
@@ -271,15 +271,15 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
-        var panel = await ResolveAsync(svc, session, "pnlScroll");
+        var uiTarget = SessionFor(fx);
+        var panel = await ResolveAsync(svc, uiTarget, "pnlScroll");
 
-        await svc.ScrollContainerAsync(session, panel, null, "bottom", CancellationToken.None);
-        var atBottom = await VerticalPercentAsync(svc, session, "pnlScroll");
+        await svc.ScrollContainerAsync(uiTarget, panel, null, "bottom", CancellationToken.None);
+        var atBottom = await VerticalPercentAsync(svc, uiTarget, "pnlScroll");
         Assert.IsTrue(atBottom > 90, $"expected near 100% at bottom, got {atBottom}");
 
-        await svc.ScrollContainerAsync(session, panel, null, "top", CancellationToken.None);
-        var atTop = await VerticalPercentAsync(svc, session, "pnlScroll");
+        await svc.ScrollContainerAsync(uiTarget, panel, null, "top", CancellationToken.None);
+        var atTop = await VerticalPercentAsync(svc, uiTarget, "pnlScroll");
         Assert.IsTrue(atTop < 10, $"expected near 0% at top, got {atTop}");
     }
 
@@ -288,11 +288,11 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
-        var panel = await ResolveAsync(svc, session, "pnlScroll");
+        var uiTarget = SessionFor(fx);
+        var panel = await ResolveAsync(svc, uiTarget, "pnlScroll");
 
         await Assert.ThrowsExactlyAsync<ArgumentException>(
-            () => svc.ScrollContainerAsync(session, panel, "sideways", null, CancellationToken.None));
+            () => svc.ScrollContainerAsync(uiTarget, panel, "sideways", null, CancellationToken.None));
     }
 
     [TestMethod]
@@ -300,11 +300,11 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
-        var panel = await ResolveAsync(svc, session, "pnlScroll");
+        var uiTarget = SessionFor(fx);
+        var panel = await ResolveAsync(svc, uiTarget, "pnlScroll");
 
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(
-            () => svc.ScrollContainerAsync(session, panel, "right", null, CancellationToken.None));
+            () => svc.ScrollContainerAsync(uiTarget, panel, "right", null, CancellationToken.None));
     }
 
     [TestMethod]
@@ -312,14 +312,14 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
+        var uiTarget = SessionFor(fx);
         // A child button has no ScrollPattern; the service must walk up to the panel.
-        var child = await ResolveAsync(svc, session, "pnlChild02");
-        var before = await VerticalPercentAsync(svc, session, "pnlScroll");
+        var child = await ResolveAsync(svc, uiTarget, "pnlChild02");
+        var before = await VerticalPercentAsync(svc, uiTarget, "pnlScroll");
 
-        await svc.ScrollContainerAsync(session, child, "down", null, CancellationToken.None);
+        await svc.ScrollContainerAsync(uiTarget, child, "down", null, CancellationToken.None);
 
-        var after = await VerticalPercentAsync(svc, session, "pnlScroll");
+        var after = await VerticalPercentAsync(svc, uiTarget, "pnlScroll");
         Assert.IsTrue(after > before, $"scrolling via a child should move the ancestor panel (before={before}, after={after})");
     }
 
@@ -328,16 +328,16 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
-        var session = SessionFor(fx);
-        var deepChild = await ResolveAsync(svc, session, "pnlChild39");
-        var before = await VerticalPercentAsync(svc, session, "pnlScroll");
+        var uiTarget = SessionFor(fx);
+        var deepChild = await ResolveAsync(svc, uiTarget, "pnlChild39");
+        var before = await VerticalPercentAsync(svc, uiTarget, "pnlScroll");
 
         // pnlChild39 is the last child of a top-scrolled AutoScroll panel, so bringing it into view must
         // scroll the ancestor down (via ScrollItemPattern or the ScrollPattern fallback), not merely
         // avoid throwing.
-        await svc.ScrollIntoViewAsync(session, deepChild, CancellationToken.None);
+        await svc.ScrollIntoViewAsync(uiTarget, deepChild, CancellationToken.None);
 
-        var after = await VerticalPercentAsync(svc, session, "pnlScroll");
+        var after = await VerticalPercentAsync(svc, uiTarget, "pnlScroll");
         Assert.IsTrue(after > before, $"scrolling the last child into view should move the panel down (before={before}, after={after})");
     }
 

@@ -43,7 +43,7 @@ internal partial class UiInspectCommand : Command, IShortDescription
     }
 
     public partial class Handler(
-        IUiTargetResolver sessionService,
+        IUiTargetResolver targetResolver,
         IUiAutomation uiAutomation,
         IAnsiConsole ansiConsole,
         ILogger<UiInspectCommand> logger) : AsynchronousCommandLineAction
@@ -78,12 +78,12 @@ internal partial class UiInspectCommand : Command, IShortDescription
 
             try
             {
-                var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
+                var uiTarget = await targetResolver.ResolveAsync(app, window, cancellationToken);
                 UiElement[] elements;
 
                 if (ancestors && selector is not null)
                 {
-                    elements = await uiAutomation.InspectAncestorsAsync(session, selector, cancellationToken);
+                    elements = await uiAutomation.InspectAncestorsAsync(uiTarget, selector, cancellationToken);
                     // The ancestor walk returns root-first..target-last but does not assign Depth.
                     // BuildWindows/NestElements use a depth-stack to nest children, so without an
                     // ascending depth assignment all ancestors collapse into sibling roots in JSON.
@@ -91,7 +91,7 @@ internal partial class UiInspectCommand : Command, IShortDescription
                 }
                 else
                 {
-                    elements = await uiAutomation.InspectAsync(session, selector, depth, cancellationToken);
+                    elements = await uiAutomation.InspectAsync(uiTarget, selector, depth, cancellationToken);
                 }
 
                 // Apply filters (preserve window separator elements)
@@ -126,7 +126,7 @@ internal partial class UiInspectCommand : Command, IShortDescription
                     // the unfiltered tree so BuildWindows can collapse non-interactive ancestors
                     // and surface them as ancestorPath breadcrumbs on the surviving descendants.
                     var jsonElements = interactive ? allElements : elements;
-                    var windows = BuildWindows(jsonElements, session, interactive);
+                    var windows = BuildWindows(jsonElements, uiTarget, interactive);
 
                     var result = new UiInspectResult
                     {
@@ -337,7 +337,7 @@ internal partial class UiInspectCommand : Command, IShortDescription
         /// keeps the full structural tree but prunes subtrees with no interactive descendants.
         /// Clears redundant per-element fields (depth/parentSelector/ancestorPath/windowHandle)
         /// since they're implied by the tree structure.</summary>
-        private static UiInspectWindowInfo[] BuildWindows(UiElement[] elements, UiTarget session, bool interactive)
+        private static UiInspectWindowInfo[] BuildWindows(UiElement[] elements, UiTarget uiTarget, bool interactive)
         {
             var windows = new List<UiInspectWindowInfo>();
             UiInspectWindowInfo? current = null;
@@ -373,8 +373,8 @@ internal partial class UiInspectCommand : Command, IShortDescription
                     {
                         current = new UiInspectWindowInfo
                         {
-                            Hwnd = el.WindowHandle ?? session.WindowHandle,
-                            Title = session.WindowTitle,
+                            Hwnd = el.WindowHandle ?? uiTarget.WindowHandle,
+                            Title = uiTarget.WindowTitle,
                         };
                     }
                     bucket.Add(el);

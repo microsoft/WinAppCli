@@ -14,7 +14,7 @@ public interface IUiRecordingService
     /// <summary>Records a window or element region to H.264 MP4.</summary>
     /// <param name="onRecordingStarted">Invoked after the first frame; reports whether frame output is active.</param>
     Task<RecordCaptureResult> RecordAsync(
-        UiTarget session,
+        UiTarget uiTarget,
         string? elementId,
         RecordOptions options,
         CancellationToken ct,

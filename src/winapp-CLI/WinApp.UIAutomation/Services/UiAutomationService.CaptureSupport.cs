@@ -71,7 +71,7 @@ internal sealed partial class UiAutomationService
         }
         catch (System.Runtime.InteropServices.COMException ex)
         {
-            _logger.LogDebug(ex, "Deriving element top-level HWND failed; leaving capture on the session window");
+            _logger.LogDebug(ex, "Deriving element top-level HWND failed; leaving capture on the target window");
             return 0;
         }
     }

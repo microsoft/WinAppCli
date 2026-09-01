@@ -45,7 +45,7 @@ internal static partial class WgcCapture
             out var context).ThrowOnFailure();
 
         Direct3D11CaptureFramePool? pool = null;
-        GraphicsCaptureSession? session = null;
+        GraphicsCaptureSession? uiTarget = null;
         try
         {
             var winrtDevice = CreateDirect3DDevice(device);
@@ -55,16 +55,16 @@ internal static partial class WgcCapture
                 DirectXPixelFormat.B8G8R8A8UIntNormalized,
                 numberOfBuffers: 2,
                 item.Size);
-            session = pool.CreateCaptureSession(item);
-            session.IsCursorCaptureEnabled = false;
+            uiTarget = pool.CreateCaptureSession(item);
+            uiTarget.IsCursorCaptureEnabled = false;
 
-            return new FrameGrabber(device, context, pool, session, item, logger, fps);
+            return new FrameGrabber(device, context, pool, uiTarget, item, logger, fps);
         }
         catch
         {
             // If we fail after allocating the frame pool/session but before FrameGrabber takes
             // ownership, dispose them here so the heavy WGC/GPU resources are not leaked.
-            session?.Dispose();
+            uiTarget?.Dispose();
             pool?.Dispose();
             (context as IDisposable)?.Dispose();
             (device as IDisposable)?.Dispose();
@@ -114,7 +114,7 @@ internal static partial class WgcCapture
             D3D.ID3D11Device device,
             D3D.ID3D11DeviceContext context,
             Direct3D11CaptureFramePool pool,
-            GraphicsCaptureSession session,
+            GraphicsCaptureSession uiTarget,
             GraphicsCaptureItem item,
             ILogger logger,
             int fps = 0)
@@ -122,7 +122,7 @@ internal static partial class WgcCapture
             _device = device;
             _context = context;
             _pool = pool;
-            _session = session;
+            _session = uiTarget;
             _item = item;
             _logger = logger;
             _poolSize = item.Size;

@@ -5,15 +5,19 @@
 namespace Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation;
 
 /// <summary>
-/// Resolves a UI automation session for a target application.
-/// Locates the target process and window from an app identifier or HWND.
+/// Finds the app window that automation calls will act on, from a process name, window title, PID,
+/// or window handle. Use <see cref="UiTarget.FromWindowHandle"/> directly when you already have a
+/// handle and need no discovery.
 /// </summary>
 public interface IUiTargetResolver
 {
     /// <summary>
-    /// Resolve or create a session for the given app. Always requires app identifier.
+    /// Resolves the target window. When several windows match, the foreground one wins, otherwise
+    /// the largest.
     /// </summary>
-    /// <param name="app">Process name, window title, or PID. Required unless hwnd is set.</param>
-    /// <param name="hwnd">Direct window handle (from -w flag). Takes precedence over app.</param>
-    Task<UiTarget> ResolveSessionAsync(string? app, long? hwnd, CancellationToken ct);
+    /// <param name="app">Process name, window title, or PID. Required unless <paramref name="hwnd"/> is set.</param>
+    /// <param name="hwnd">A specific window handle. Takes precedence over <paramref name="app"/> and marks the result as an explicit target, so element lookups stay scoped to that window.</param>
+    /// <exception cref="AppNotFoundException">No running app matched.</exception>
+    /// <exception cref="InvalidOperationException">Neither argument was supplied, or several windowed processes matched and the choice is ambiguous.</exception>
+    Task<UiTarget> ResolveAsync(string? app, long? hwnd, CancellationToken ct);
 }

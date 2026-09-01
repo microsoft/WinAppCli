@@ -122,9 +122,9 @@ public class GestureTargetingTests
 
         public QueueUiAutomation(IEnumerable<UiElement?> elements) => _elements = new Queue<UiElement?>(elements);
 
-        public Task<UiElement?> FindSingleElementAsync(UiTarget session, UiSelector selector, CancellationToken ct)
+        public Task<UiElement?> FindSingleElementAsync(UiTarget uiTarget, UiSelector selector, CancellationToken ct)
         {
-            Assert.AreSame(Session, session);
+            Assert.AreSame(Session, uiTarget);
             Assert.AreSame(Selector, selector);
             FindCalls++;
             return Task.FromResult(_elements.Dequeue());
@@ -132,18 +132,18 @@ public class GestureTargetingTests
 
         public List<(nint Hwnd, int Pid, string Title)> FindWindowsByTitle(string titleQuery) => throw new NotImplementedException();
         public List<(nint Hwnd, int Pid, string Title)> FindWindowsByPid(int pid) => throw new NotImplementedException();
-        public Task<UiElement[]> InspectAsync(UiTarget session, string? elementId, int depth, CancellationToken ct) => throw new NotImplementedException();
-        public Task<UiElement[]> InspectAncestorsAsync(UiTarget session, string elementId, CancellationToken ct) => throw new NotImplementedException();
-        public Task<UiElement[]> SearchAsync(UiTarget session, UiSelector selector, int maxResults, CancellationToken ct) => throw new NotImplementedException();
-        public Task<Dictionary<string, object?>> GetPropertiesAsync(UiTarget session, UiElement element, string? propertyName, CancellationToken ct) => throw new NotImplementedException();
-        public Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiTarget session, string? elementId, bool captureScreen, bool focus, CancellationToken ct) => throw new NotImplementedException();
-        public Task<string> InvokeAsync(UiTarget session, UiElement element, CancellationToken ct) => throw new NotImplementedException();
-        public Task SetValueAsync(UiTarget session, UiElement element, string text, CancellationToken ct) => throw new NotImplementedException();
-        public Task FocusAsync(UiTarget session, UiElement element, CancellationToken ct) => throw new NotImplementedException();
-        public Task ScrollIntoViewAsync(UiTarget session, UiElement element, CancellationToken ct) => throw new NotImplementedException();
-        public Task ScrollContainerAsync(UiTarget session, UiElement element, string? direction, string? destination, CancellationToken ct) => throw new NotImplementedException();
-        public Task<UiElement?> GetFocusedElementAsync(UiTarget session, CancellationToken ct) => throw new NotImplementedException();
-        public Task<string?> GetTextAsync(UiTarget session, UiElement element, CancellationToken ct) => throw new NotImplementedException();
+        public Task<UiElement[]> InspectAsync(UiTarget uiTarget, string? elementId, int depth, CancellationToken ct) => throw new NotImplementedException();
+        public Task<UiElement[]> InspectAncestorsAsync(UiTarget uiTarget, string elementId, CancellationToken ct) => throw new NotImplementedException();
+        public Task<UiElement[]> SearchAsync(UiTarget uiTarget, UiSelector selector, int maxResults, CancellationToken ct) => throw new NotImplementedException();
+        public Task<Dictionary<string, object?>> GetPropertiesAsync(UiTarget uiTarget, UiElement element, string? propertyName, CancellationToken ct) => throw new NotImplementedException();
+        public Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiTarget uiTarget, string? elementId, bool captureScreen, bool focus, CancellationToken ct) => throw new NotImplementedException();
+        public Task<string> InvokeAsync(UiTarget uiTarget, UiElement element, CancellationToken ct) => throw new NotImplementedException();
+        public Task SetValueAsync(UiTarget uiTarget, UiElement element, string text, CancellationToken ct) => throw new NotImplementedException();
+        public Task FocusAsync(UiTarget uiTarget, UiElement element, CancellationToken ct) => throw new NotImplementedException();
+        public Task ScrollIntoViewAsync(UiTarget uiTarget, UiElement element, CancellationToken ct) => throw new NotImplementedException();
+        public Task ScrollContainerAsync(UiTarget uiTarget, UiElement element, string? direction, string? destination, CancellationToken ct) => throw new NotImplementedException();
+        public Task<UiElement?> GetFocusedElementAsync(UiTarget uiTarget, CancellationToken ct) => throw new NotImplementedException();
+        public Task<string?> GetTextAsync(UiTarget uiTarget, UiElement element, CancellationToken ct) => throw new NotImplementedException();
         public bool TryResolveRootWindow(UiTarget target, out nint hwnd, out string? title) => throw new NotImplementedException();
         public nint ResolveElementTopLevelWindow(UiTarget target, UiElement element) => throw new NotImplementedException();
         public PointerRect GetVisibleWindowBounds(nint hwnd, PointerRect fallback) => fallback;

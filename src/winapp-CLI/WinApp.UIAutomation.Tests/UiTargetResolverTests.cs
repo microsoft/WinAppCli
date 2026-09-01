@@ -40,7 +40,7 @@ public class UiSessionServiceTests
         sys.ProcessIdForWindowResult = 0; // window not found / not accessible
 
         var ex = await Assert.ThrowsExactlyAsync<AppNotFoundException>(
-            () => service.ResolveSessionAsync(app: null, hwnd: 0x9999, CancellationToken.None));
+            () => service.ResolveAsync(app: null, hwnd: 0x9999, CancellationToken.None));
 
         StringAssert.Contains(ex.Message, "not found or not accessible");
     }
@@ -53,14 +53,14 @@ public class UiSessionServiceTests
         sys.ProcessesById[4321] = new UiProcessInfo(4321, "notepad", 0, null);
         sys.WindowTextResult = "Untitled - Notepad";
 
-        var session = await service.ResolveSessionAsync(app: null, hwnd: 0x1234, CancellationToken.None);
+        var uiTarget = await service.ResolveAsync(app: null, hwnd: 0x1234, CancellationToken.None);
 
-        Assert.IsTrue(session.IsExplicitWindow,
+        Assert.IsTrue(uiTarget.IsExplicitWindow,
             "Sessions resolved via --window must be marked explicit so inspect/search/find don't expand to other windows (#472).");
-        Assert.AreEqual((long)0x1234, session.WindowHandle);
-        Assert.AreEqual(4321, session.ProcessId);
-        Assert.AreEqual("notepad", session.ProcessName);
-        Assert.AreEqual("Untitled - Notepad", session.WindowTitle);
+        Assert.AreEqual((long)0x1234, uiTarget.WindowHandle);
+        Assert.AreEqual(4321, uiTarget.ProcessId);
+        Assert.AreEqual("notepad", uiTarget.ProcessName);
+        Assert.AreEqual("Untitled - Notepad", uiTarget.WindowTitle);
     }
 
     [TestMethod]
@@ -71,11 +71,11 @@ public class UiSessionServiceTests
         sys.DefaultProcessById = new UiProcessInfo(0, "proc", 0, null);
         sys.WindowTextResult = null; // empty/unavailable title
 
-        var session = await service.ResolveSessionAsync(app: null, hwnd: 0x1000, CancellationToken.None);
+        var uiTarget = await service.ResolveAsync(app: null, hwnd: 0x1000, CancellationToken.None);
 
-        Assert.IsTrue(session.IsExplicitWindow);
-        Assert.AreEqual("proc", session.ProcessName);
-        Assert.IsNull(session.WindowTitle);
+        Assert.IsTrue(uiTarget.IsExplicitWindow);
+        Assert.AreEqual("proc", uiTarget.ProcessName);
+        Assert.IsNull(uiTarget.WindowTitle);
     }
 
     // ---- Missing selector ------------------------------------------------
@@ -86,7 +86,7 @@ public class UiSessionServiceTests
         var (service, _, _) = NewService();
 
         var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
-            () => service.ResolveSessionAsync(app: null, hwnd: null, CancellationToken.None));
+            () => service.ResolveAsync(app: null, hwnd: null, CancellationToken.None));
 
         StringAssert.Contains(ex.Message, "Specify --app");
     }
@@ -98,7 +98,7 @@ public class UiSessionServiceTests
 
         // hwnd 0 is not "> 0", so it falls through to the app check.
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(
-            () => service.ResolveSessionAsync(app: "   ", hwnd: 0, CancellationToken.None));
+            () => service.ResolveAsync(app: "   ", hwnd: 0, CancellationToken.None));
     }
 
     // ---- PID resolution --------------------------------------------------
@@ -109,7 +109,7 @@ public class UiSessionServiceTests
         var (service, _, _) = NewService();
 
         var ex = await Assert.ThrowsExactlyAsync<AppNotFoundException>(
-            () => service.ResolveSessionAsync(app: "999999", hwnd: null, CancellationToken.None));
+            () => service.ResolveAsync(app: "999999", hwnd: null, CancellationToken.None));
 
         StringAssert.Contains(ex.Message, "No process found with PID 999999");
     }
@@ -121,13 +121,13 @@ public class UiSessionServiceTests
         sys.ProcessesById[500] = new UiProcessInfo(500, "myapp", 0, "Main Title");
         uia.WindowsByPidResult = []; // no discoverable windows
 
-        var session = await service.ResolveSessionAsync(app: "500", hwnd: null, CancellationToken.None);
+        var uiTarget = await service.ResolveAsync(app: "500", hwnd: null, CancellationToken.None);
 
-        Assert.IsFalse(session.IsExplicitWindow,
-            "Only --window should mark a session as explicit; --app/PID resolution must leave it false.");
-        Assert.AreEqual(500, session.ProcessId);
-        Assert.AreEqual("myapp", session.ProcessName);
-        Assert.AreEqual("Main Title", session.WindowTitle);
+        Assert.IsFalse(uiTarget.IsExplicitWindow,
+            "Only --window should mark a target as explicit; --app/PID resolution must leave it false.");
+        Assert.AreEqual(500, uiTarget.ProcessId);
+        Assert.AreEqual("myapp", uiTarget.ProcessName);
+        Assert.AreEqual("Main Title", uiTarget.WindowTitle);
     }
 
     [TestMethod]
@@ -137,9 +137,9 @@ public class UiSessionServiceTests
         sys.ProcessesById[501] = new UiProcessInfo(501, "myapp", 0, "");
         uia.WindowsByPidResult = [];
 
-        var session = await service.ResolveSessionAsync(app: "501", hwnd: null, CancellationToken.None);
+        var uiTarget = await service.ResolveAsync(app: "501", hwnd: null, CancellationToken.None);
 
-        Assert.IsNull(session.WindowTitle);
+        Assert.IsNull(uiTarget.WindowTitle);
     }
 
     [TestMethod]
@@ -149,12 +149,12 @@ public class UiSessionServiceTests
         sys.ProcessesById[600] = new UiProcessInfo(600, "app6", 0, null);
         uia.WindowsByPidResult = [((nint)0xAAA, 600, "Win6")];
 
-        var session = await service.ResolveSessionAsync(app: "600", hwnd: null, CancellationToken.None);
+        var uiTarget = await service.ResolveAsync(app: "600", hwnd: null, CancellationToken.None);
 
-        Assert.AreEqual(600, session.ProcessId);
-        Assert.AreEqual("app6", session.ProcessName);
-        Assert.AreEqual((long)0xAAA, session.WindowHandle);
-        Assert.AreEqual("Win6", session.WindowTitle);
+        Assert.AreEqual(600, uiTarget.ProcessId);
+        Assert.AreEqual("app6", uiTarget.ProcessName);
+        Assert.AreEqual((long)0xAAA, uiTarget.WindowHandle);
+        Assert.AreEqual("Win6", uiTarget.WindowTitle);
     }
 
     [TestMethod]
@@ -165,11 +165,11 @@ public class UiSessionServiceTests
         uia.WindowsByPidResult = [((nint)0x100, 700, "A"), ((nint)0x200, 700, "B")];
         sys.ForegroundWindowResult = 0x200; // the second window is foreground
 
-        var session = await service.ResolveSessionAsync(app: "700", hwnd: null, CancellationToken.None);
+        var uiTarget = await service.ResolveAsync(app: "700", hwnd: null, CancellationToken.None);
 
-        Assert.AreEqual((long)0x200, session.WindowHandle);
-        Assert.AreEqual("B", session.WindowTitle);
-        Assert.AreEqual("app7", session.ProcessName);
+        Assert.AreEqual((long)0x200, uiTarget.WindowHandle);
+        Assert.AreEqual("B", uiTarget.WindowTitle);
+        Assert.AreEqual("app7", uiTarget.ProcessName);
     }
 
     [TestMethod]
@@ -183,11 +183,11 @@ public class UiSessionServiceTests
         sys.WindowSizeByHwnd[0x111] = (100, 100);
         sys.WindowSizeByHwnd[0x222] = (300, 300);
 
-        var session = await service.ResolveSessionAsync(app: "701", hwnd: null, CancellationToken.None);
+        var uiTarget = await service.ResolveAsync(app: "701", hwnd: null, CancellationToken.None);
 
-        Assert.AreEqual(701, session.ProcessId);
-        Assert.AreEqual("app7b", session.ProcessName);
-        Assert.AreEqual(0x222L, session.WindowHandle,
+        Assert.AreEqual(701, uiTarget.ProcessId);
+        Assert.AreEqual("app7b", uiTarget.ProcessName);
+        Assert.AreEqual(0x222L, uiTarget.WindowHandle,
             "Auto-select must pick the largest-area window (0x222), not just any candidate.");
     }
 
@@ -200,11 +200,11 @@ public class UiSessionServiceTests
         sys.ByNameResult = [new UiProcessInfo(800, "calc", 0, null)];
         uia.WindowsByPidResult = [];
 
-        var session = await service.ResolveSessionAsync(app: "calc", hwnd: null, CancellationToken.None);
+        var uiTarget = await service.ResolveAsync(app: "calc", hwnd: null, CancellationToken.None);
 
-        Assert.AreEqual(800, session.ProcessId);
-        Assert.AreEqual("calc", session.ProcessName);
-        Assert.IsNull(session.WindowTitle);
+        Assert.AreEqual(800, uiTarget.ProcessId);
+        Assert.AreEqual("calc", uiTarget.ProcessName);
+        Assert.IsNull(uiTarget.WindowTitle);
     }
 
     [TestMethod]
@@ -218,10 +218,10 @@ public class UiSessionServiceTests
         ];
         uia.WindowsByPidResult = [];
 
-        var session = await service.ResolveSessionAsync(app: "dup", hwnd: null, CancellationToken.None);
+        var uiTarget = await service.ResolveAsync(app: "dup", hwnd: null, CancellationToken.None);
 
-        Assert.AreEqual(811, session.ProcessId);
-        Assert.AreEqual("Real", session.WindowTitle);
+        Assert.AreEqual(811, uiTarget.ProcessId);
+        Assert.AreEqual("Real", uiTarget.WindowTitle);
     }
 
     [TestMethod]
@@ -235,7 +235,7 @@ public class UiSessionServiceTests
         ];
 
         var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
-            () => service.ResolveSessionAsync(app: "ambig", hwnd: null, CancellationToken.None));
+            () => service.ResolveAsync(app: "ambig", hwnd: null, CancellationToken.None));
 
         StringAssert.Contains(ex.Message, "Multiple 'ambig' windows found");
         StringAssert.Contains(ex.Message, "PID 820");
@@ -254,10 +254,10 @@ public class UiSessionServiceTests
         sys.MatchingResult = [new UiProcessInfo(832, "xyz", 0, null)];
         uia.WindowsByPidResult = [];
 
-        var session = await service.ResolveSessionAsync(app: "xy", hwnd: null, CancellationToken.None);
+        var uiTarget = await service.ResolveAsync(app: "xy", hwnd: null, CancellationToken.None);
 
-        Assert.AreEqual(832, session.ProcessId);
-        Assert.AreEqual("xyz", session.ProcessName);
+        Assert.AreEqual(832, uiTarget.ProcessId);
+        Assert.AreEqual("xyz", uiTarget.ProcessName);
     }
 
     // ---- Partial process-name resolution --------------------------------
@@ -274,11 +274,11 @@ public class UiSessionServiceTests
         ];
         uia.WindowsByPidResult = [];
 
-        var session = await service.ResolveSessionAsync(app: "po", hwnd: null, CancellationToken.None);
+        var uiTarget = await service.ResolveAsync(app: "po", hwnd: null, CancellationToken.None);
 
-        Assert.AreEqual(851, session.ProcessId);
-        Assert.AreEqual("poc", session.ProcessName);
-        Assert.AreEqual("Poc Win", session.WindowTitle);
+        Assert.AreEqual(851, uiTarget.ProcessId);
+        Assert.AreEqual("poc", uiTarget.ProcessName);
+        Assert.AreEqual("Poc Win", uiTarget.WindowTitle);
     }
 
     [TestMethod]
@@ -292,7 +292,7 @@ public class UiSessionServiceTests
         ];
 
         var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
-            () => service.ResolveSessionAsync(app: "mp", hwnd: null, CancellationToken.None));
+            () => service.ResolveAsync(app: "mp", hwnd: null, CancellationToken.None));
 
         StringAssert.Contains(ex.Message, "Multiple processes matching 'mp' found");
         StringAssert.Contains(ex.Message, "PID 860 (mpa)");
@@ -311,7 +311,7 @@ public class UiSessionServiceTests
         uia.WindowsByTitleResult = []; // title search also finds nothing → throws
 
         var ex = await Assert.ThrowsExactlyAsync<AppNotFoundException>(
-            () => service.ResolveSessionAsync(app: "pw", hwnd: null, CancellationToken.None));
+            () => service.ResolveAsync(app: "pw", hwnd: null, CancellationToken.None));
 
         StringAssert.Contains(ex.Message, "No running app found matching 'pw'");
     }
@@ -325,7 +325,7 @@ public class UiSessionServiceTests
         uia.WindowsByTitleResult = [];
 
         var ex = await Assert.ThrowsExactlyAsync<AppNotFoundException>(
-            () => service.ResolveSessionAsync(app: "ghost", hwnd: null, CancellationToken.None));
+            () => service.ResolveAsync(app: "ghost", hwnd: null, CancellationToken.None));
 
         StringAssert.Contains(ex.Message, "No running app found matching 'ghost'");
     }
@@ -337,12 +337,12 @@ public class UiSessionServiceTests
         uia.WindowsByTitleResult = [((nint)0xB, 900, "Ghost Win")];
         sys.DefaultProcessById = new UiProcessInfo(0, "ghostapp", 0, null);
 
-        var session = await service.ResolveSessionAsync(app: "ghost", hwnd: null, CancellationToken.None);
+        var uiTarget = await service.ResolveAsync(app: "ghost", hwnd: null, CancellationToken.None);
 
-        Assert.AreEqual(900, session.ProcessId);
-        Assert.AreEqual((long)0xB, session.WindowHandle);
-        Assert.AreEqual("Ghost Win", session.WindowTitle);
-        Assert.AreEqual("ghostapp", session.ProcessName);
+        Assert.AreEqual(900, uiTarget.ProcessId);
+        Assert.AreEqual((long)0xB, uiTarget.WindowHandle);
+        Assert.AreEqual("Ghost Win", uiTarget.WindowTitle);
+        Assert.AreEqual("ghostapp", uiTarget.ProcessName);
     }
 
     [TestMethod]
@@ -350,13 +350,13 @@ public class UiSessionServiceTests
     {
         var (service, uia, _) = NewService();
         uia.WindowsByTitleResult = [((nint)0xE, 960, "GW")];
-        // No default and no seed for PID 960 → CreateSession's name lookup returns null → "Unknown".
+        // No default and no seed for PID 960 → CreateTarget's name lookup returns null → "Unknown".
 
-        var session = await service.ResolveSessionAsync(app: "ghost2", hwnd: null, CancellationToken.None);
+        var uiTarget = await service.ResolveAsync(app: "ghost2", hwnd: null, CancellationToken.None);
 
-        Assert.AreEqual(960, session.ProcessId);
-        Assert.AreEqual("Unknown", session.ProcessName);
-        Assert.AreEqual("GW", session.WindowTitle);
+        Assert.AreEqual(960, uiTarget.ProcessId);
+        Assert.AreEqual("Unknown", uiTarget.ProcessName);
+        Assert.AreEqual("GW", uiTarget.WindowTitle);
     }
 
     [TestMethod]
@@ -370,11 +370,11 @@ public class UiSessionServiceTests
         sys.WindowSizeByHwnd[0xC1] = (400, 400);
         sys.WindowSizeByHwnd[0xC2] = (50, 50);
 
-        var session = await service.ResolveSessionAsync(app: "ghosts", hwnd: null, CancellationToken.None);
+        var uiTarget = await service.ResolveAsync(app: "ghosts", hwnd: null, CancellationToken.None);
 
-        Assert.AreEqual(910, session.ProcessId);
-        Assert.AreEqual("multi", session.ProcessName);
-        Assert.AreEqual(0xC1L, session.WindowHandle,
+        Assert.AreEqual(910, uiTarget.ProcessId);
+        Assert.AreEqual("multi", uiTarget.ProcessName);
+        Assert.AreEqual(0xC1L, uiTarget.WindowHandle,
             "Auto-select must pick the largest-area window (0xC1).");
     }
 

@@ -42,28 +42,28 @@ public sealed partial class UiRecordingService(
     /// fault arms, and cancellation timing races that require mutating real desktop windows or native
     /// WGC failures and are not safe to trigger on the shared coverage host.
     /// </remarks>
-    public async Task<RecordCaptureResult> RecordAsync(UiTarget session, string? elementId, RecordOptions options, CancellationToken ct, Action<bool>? onRecordingStarted = null)
+    public async Task<RecordCaptureResult> RecordAsync(UiTarget uiTarget, string? elementId, RecordOptions options, CancellationToken ct, Action<bool>? onRecordingStarted = null)
     {
         _logger.LogDebug("Recording process {Pid} (duration={Dur}s, fps={Fps}, maxEdge={MaxEdge}, captureScreen={Screen})",
-            session.ProcessId, options.DurationSec, options.Fps, options.MaxEdge, options.CaptureScreen);
+            uiTarget.ProcessId, options.DurationSec, options.Fps, options.MaxEdge, options.CaptureScreen);
 
-        if (!_uiAutomation.TryResolveRootWindow(session, out var rootHwnd, out var rootName))
+        if (!_uiAutomation.TryResolveRootWindow(uiTarget, out var rootHwnd, out var rootName))
         {
-            throw new InvalidOperationException($"No UIA window found for {session.ProcessName} (PID {session.ProcessId}).");
+            throw new InvalidOperationException($"No UIA window found for {uiTarget.ProcessName} (PID {uiTarget.ProcessId}).");
         }
 
         if (rootName is not null)
         {
-            session.WindowTitle = rootName;
+            uiTarget.WindowTitle = rootName;
         }
 
-        if (rootHwnd == 0 && session.WindowHandle != 0)
+        if (rootHwnd == 0 && uiTarget.WindowHandle != 0)
         {
-            rootHwnd = (nint)session.WindowHandle;
+            rootHwnd = (nint)uiTarget.WindowHandle;
         }
         if (rootHwnd == 0)
         {
-            throw new InvalidOperationException($"No native window handle for {session.ProcessName}. Is the window visible?");
+            throw new InvalidOperationException($"No native window handle for {uiTarget.ProcessName}. Is the window visible?");
         }
 
         var hwnd = new HWND(rootHwnd);
@@ -157,7 +157,7 @@ public sealed partial class UiRecordingService(
                 //   - Popup/child-window searching and slug validation are preserved.
                 // No selector (elementId == null) → whole-window recording (by design, unchanged).
                 var selectorExpr = _selectorParser.Parse(elementId);
-                var selectorElement = await _uiAutomation.FindSingleElementAsync(session, selectorExpr, ct).ConfigureAwait(false);
+                var selectorElement = await _uiAutomation.FindSingleElementAsync(uiTarget, selectorExpr, ct).ConfigureAwait(false);
                 if (selectorElement is null)
                 {
                     throw new UiElementNotFoundException(elementId);
@@ -176,7 +176,7 @@ public sealed partial class UiRecordingService(
                         (nint)hwnd,
                         ref captureOriginLeft, ref captureOriginTop,
                         ref srcWidth, ref srcHeight,
-                        getElementTopLevelHwnd: () => _uiAutomation.ResolveElementTopLevelWindow(session, selectorElement));
+                        getElementTopLevelHwnd: () => _uiAutomation.ResolveElementTopLevelWindow(uiTarget, selectorElement));
                     if (derivedHwnd != (nint)hwnd)
                     {
                         captureTargetHwnd = derivedHwnd;
