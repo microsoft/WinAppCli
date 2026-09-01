@@ -19,8 +19,8 @@ public interface IUiRecordingService
     /// <param name="onRecordingStarted">Invoked after the first frame; reports whether frame output is active.</param>
     /// <returns>Frame counts, timing, and the paths that were written.</returns>
     /// <exception cref="ArgumentOutOfRangeException">
-    /// <see cref="RecordOptions.DurationSec"/> or <see cref="RecordOptions.MaxEdge"/> is negative, or
-    /// <see cref="RecordOptions.Fps"/> is not positive.
+    /// <see cref="RecordOptions.DurationSec"/> is negative, <see cref="RecordOptions.Fps"/> is not
+    /// positive, or <see cref="RecordOptions.MaxEdge"/> is negative or between 1 and 63.
     /// </exception>
     /// <exception cref="Mp4EncoderInitializationException">The H.264 encoder could not be created.</exception>
     /// <exception cref="RecordPartialOutputException">Recording failed partway, but some output survived.</exception>

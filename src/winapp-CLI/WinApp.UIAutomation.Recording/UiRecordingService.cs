@@ -52,6 +52,14 @@ internal sealed partial class UiRecordingService(
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(options.Fps, nameof(options.Fps));
         ArgumentOutOfRangeException.ThrowIfNegative(options.MaxEdge, nameof(options.MaxEdge));
 
+        // The encoder cannot go below 64 pixels, so a smaller cap does not shrink the video - it
+        // produces a 64x64 one holding a few pixels of content, which is not what "at most this many
+        // pixels" promises. Refuse instead of returning something misleading.
+        if (options.MaxEdge > 0)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(options.MaxEdge, MfH264MinWidth, nameof(options.MaxEdge));
+        }
+
         _logger.LogDebug("Recording process {Pid} (duration={Dur}s, fps={Fps}, maxEdge={MaxEdge}, captureScreen={Screen})",
             uiTarget.ProcessId, options.DurationSec, options.Fps, options.MaxEdge, options.CaptureScreen);
 

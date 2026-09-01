@@ -40,6 +40,8 @@ public partial class RealRecordingTests
     [DataRow(10, 0, 0, nameof(RecordOptions.Fps))]
     [DataRow(10, -1, 0, nameof(RecordOptions.Fps))]
     [DataRow(10, 15, -1, nameof(RecordOptions.MaxEdge))]
+    [DataRow(10, 15, 1, nameof(RecordOptions.MaxEdge))]
+    [DataRow(10, 15, 63, nameof(RecordOptions.MaxEdge))]
     public async Task RecordAsync_InvalidOptions_ThrowsBeforeTouchingTheWindow(
         int durationSec, int fps, int maxEdge, string expectedParameter)
     {

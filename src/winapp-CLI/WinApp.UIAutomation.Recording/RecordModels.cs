@@ -17,7 +17,10 @@ public sealed class RecordOptions
     /// <summary>Target frames per second.</summary>
     public int Fps { get; init; } = 15;
 
-    /// <summary>Downscale so the longest edge is at most this many pixels. 0 = no downscale.</summary>
+    /// <summary>
+    /// Downscale so the longest edge is at most this many pixels. 0 = no downscale. A nonzero value
+    /// must be at least 64, the smallest frame the H.264 encoder accepts.
+    /// </summary>
     public int MaxEdge { get; init; }
 
     /// <summary>Capture from the screen DC (BitBlt) so overlays/popups are included.</summary>
