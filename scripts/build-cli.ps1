@@ -372,16 +372,8 @@ try
         Write-Host ""
         Write-Host "[NUGET] Creating NuGet packages..." -ForegroundColor Blue
 
-        # The UI Automation libraries build from source and do not need the published CLI, so they
-        # are packed first and independently of the CLI tools package below.
-        $GenerateNuGetScript = Join-Path $PSScriptRoot "generate-nuget.ps1"
-
-        & $GenerateNuGetScript -Version $FullVersion -Stable:$Stable
-
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning "UI Automation library packages creation failed, but continuing..."
-        }
-
+        # package-nuget.ps1 builds all three: the CLI tools package plus the two UI Automation
+        # library packages.
         $PackageNuGetScript = Join-Path $PSScriptRoot "package-nuget.ps1"
 
         & $PackageNuGetScript -Version $FullVersion -Stable:$Stable
