@@ -29,7 +29,7 @@ namespace Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation.Recording;
 /// a constructor or capture failure never leaves a corrupt file at the final path.
 /// </para>
 /// </remarks>
-public interface IVideoEncoder : IDisposable
+internal interface IVideoEncoder : IDisposable
 {
     int Width { get; }
 
@@ -40,7 +40,7 @@ public interface IVideoEncoder : IDisposable
     void Complete();
 }
 
-public sealed unsafe class Mp4SinkWriterEncoder : IVideoEncoder
+internal sealed unsafe class Mp4SinkWriterEncoder : IVideoEncoder
 {
     // MF_VERSION for Windows 7+ (MF_SDK_VERSION 0x0002, MF_API_VERSION 0x0070).
     private const uint MF_VERSION = 0x00020070;
@@ -371,6 +371,13 @@ public sealed unsafe class Mp4SinkWriterEncoder : IVideoEncoder
     }
 }
 
+/// <summary>
+/// The H.264 encoder could not be initialized. Usually means Media Foundation or the H.264 encoder
+/// is unavailable — most often on a Windows N/KN edition without the Media Feature Pack, or on a
+/// Server SKU without the Desktop Experience.
+/// </summary>
+/// <param name="message">Describes what failed.</param>
+/// <param name="innerException">The underlying Media Foundation failure.</param>
 public sealed class Mp4EncoderInitializationException(string message, Exception innerException)
     : InvalidOperationException(message, innerException)
 {

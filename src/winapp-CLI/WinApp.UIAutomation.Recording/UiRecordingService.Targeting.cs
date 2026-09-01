@@ -7,7 +7,7 @@ using Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation;
 
 namespace Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation.Recording;
 
-public sealed partial class UiRecordingService
+internal sealed partial class UiRecordingService
 {
     /// <summary>Retargets capture to an element's popup or owned top-level window.</summary>
     internal static nint ResolvePopupCaptureHwnd(

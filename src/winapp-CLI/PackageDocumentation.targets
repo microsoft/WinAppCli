@@ -1,0 +1,71 @@
+<Project>
+
+  <!--
+    Both packages run the CsWin32 source generator, which emits thousands of documented internal
+    P/Invoke wrappers under Windows.Win32. Those land in the generated XML documentation file and
+    dominate it - roughly 2,000 of 2,400 entries - which nearly doubles the .nupkg and offers a
+    consumer nothing, since the types they describe are not public.
+
+    Drop that one generated namespace rather than allow-listing our own: public API also lives under
+    Microsoft.Extensions.DependencyInjection, so that the AddWinAppUiAutomation() extension is found
+    without an extra using. A documentation file is allowed to omit members; the compiler is simply
+    the wrong place to filter them out.
+  -->
+
+  <UsingTask TaskName="TrimDocumentationToNamespace"
+             TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <DocumentationPath ParameterType="System.String" Required="true" />
+      <DropNamespace ParameterType="System.String" Required="true" />
+      <RemovedCount ParameterType="System.Int32" Output="true" />
+    </ParameterGroup>
+    <Task>
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        RemovedCount = 0;
+        if (System.IO.File.Exists(DocumentationPath))
+        {
+            var text = System.IO.File.ReadAllText(DocumentationPath);
+            var drop = DropNamespace + ".";
+            var removed = 0;
+
+            // Members never nest, so a non-greedy match to the first closing tag is exact. Handles
+            // both "<member ...>...</member>" and the self-closing form.
+            var pattern = "[ \\t]*<member\\s+name=\"(?<n>[^\"]*)\"(?:\\s*/>|[\\s\\S]*?</member>)\\r?\\n?";
+            var trimmed = System.Text.RegularExpressions.Regex.Replace(text, pattern, m =>
+            {
+                var name = m.Groups["n"].Value;
+
+                // Names look like "T:Namespace.Type" or "M:Namespace.Type.Method(...)".
+                var qualified = name.Length > 2 && name[1] == ':' ? name.Substring(2) : null;
+                if (qualified == null || !qualified.StartsWith(drop, System.StringComparison.Ordinal))
+                {
+                    return m.Value;
+                }
+
+                removed++;
+                return string.Empty;
+            });
+
+            if (removed > 0)
+            {
+                System.IO.File.WriteAllText(DocumentationPath, trimmed);
+            }
+
+            RemovedCount = removed;
+        }
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <Target Name="TrimGeneratedInteropDocumentation"
+          AfterTargets="CoreCompile"
+          Condition="'$(GenerateDocumentationFile)' == 'true' AND '$(DocumentationFile)' != '' AND Exists('$(DocumentationFile)')">
+    <TrimDocumentationToNamespace DocumentationPath="$(DocumentationFile)"
+                                  DropNamespace="Windows.Win32">
+      <Output TaskParameter="RemovedCount" PropertyName="_TrimmedDocEntries" />
+    </TrimDocumentationToNamespace>
+    <Message Importance="normal" Text="Trimmed $(_TrimmedDocEntries) generated interop entries from $(DocumentationFile)." />
+  </Target>
+
+</Project>

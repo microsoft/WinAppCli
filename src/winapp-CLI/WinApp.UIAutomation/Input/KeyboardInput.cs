@@ -128,6 +128,14 @@ public static class KeyboardInput
         s_chunkDelayMs = DefaultChunkDelayMs;
     }
 
+    /// <summary>
+    /// Sends a parsed key sequence to a window. Modifiers in a chord are pressed before, and released
+    /// after, the main key.
+    /// </summary>
+    /// <param name="hwnd">Target window handle. Only used by <see cref="KeyTransport.PostMessage"/>;
+    /// <see cref="KeyTransport.SendInput"/> goes to whichever window has focus.</param>
+    /// <param name="actions">The chords and literal text to send, in order.</param>
+    /// <param name="transport">How to deliver the input.</param>
     public static void Send(long hwnd, IReadOnlyList<KeyAction> actions, KeyTransport transport)
     {
         switch (transport)
@@ -415,7 +423,7 @@ public static class KeyboardInput
 
     /// <summary>
     /// Best-effort release of every key pressed in <paramref name="batch"/> — emits a matching key-up for
-    /// each key-down event, in reverse order, so a partial <see cref="PInvoke.SendInput"/> can't leave a
+    /// each key-down event, in reverse order, so a partial <c>SendInput</c> can't leave a
     /// modifier or key logically stuck down. Failures here are swallowed (we're already on the error path).
     /// </summary>
     internal static void ReleaseHeldKeys(INPUT[] batch)

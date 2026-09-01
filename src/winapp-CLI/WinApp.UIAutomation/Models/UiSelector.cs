@@ -14,6 +14,9 @@ public sealed record UiSelector
     /// <summary>Plain text search query — matches against Name and AutomationId (substring, case-insensitive).</summary>
     public string? Query { get; init; }
 
+    /// <summary>Whether this selector targets a semantic slug.</summary>
     public bool IsSlug => Slug is not null;
+
+    /// <summary>Whether this selector targets a plain text query.</summary>
     public bool IsQuery => Query is not null;
 }

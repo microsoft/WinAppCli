@@ -11,5 +11,7 @@ namespace Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation;
 /// </summary>
 public sealed class AppNotFoundException : InvalidOperationException
 {
+    /// <summary>Creates an exception with a message describing the app or window that was not found.</summary>
+    /// <param name="message">Human-readable description of the failed target lookup.</param>
     public AppNotFoundException(string message) : base(message) { }
 }

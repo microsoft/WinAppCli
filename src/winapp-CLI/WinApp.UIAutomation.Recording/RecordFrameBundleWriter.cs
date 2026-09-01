@@ -13,14 +13,14 @@ using Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation;
 
 namespace Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation.Recording;
 
-public interface IRecordFrameSink : IAsyncDisposable
+internal interface IRecordFrameSink : IAsyncDisposable
 {
     ValueTask WriteAsync(ReadOnlyMemory<byte> bgra, RecordFrameSample sample, CancellationToken cancellationToken);
     Task<RecordFrameArtifactResult> CompleteAsync(RecordFrameCompletion completion);
     Task AbortAsync();
 }
 
-public sealed class RecordFrameBundleConfiguration
+internal sealed class RecordFrameBundleConfiguration
 {
     public const long DefaultMaximumBundleBytes = 1024L * 1024 * 1024;
 
@@ -34,7 +34,7 @@ public sealed class RecordFrameBundleConfiguration
     public long MaximumBundleBytes { get; init; } = DefaultMaximumBundleBytes;
 }
 
-public sealed class RecordFrameCompletion
+internal sealed class RecordFrameCompletion
 {
     public required string Status { get; init; }
     public required string StopReason { get; init; }
@@ -47,7 +47,7 @@ public sealed class RecordFrameCompletion
     public string? PublicationDirectory { get; init; }
 }
 
-public sealed class RecordFrameBundleWriter : IRecordFrameSink
+internal sealed class RecordFrameBundleWriter : IRecordFrameSink
 {
     internal const int JpegQuality = 85;
     private const long ManifestByteReserve = 1024L * 1024;

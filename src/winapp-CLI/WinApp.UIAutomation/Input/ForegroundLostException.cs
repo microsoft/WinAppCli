@@ -13,5 +13,7 @@ namespace Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation;
 /// </summary>
 public sealed class ForegroundLostException : InvalidOperationException
 {
+    /// <summary>Creates an exception with a message describing how foreground ownership was lost.</summary>
+    /// <param name="message">Human-readable description of the foreground-window mismatch.</param>
     public ForegroundLostException(string message) : base(message) { }
 }

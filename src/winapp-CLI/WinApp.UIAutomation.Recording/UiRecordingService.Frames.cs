@@ -8,7 +8,7 @@ using Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation;
 
 namespace Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation.Recording;
 
-public sealed partial class UiRecordingService
+internal sealed partial class UiRecordingService
 {
     // Media Foundation rejects H.264 frames smaller than 64 pixels.
     private const int MfH264MinWidth = 64;

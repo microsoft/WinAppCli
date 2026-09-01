@@ -22,7 +22,7 @@ namespace Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation;
 /// pixels — the same space <c>ui inspect</c> reports.
 /// </summary>
 [SupportedOSPlatform("windows10.0.17763.0")]
-public static class PointerInput
+internal static class PointerInput
 {
     /// <summary>Maximum simultaneous touch contacts we register with the injection subsystem.</summary>
     private const uint MaxContacts = 10;
@@ -520,6 +520,10 @@ public static class PointerInput
     /// Sends the full sequence of DOWN → interpolated UPDATE glide → UP frames for a pen stroke.
     /// Exposed as <see langword="internal"/> for frame-sequence unit tests (no live device needed).
     /// </summary>
+    /// <param name="path">Ordered waypoints of the stroke, in screen coordinates. A single point is a tap.</param>
+    /// <param name="contactPressure">Tip pressure in the native 0..1024 pen range.</param>
+    /// <param name="durationMs">How long the glide between waypoints should take.</param>
+    /// <param name="send">Submits one pen frame. Injected so tests can capture frames instead of driving a real device.</param>
     /// <param name="sleep">
     /// Optional sleep function; defaults to <see cref="Thread.Sleep(int)"/>. Inject a fake for tests
     /// so timing assertions complete instantly without real blocking.
@@ -627,7 +631,7 @@ public static class PointerInput
     /// <remarks>
     /// Coverage ceiling (issue #630): the <c>InjectSyntheticPointerInput</c> P/Invoke and its Win32
     /// failure branch require a live synthetic pen device on an unlocked interactive desktop, so this
-    /// native sender is un-coverable in the shared CI/test environment. The <see cref="ComputePenFlags"/>
+    /// native sender is un-coverable in the shared CI/test environment. The <c>ComputePenFlags</c>
     /// bitmask logic it applies per frame is covered directly, and the frames it would submit are
     /// validated via the injectable <see cref="PenFrameSender"/> seam (see PointerInputFrameTests).
     /// </remarks>

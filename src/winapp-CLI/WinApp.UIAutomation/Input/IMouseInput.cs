@@ -24,6 +24,10 @@ public interface IMouseInput
     /// <summary>
     /// Clicks at screen coordinates.
     /// </summary>
+    /// <param name="screenX">X position in screen coordinates.</param>
+    /// <param name="screenY">Y position in screen coordinates.</param>
+    /// <param name="doubleClick">Issue a double click instead of a single one.</param>
+    /// <param name="rightClick">Use the right button instead of the left.</param>
     /// <param name="settleMs">Cursor-settle pause (ms) after positioning, before the button-down. Pass
     /// <c>0</c> when the caller already moved the cursor and confirmed the target hasn't moved, so no
     /// extra unguarded settle window reopens the move-during-settle race.</param>
@@ -32,6 +36,11 @@ public interface IMouseInput
     /// <summary>
     /// Presses the mouse button at the from-point, moves to the to-point in steps, then releases.
     /// </summary>
+    /// <param name="fromScreenX">X position to press at, in screen coordinates.</param>
+    /// <param name="fromScreenY">Y position to press at, in screen coordinates.</param>
+    /// <param name="toScreenX">X position to release at, in screen coordinates.</param>
+    /// <param name="toScreenY">Y position to release at, in screen coordinates.</param>
+    /// <param name="rightButton">Use the right button instead of the left.</param>
     /// <param name="holdMs">Milliseconds to hold the button down at the start before moving. With
     /// <paramref name="fromScreenX"/>/<paramref name="fromScreenY"/> equal to the to-point (no movement)
     /// this performs a press-and-hold / long-press gesture.</param>
@@ -46,6 +55,9 @@ public interface IMouseInput
     /// Rotates the mouse wheel at the given screen position. Positive delta scrolls up/away, negative down/toward.
     /// One notch is <c>120</c> units (WHEEL_DELTA).
     /// </summary>
+    /// <param name="screenX">X position in screen coordinates.</param>
+    /// <param name="screenY">Y position in screen coordinates.</param>
+    /// <param name="delta">Wheel movement in WHEEL_DELTA units.</param>
     /// <param name="settleMs">Cursor-settle pause (ms) after positioning, before the wheel rotation. Pass
     /// <c>0</c> when the caller already moved the cursor and confirmed the target is stable.</param>
     void ScrollWheel(int screenX, int screenY, int delta, int settleMs = 30);

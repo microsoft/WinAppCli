@@ -10,6 +10,12 @@ namespace Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation;
 /// </summary>
 public static class CoordinateParser
 {
+    /// <summary>
+    /// Parses an <c>x,y</c> coordinate token into a <see cref="PointerPoint"/>.
+    /// </summary>
+    /// <param name="value">Coordinate token to parse.</param>
+    /// <param name="point">Parsed point when the method returns <see langword="true"/>; otherwise the default point.</param>
+    /// <returns><see langword="true"/> when both coordinates parse as integers; otherwise <see langword="false"/>.</returns>
     public static bool TryParsePoint(string? value, out PointerPoint point)
     {
         point = default;
@@ -22,6 +28,13 @@ public static class CoordinateParser
         return false;
     }
 
+    /// <summary>
+    /// Parses an <c>x,y</c> coordinate token into integer coordinates.
+    /// </summary>
+    /// <param name="value">Coordinate token to parse.</param>
+    /// <param name="x">Parsed X coordinate when the method returns <see langword="true"/>; otherwise 0.</param>
+    /// <param name="y">Parsed Y coordinate when the method returns <see langword="true"/>; otherwise 0.</param>
+    /// <returns><see langword="true"/> when both coordinates parse as integers; otherwise <see langword="false"/>.</returns>
     public static bool TryParsePoint(string? value, out int x, out int y)
     {
         x = 0;

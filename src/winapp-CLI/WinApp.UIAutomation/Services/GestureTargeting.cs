@@ -103,7 +103,7 @@ public static class GestureTargeting
     /// animating target drifts during the settle window <see cref="ResolveStableAsync"/> couldn't see,
     /// so a reported success no longer hides a silent miss. Returns the element's current bounds on
     /// success, or a <see cref="TargetStatus.Moving"/> / <see cref="TargetStatus.NotFound"/> /
-    /// <see cref="TargetStatus.ZeroSize"/> result (feed to <see cref="TryReport"/>) when it shifted,
+    /// <see cref="TargetStatus.ZeroSize"/> result (feed to <c>TryReport</c>) when it shifted,
     /// vanished, or collapsed in that final window.
     /// </summary>
     public static async Task<StableTarget> ConfirmStillAsync(

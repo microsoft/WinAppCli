@@ -17,6 +17,8 @@ public interface IUiTargetResolver
     /// </summary>
     /// <param name="app">Process name, window title, or PID. Required unless <paramref name="hwnd"/> is set.</param>
     /// <param name="hwnd">A specific window handle. Takes precedence over <paramref name="app"/> and marks the result as an explicit target, so element lookups stay scoped to that window.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>The process and, when known, window that matched the request.</returns>
     /// <exception cref="AppNotFoundException">No running app matched.</exception>
     /// <exception cref="InvalidOperationException">Neither argument was supplied, or several windowed processes matched and the choice is ambiguous.</exception>
     Task<UiTarget> ResolveAsync(string? app, long? hwnd, CancellationToken ct);

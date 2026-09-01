@@ -11,5 +11,11 @@ namespace Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation;
 /// </summary>
 public interface IUiSelectorParser
 {
+    /// <summary>
+    /// Parses a selector string into either a semantic slug selector or a plain text query.
+    /// </summary>
+    /// <param name="selector">Selector text to parse. Must not be <see langword="null"/>, empty, or whitespace.</param>
+    /// <returns>The parsed selector expression.</returns>
+    /// <exception cref="ArgumentException"><paramref name="selector"/> is <see langword="null"/>, empty, or whitespace.</exception>
     UiSelector Parse(string selector);
 }

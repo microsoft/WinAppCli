@@ -112,7 +112,7 @@ public static class ForegroundGuard
             : null;
 
     /// <summary>
-    /// Pure decision behind <see cref="TryEnsureForeground"/>: given whether there is a target window
+    /// Pure decision behind <c>TryEnsureForeground</c>: given whether there is a target window
     /// to verify, whether that target currently holds the foreground, and whether any foreground
     /// window exists at all, choose the outcome. Side-effect-free (no PInvoke) so the locked-desktop
     /// (<c>no_interactive_desktop</c>) vs. wrong-window (<c>foreground_not_target</c>) selection is

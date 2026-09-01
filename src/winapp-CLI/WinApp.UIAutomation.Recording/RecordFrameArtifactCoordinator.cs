@@ -7,7 +7,7 @@ using Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation;
 
 namespace Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation.Recording;
 
-public sealed class RecordFrameArtifactCoordinator : IAsyncDisposable
+internal sealed class RecordFrameArtifactCoordinator : IAsyncDisposable
 {
     private readonly ILogger _logger;
     private IRecordFrameSink? _sink;

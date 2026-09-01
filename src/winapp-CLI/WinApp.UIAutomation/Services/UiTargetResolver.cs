@@ -5,6 +5,13 @@ using Microsoft.Extensions.Logging;
 
 namespace Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation;
 
+/// <summary>
+/// Resolves app, process, title, PID, or window-handle input into the UI Automation target that
+/// later operations act on.
+/// </summary>
+/// <param name="uiAutomation">Window discovery service used for title and process window searches.</param>
+/// <param name="systemQuery">System window and process query service used to inspect candidate windows.</param>
+/// <param name="logger">Logger used to report automatic target selection decisions.</param>
 public sealed class UiTargetResolver(
     IUiAutomation uiAutomation,
     ISystemUiQuery systemQuery,
@@ -17,6 +24,15 @@ public sealed class UiTargetResolver(
     // point at the same OS boundary; tests inject a fake for the instance path.
     private static readonly SystemUiQuery s_sharedQuery = new();
 
+    /// <summary>
+    /// Resolves the requested app or window handle into the target window for automation calls.
+    /// </summary>
+    /// <param name="app">Process name, window title, or PID. Required unless <paramref name="hwnd"/> is set.</param>
+    /// <param name="hwnd">Specific window handle. When supplied, it takes precedence over <paramref name="app"/>.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>The process and, when known, window that matched the request.</returns>
+    /// <exception cref="AppNotFoundException">No running process or window matched the request.</exception>
+    /// <exception cref="InvalidOperationException">Neither target argument was supplied, or multiple processes matched ambiguously.</exception>
     public Task<UiTarget> ResolveAsync(string? app, long? hwnd, CancellationToken ct)
     {
         // Direct HWND targeting — most stable, used after discovery
@@ -126,8 +142,15 @@ public sealed class UiTargetResolver(
         };
     }
 
+    /// <summary>Returns the Win32 class name for <paramref name="hwnd"/>, or <see langword="null"/> when it cannot be read.</summary>
+    /// <param name="hwnd">Native window handle to inspect.</param>
     public static string? GetWindowClassName(nint hwnd) => s_sharedQuery.GetWindowClassName((long)hwnd);
 
+    /// <summary>
+    /// Classifies a Win32 class name as a user-facing window kind for diagnostics.
+    /// </summary>
+    /// <param name="className">Win32 class name, or <see langword="null"/> when unknown.</param>
+    /// <returns><c>"popup"</c> for popup classes, <c>"dialog"</c> for <c>#32770</c>, otherwise <c>"window"</c>.</returns>
     public static string ClassifyWindow(string? className)
     {
         if (className is null) { return "window"; }
@@ -136,12 +159,22 @@ public sealed class UiTargetResolver(
         return "window";
     }
 
+    /// <summary>Metadata reported for a native window.</summary>
     public record WindowMetadata
     {
+        /// <summary>Win32 class name, or <c>"Unknown"</c> when it could not be read.</summary>
         public string ClassName { get; init; } = "Unknown";
+
+        /// <summary>User-facing window kind, such as <c>"window"</c>, <c>"popup"</c>, or <c>"dialog"</c>.</summary>
         public string Label { get; init; } = "window";
+
+        /// <summary>Window width in screen pixels.</summary>
         public int Width { get; init; }
+
+        /// <summary>Window height in screen pixels.</summary>
         public int Height { get; init; }
+
+        /// <summary>Owning window handle, or 0 when the window has no owner.</summary>
         public nint OwnerHwnd { get; init; }
     }
 

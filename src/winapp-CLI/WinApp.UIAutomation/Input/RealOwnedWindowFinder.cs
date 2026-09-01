@@ -6,7 +6,7 @@ namespace Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation;
 /// <summary>
 /// Production <see cref="IOwnedWindowFinder"/> — enumerates the real desktop for visible top-level
 /// windows owned by one of the given app windows. This is a thin, un-runnable-in-CI native (Win32)
-/// wrapper; the interface exists so <see cref="Commands.UiScreenshotCommand"/>'s discovery logic is
+/// wrapper; the interface exists so <c>UiScreenshotCommand</c>'s discovery logic is
 /// testable without a live desktop. Moved verbatim from the command; behavior is unchanged.
 /// </summary>
 internal sealed class RealOwnedWindowFinder : IOwnedWindowFinder

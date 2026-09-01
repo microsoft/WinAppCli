@@ -9,7 +9,7 @@ namespace Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation;
 /// <summary>
 /// Simulates mouse clicks at screen coordinates using SendInput.
 /// </summary>
-public static class MouseInput
+internal static class MouseInput
 {
     internal delegate uint SendInputHook(INPUT[] inputs);
 

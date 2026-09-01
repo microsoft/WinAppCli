@@ -28,11 +28,22 @@ public readonly record struct PointerRect(int Left, int Top, int Right, int Bott
 /// <summary>The synthetic touch gestures supported by <c>winapp ui touch</c>.</summary>
 public enum TouchGesture
 {
+    /// <summary>A single brief contact.</summary>
     Tap,
+
+    /// <summary>Two taps in quick succession.</summary>
     DoubleTap,
+
+    /// <summary>One contact held in place before lifting.</summary>
     LongPress,
+
+    /// <summary>One contact gliding from a start point to an end point.</summary>
     Swipe,
+
+    /// <summary>Two contacts moving toward each other, which apps read as zoom out.</summary>
     Pinch,
+
+    /// <summary>Two contacts moving apart, which apps read as zoom in.</summary>
     Stretch,
 }
 
@@ -53,6 +64,7 @@ public interface IPointerInput
     /// <paramref name="durationMs"/>, then lifts them.
     /// </summary>
     /// <param name="gesture">Gesture kind — drives double-tap repetition and long-press semantics.</param>
+    /// <param name="contactPaths">One ordered waypoint path per finger, in screen coordinates.</param>
     /// <param name="holdMs">Milliseconds to hold the contacts down before lifting (long-press).</param>
     /// <param name="durationMs">Glide time in milliseconds for moving gestures (swipe/pinch/stretch).</param>
     void Touch(

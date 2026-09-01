@@ -17,6 +17,9 @@
          Restore and consumption work on any system with long-path support, which .NET 10 requires. -->
     <NoWarn>CA1852;NU5123</NoWarn>
 
+    <!-- Ship IntelliSense with the package, and let CS1591 hold the public surface to account. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
     <IsAotCompatible>true</IsAotCompatible>
     <DisableRuntimeMarshalling>true</DisableRuntimeMarshalling>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -68,5 +71,7 @@
       <_Parameter1>WinApp.Cli.Tests</_Parameter1>
     </AssemblyAttribute>
   </ItemGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)..\PackageDocumentation.targets" />
 
 </Project>

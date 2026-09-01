@@ -29,20 +29,102 @@ public interface IUiAutomation
     /// </summary>
     bool TryGetWindowRect(long hwnd, out PointerRect rect);
 
-    
+    /// <summary>
+    /// Walks the element tree under <paramref name="elementId"/>, or the whole window when it is
+    /// <see langword="null"/>, down to <paramref name="depth"/> levels.
+    /// </summary>
+    /// <param name="uiTarget">The app or window to inspect.</param>
+    /// <param name="elementId">Selector of the element to start from, or <see langword="null"/> for the window root.</param>
+    /// <param name="depth">How many levels below the starting element to include.</param>
+    /// <param name="ct">Cancels the walk.</param>
+    /// <returns>The elements found, in walk order.</returns>
     Task<UiElement[]> InspectAsync(UiTarget uiTarget, string? elementId, int depth, CancellationToken ct);
+
+    /// <summary>Walks from an element up to the window root, so a caller can see where it sits in the tree.</summary>
+    /// <param name="uiTarget">The app or window that owns the element.</param>
+    /// <param name="elementId">Selector of the element to walk up from.</param>
+    /// <param name="ct">Cancels the walk.</param>
+    /// <returns>The ancestors, ordered from the root down to the element's parent.</returns>
     Task<UiElement[]> InspectAncestorsAsync(UiTarget uiTarget, string elementId, CancellationToken ct);
+
+    /// <summary>Finds every element matching <paramref name="selector"/>, up to <paramref name="maxResults"/>.</summary>
+    /// <param name="uiTarget">The app or window to search.</param>
+    /// <param name="selector">What to match.</param>
+    /// <param name="maxResults">Caps how many matches are returned.</param>
+    /// <param name="ct">Cancels the search.</param>
+    /// <returns>The matching elements.</returns>
     Task<UiElement[]> SearchAsync(UiTarget uiTarget, UiSelector selector, int maxResults, CancellationToken ct);
+
+    /// <summary>Finds the one element matching <paramref name="selector"/>.</summary>
+    /// <param name="uiTarget">The app or window to search.</param>
+    /// <param name="selector">What to match.</param>
+    /// <param name="ct">Cancels the search.</param>
+    /// <returns>The match, or <see langword="null"/> when nothing matched.</returns>
+    /// <exception cref="UiAmbiguousSelectorException">More than one element matched.</exception>
     Task<UiElement?> FindSingleElementAsync(UiTarget uiTarget, UiSelector selector, CancellationToken ct);
+
+    /// <summary>Reads an element's UIA properties.</summary>
+    /// <param name="uiTarget">The app or window that owns the element.</param>
+    /// <param name="element">The element to read.</param>
+    /// <param name="propertyName">A single property to read, or <see langword="null"/> for all of them.</param>
+    /// <param name="ct">Cancels the read.</param>
+    /// <returns>Property names mapped to their values.</returns>
     Task<Dictionary<string, object?>> GetPropertiesAsync(UiTarget uiTarget, UiElement element, string? propertyName, CancellationToken ct);
+
+    /// <summary>Captures the window, or one element's region, as raw BGRA pixels.</summary>
+    /// <param name="uiTarget">The app or window to capture.</param>
+    /// <param name="elementId">Selector of the element to crop to, or <see langword="null"/> for the whole window.</param>
+    /// <param name="captureScreen">Read from the screen instead of the window, which includes anything overlapping it.</param>
+    /// <param name="focus">Bring the window to the foreground first.</param>
+    /// <param name="ct">Cancels the capture.</param>
+    /// <returns>The pixels and their dimensions.</returns>
     Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiTarget uiTarget, string? elementId, bool captureScreen, bool focus, CancellationToken ct);
 
+    /// <summary>Invokes an element the way a click would, through its UIA pattern rather than the mouse.</summary>
+    /// <param name="uiTarget">The app or window that owns the element.</param>
+    /// <param name="element">The element to invoke.</param>
+    /// <param name="ct">Cancels the call.</param>
+    /// <returns>The pattern that was used, such as "Invoke" or "Toggle".</returns>
     Task<string> InvokeAsync(UiTarget uiTarget, UiElement element, CancellationToken ct);
+
+    /// <summary>Replaces an editable element's text through its ValuePattern.</summary>
+    /// <param name="uiTarget">The app or window that owns the element.</param>
+    /// <param name="element">The element to write to.</param>
+    /// <param name="text">The replacement text.</param>
+    /// <param name="ct">Cancels the call.</param>
     Task SetValueAsync(UiTarget uiTarget, UiElement element, string text, CancellationToken ct);
+
+    /// <summary>Moves keyboard focus to an element.</summary>
+    /// <param name="uiTarget">The app or window that owns the element.</param>
+    /// <param name="element">The element to focus.</param>
+    /// <param name="ct">Cancels the call.</param>
     Task FocusAsync(UiTarget uiTarget, UiElement element, CancellationToken ct);
+
+    /// <summary>Scrolls an element's container until the element is on screen.</summary>
+    /// <param name="uiTarget">The app or window that owns the element.</param>
+    /// <param name="element">The element to bring into view.</param>
+    /// <param name="ct">Cancels the call.</param>
     Task ScrollIntoViewAsync(UiTarget uiTarget, UiElement element, CancellationToken ct);
+
+    /// <summary>Scrolls a scrollable container.</summary>
+    /// <param name="uiTarget">The app or window that owns the element.</param>
+    /// <param name="element">The container to scroll.</param>
+    /// <param name="direction">"up", "down", "left", or "right".</param>
+    /// <param name="destination">"start" or "end" to jump to either extreme instead of stepping.</param>
+    /// <param name="ct">Cancels the call.</param>
     Task ScrollContainerAsync(UiTarget uiTarget, UiElement element, string? direction, string? destination, CancellationToken ct);
+
+    /// <summary>Reads whichever element currently has keyboard focus.</summary>
+    /// <param name="uiTarget">The app or window to look in.</param>
+    /// <param name="ct">Cancels the call.</param>
+    /// <returns>The focused element, or <see langword="null"/> when nothing is focused.</returns>
     Task<UiElement?> GetFocusedElementAsync(UiTarget uiTarget, CancellationToken ct);
+
+    /// <summary>Reads an element's text through its TextPattern or ValuePattern.</summary>
+    /// <param name="uiTarget">The app or window that owns the element.</param>
+    /// <param name="element">The element to read.</param>
+    /// <param name="ct">Cancels the call.</param>
+    /// <returns>The text, or <see langword="null"/> when the element exposes none.</returns>
     Task<string?> GetTextAsync(UiTarget uiTarget, UiElement element, CancellationToken ct);
 
     /// <summary>

@@ -21,7 +21,7 @@ namespace Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation.Recording;
 /// <see cref="IUiAutomation"/> and <see cref="IWindowCapture"/>; this service owns only the
 /// recording loop, encoding, and frame-artifact output, which are CLI concerns.
 /// </remarks>
-public sealed partial class UiRecordingService(
+internal sealed partial class UiRecordingService(
     IUiAutomation uiAutomation,
     IWindowCapture windowCapture,
     IUiSelectorParser selectorParser,

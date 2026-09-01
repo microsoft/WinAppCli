@@ -11,6 +11,7 @@ namespace Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation;
 public sealed class UiElementNotFoundException(string selector)
     : Exception($"No element found matching '{selector}'.")
 {
+    /// <summary>Selector that did not match any element.</summary>
     public string Selector { get; } = selector;
 }
 
@@ -32,5 +33,6 @@ public sealed class UiAmbiguousSelectorException(string message)
 public sealed class UiElementOffscreenException(string selector)
     : Exception($"Element '{selector}' is entirely offscreen / has no visible area to capture.")
 {
+    /// <summary>Selector that resolved to an offscreen element.</summary>
     public string Selector { get; } = selector;
 }
