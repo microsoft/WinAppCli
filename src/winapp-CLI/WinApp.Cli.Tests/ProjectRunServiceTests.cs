@@ -1960,7 +1960,7 @@ public class ProjectRunServiceTests
                 : (0, PackagedPropertiesJson(), string.Empty),
         };
         var shim = new FakeCsWinRTMetadataShimService { WindowsSdkAbsent = true, FolderToReturn = null };
-        var console = new TestConsole();
+        using var console = new TestConsole();
         var logger = new LevelLogger<ProjectRunService>(LogLevel.Information);
         var service = new ProjectRunService(dotnet, NewDetection(dotnet), shim, console, logger);
         var options = new ProjectRunOptions(
@@ -3175,7 +3175,7 @@ public class ProjectRunServiceTests
                 return (0, PackagedPropertiesJson(), string.Empty);
             },
         };
-        var console = new TestConsole();
+        using var console = new TestConsole();
         var logger = new LevelLogger<ProjectRunService>(LogLevel.Information);
         var service = new ProjectRunService(
             dotnet, NewDetection(dotnet), new FakeCsWinRTMetadataShimService(), console, logger);
@@ -3207,7 +3207,7 @@ public class ProjectRunServiceTests
                     ? (1, string.Empty, "simulated sibling restore failure")
                     : (0, PackagedPropertiesJson(), string.Empty),
         };
-        var console = new TestConsole();
+        using var console = new TestConsole();
         var logger = new LevelLogger<ProjectRunService>(LogLevel.Information);
         var service = new ProjectRunService(
             dotnet, NewDetection(dotnet), new FakeCsWinRTMetadataShimService(), console, logger);
