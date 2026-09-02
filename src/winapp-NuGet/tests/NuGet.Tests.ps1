@@ -103,6 +103,7 @@ $extraProps  </PropertyGroup>
                 [string]$WinAppLaunchArgs = "",
                 [string]$WinAppRunArgs = "",
                 [switch]$WinAppRunDetach,
+                [switch]$WinAppRunNoLaunch,
                 [switch]$WinAppRunUnregisterOnExit,
                 [switch]$WinAppRunClean,
                 [switch]$WinAppRunSymbols,
@@ -125,6 +126,7 @@ $extraProps  </PropertyGroup>
             if ($WinAppLaunchArgs) { $extraProps += "    <WinAppLaunchArgs>$WinAppLaunchArgs</WinAppLaunchArgs>`n" }
             if ($WinAppRunArgs) { $extraProps += "    <WinAppRunArgs>$WinAppRunArgs</WinAppRunArgs>`n" }
             if ($WinAppRunDetach) { $extraProps += "    <WinAppRunDetach>true</WinAppRunDetach>`n" }
+            if ($WinAppRunNoLaunch) { $extraProps += "    <WinAppRunNoLaunch>true</WinAppRunNoLaunch>`n" }
             if ($WinAppRunUnregisterOnExit) { $extraProps += "    <WinAppRunUnregisterOnExit>true</WinAppRunUnregisterOnExit>`n" }
             if ($WinAppRunClean) { $extraProps += "    <WinAppRunClean>true</WinAppRunClean>`n" }
             if ($WinAppRunSymbols) { $extraProps += "    <WinAppRunSymbols>true</WinAppRunSymbols>`n" }
@@ -157,6 +159,15 @@ $extraProps  </PropertyGroup>
     }
 
     Context "Active scenarios - packaged Windows apps" {
+        It "Ships props and targets that are well-formed XML" {
+            # XML forbids '--' inside a comment, and MSBuild reports that as MSB4024 "could not be
+            # loaded" on EVERY consuming project — so a comment mentioning a CLI switch by name breaks
+            # every build, not just this file. Parsing here catches it before it reaches a consumer.
+            foreach ($file in @($script:propsPath, $script:targetsPath)) {
+                { [xml](Get-Content $file -Raw) } | Should -Not -Throw -Because "$file must be well-formed XML"
+            }
+        }
+
         It "Activates for WinUI app (OutputType=WinExe, manifest in project dir)" {
             Get-GateValue -CaseName 'winui' -TargetFramework 'net10.0-windows10.0.19041.0' -OutputType 'WinExe' -ProjectDirManifest $true | Should -Be 'true'
         }
@@ -325,6 +336,31 @@ $extraProps  </PropertyGroup>
 
             $args | Should -Match ' --without-alias'
             $args | Should -Not -Match ' --with-alias '
+        }
+
+        It "Does not infer the console alias when detaching - the CLI rejects that pair" {
+            # --detach does not wait on a process this terminal owns, so an alias cannot express it. An
+            # inferred alias would break console projects already using WinAppRunDetach.
+            $args = Get-ComputedRunArgs -CaseName 'run-alias-detach' -OutputType 'Exe' -WinAppRunDetach
+
+            $args | Should -Match ' --detach'
+            $args | Should -Not -Match ' --with-alias'
+        }
+
+        It "Does not infer the console alias when not launching - the CLI rejects that pair" {
+            $args = Get-ComputedRunArgs -CaseName 'run-alias-nolaunch' -OutputType 'Exe' -WinAppRunNoLaunch
+
+            $args | Should -Match ' --no-launch'
+            $args | Should -Not -Match ' --with-alias'
+        }
+
+        It "Still forwards an EXPLICIT alias request alongside detach, so the conflict is reported" {
+            # Suppressing an explicit 'true' would silently ignore what the user asked for. Forwarding it
+            # lets the CLI report the contradiction instead of hiding it.
+            $args = Get-ComputedRunArgs -CaseName 'run-alias-explicit-detach' -OutputType 'Exe' -WinAppRunUseExecutionAlias 'true' -WinAppRunDetach
+
+            $args | Should -Match ' --with-alias'
+            $args | Should -Match ' --detach'
         }
     }
 

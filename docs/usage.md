@@ -852,9 +852,11 @@ than silently changed.
 
 ##### Capabilities
 
-Your app runs full-trust, which covers notifications, protocol handlers and shell integration without
-declaring anything. But some APIs are gated on a capability regardless — the Windows AI APIs are the
-common case:
+Your app runs full-trust with identity, which satisfies APIs that only require a packaged app. But some
+APIs are gated on a declared capability regardless — the Windows AI APIs are the common case. (Shell
+integrations such as protocol handlers and file associations are a third case: those need authored
+`<Extensions>` entries, not a capability, so use [your own manifest](#bring-your-own-manifest) for
+them.)
 
 ```csharp
 #:property WinAppCapabilities=systemAIModels
@@ -964,10 +966,12 @@ Windows architecture`. A `#:property RuntimeIdentifier=win-arm64` in the file is
 `--arch`/`--runtime` overrides it.
 
 **Packaged and unpackaged both work**, detected from the effective `WindowsPackageType` exactly as in
-project mode: the default registers a loose layout and launches via AUMID, while
+project mode: the default registers a loose layout and launches it with identity, while
 `#:property WindowsPackageType=None` builds the app, installs the matching Windows App Runtime, and
-launches the `.exe` directly. The identity options (`--no-launch`, `--with-alias`, `--clean`,
-`--unregister-on-exit`, `--manifest`, `--output-appx-directory`) apply to packaged apps only.
+launches the `.exe` directly. (A packaged app is launched through its execution alias or through AUMID
+activation — see the console note above; that choice is separate from whether it is packaged.) The
+identity options (`--no-launch`, `--with-alias`, `--without-alias`, `--clean`, `--unregister-on-exit`,
+`--manifest`, `--output-appx-directory`) apply to packaged apps only.
 
 Single-file mode requires the **.NET SDK 10.0.300 or newer**.
 

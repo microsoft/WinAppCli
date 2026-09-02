@@ -224,8 +224,13 @@
         winapp points at the build-output FOLDER, where it has no project to read OutputType from, so
         the console default has to be decided here and forwarded. An explicit property wins in either
         direction; otherwise a console app opts in.
+
+        The INFERRED alias is suppressed for detach and no-launch, which the CLI rejects alongside an
+        alias launch: neither waits on a process this terminal owns, so an alias cannot express them.
+        Inferring one would break console projects already using those modes. An explicit 'true' is
+        still forwarded, so a genuinely contradictory combination is still reported rather than hidden.
       -->
-      <_WinAppRunArgs Condition="'$(WinAppRunUseExecutionAlias)' == 'true' Or ('$(WinAppRunUseExecutionAlias)' == '' And '$(OutputType)' == 'Exe')">$(_WinAppRunArgs) --with-alias</_WinAppRunArgs>
+      <_WinAppRunArgs Condition="'$(WinAppRunUseExecutionAlias)' == 'true' Or ('$(WinAppRunUseExecutionAlias)' == '' And '$(OutputType)' == 'Exe' And '$(WinAppRunDetach)' != 'true' And '$(WinAppRunNoLaunch)' != 'true')">$(_WinAppRunArgs) --with-alias</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(WinAppRunUseExecutionAlias)' == 'false'">$(_WinAppRunArgs) --without-alias</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(WinAppRunNoLaunch)' == 'true'">$(_WinAppRunArgs) --no-launch</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(WinAppRunDebugOutput)' == 'true'">$(_WinAppRunArgs) --debug-output</_WinAppRunArgs>

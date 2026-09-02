@@ -36,10 +36,12 @@ internal sealed record SingleFileManifestInfo(
 /// Maps a .NET file-based app's evaluated MSBuild properties onto manifest metadata.
 /// <para>
 /// Mirrors <c>winapp manifest generate</c>'s options and adds one thing it does not have:
-/// <c>WinAppCapabilities</c>. Full trust is not the whole story — <c>runFullTrust</c> covers
-/// notifications, protocol handlers and shell integration, but some APIs are gated on a declared
-/// capability regardless, and the Windows AI APIs are the case that forced this: Phi Silica requires
-/// <c>systemAIModels</c>, which no amount of full trust substitutes for.
+/// <c>WinAppCapabilities</c>. Full trust is not the whole story — <c>runFullTrust</c> lets the app run
+/// unsandboxed, but some APIs are gated on a declared capability regardless, and the Windows AI APIs are
+/// the case that forced this: Phi Silica requires <c>systemAIModels</c>, which no amount of full trust
+/// substitutes for. Shell integrations (protocol handlers, file associations) are a third case again:
+/// those need authored <c>Extensions</c> entries and are served by the <c>WinAppManifestPath</c> escape
+/// hatch, not by a capability.
 /// </para>
 /// <para>
 /// <c>runFullTrust</c> itself stays fixed template boilerplate rather than user input, so the common

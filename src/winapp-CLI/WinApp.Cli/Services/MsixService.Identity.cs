@@ -186,6 +186,16 @@ internal partial class MsixService
             // through RegisterLooseLayoutPackageAsync's error.
             var registrationManifest = ResolveLayoutRegistrationManifest(outputAppXDirectory);
 
+            // Stage the alias into the manifest the recipe just laid down. This branch has its own
+            // staging path, so the mutation applied to the raw-manifest branch below does not reach it —
+            // without this, a recipe-backed project asking for alias launch registers fine and then fails
+            // with "No execution alias found in the manifest". Applied BEFORE the skip check so a run that
+            // adds an alias is not mistaken for an unchanged one.
+            if (ensureExecutionAlias)
+            {
+                EnsureStagedExecutionAlias(registrationManifest, taskContext);
+            }
+
             var skipResult = TrySkipRegistration(
                 identity.PackageName, identity.Publisher, identity.ApplicationId,
                 previousManifestBytes, registrationManifest, outputAppXDirectory,
@@ -305,11 +315,9 @@ internal partial class MsixService
         if (ensureExecutionAlias)
         {
             var staged = AppxManifestDocument.Parse(manifestContent);
-            var aliasName = ExecutionAliasResolver.BuildDefaultAliasName(staged.IdentityName);
-            if (aliasName != null && staged.EnsureExecutionAlias(aliasName) != null)
+            if (TryAddDefaultExecutionAlias(staged, taskContext))
             {
                 manifestContent = staged.ToXml();
-                taskContext.AddDebugMessage($"{UiSymbols.Link} Staged execution alias '{aliasName}'");
             }
         }
 
@@ -483,6 +491,54 @@ internal partial class MsixService
     {
         var canonical = new FileInfo(Path.Join(outputAppXDirectory.FullName, "appxmanifest.xml"));
         return canonical.Exists ? canonical : ManifestHelper.FindManifest(outputAppXDirectory.FullName);
+    }
+
+    /// <summary>
+    /// Declares the identity-derived execution alias on a manifest document, unless it already declares
+    /// one of its own. Returns whether the document was modified.
+    /// </summary>
+    private static bool TryAddDefaultExecutionAlias(AppxManifestDocument document, TaskContext taskContext)
+    {
+        var aliasName = ExecutionAliasResolver.BuildDefaultAliasName(document.IdentityName);
+        if (aliasName == null || document.EnsureExecutionAlias(aliasName) == null)
+        {
+            return false;
+        }
+
+        taskContext.AddDebugMessage($"{UiSymbols.Link} Staged execution alias '{aliasName}'");
+        return true;
+    }
+
+    /// <summary>
+    /// Adds the execution alias to a manifest already written into the AppX layout, for the staging paths
+    /// that register a file rather than an in-memory string.
+    /// </summary>
+    /// <remarks>
+    /// Non-fatal: the launch reports a missing alias with actionable guidance, and a default alias falls
+    /// back to AUMID, so failing the whole registration here would be worse than the problem.
+    /// </remarks>
+    private void EnsureStagedExecutionAlias(FileInfo manifestFile, TaskContext taskContext)
+    {
+        try
+        {
+            if (!manifestFile.Exists)
+            {
+                return;
+            }
+
+            var document = AppxManifestDocument.Load(manifestFile.FullName);
+            if (TryAddDefaultExecutionAlias(document, taskContext))
+            {
+                document.Save(manifestFile.FullName);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
+        {
+            logger.LogWarning(
+                "{UISymbol} Could not add an execution alias to the staged manifest: {Message}. Alias launch may fail; declare a uap5:ExecutionAlias in the manifest to control it.",
+                UiSymbols.Warning,
+                ex.Message);
+        }
     }
 
     /// <summary>

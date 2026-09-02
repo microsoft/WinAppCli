@@ -456,6 +456,45 @@ public class MsixServiceIdentityTests : BaseCommandTests
     // ---- AddLooseLayoutIdentityAsync MSBuild workflow -----------------------------
 
     [TestMethod]
+    public async Task AddLooseLayoutIdentityAsync_RecipeLayout_StagesTheExecutionAlias()
+    {
+        // The recipe branch has its OWN staging path, so the alias mutation applied to the raw-manifest
+        // branch never reached it. Without this a recipe-backed console project registers fine and then
+        // fails to launch with "No execution alias found in the manifest" — the automatic console launch
+        // silently not applying to exactly the projects whose build emits an .appxrecipe.
+        var srcDir = _tempDirectory.CreateSubdirectory("alias-build-output");
+        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        var srcExe = new FileInfo(Path.Combine(srcDir.FullName, "TestApp.exe"));
+        await File.WriteAllTextAsync(srcExe.FullName, "exe", TestContext.CancellationToken);
+
+        var sb = new StringBuilder();
+        sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
+        sb.AppendLine("<Project xmlns=\"http://schemas.microsoft.com/developer/msbuild/2003\">");
+        sb.AppendLine("  <ItemGroup>");
+        sb.AppendLine($"    <AppXManifest Include=\"{srcManifest.FullName}\"><PackagePath>appxmanifest.xml</PackagePath></AppXManifest>");
+        sb.AppendLine($"    <AppxPackagedFile Include=\"{srcExe.FullName}\"><PackagePath>TestApp.exe</PackagePath></AppxPackagedFile>");
+        sb.AppendLine("  </ItemGroup>");
+        sb.AppendLine("</Project>");
+        await File.WriteAllTextAsync(Path.Combine(srcDir.FullName, "TestApp.build.appxrecipe"), sb.ToString(), TestContext.CancellationToken);
+
+        var output = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "alias-layout"));
+
+        await _msixService.AddLooseLayoutIdentityAsync(
+            srcManifest, srcDir, output, TestTaskContext, ensureExecutionAlias: true,
+            cancellationToken: TestContext.CancellationToken);
+
+        var staged = await File.ReadAllTextAsync(
+            Path.Combine(output.FullName, "appxmanifest.xml"), TestContext.CancellationToken);
+        StringAssert.Contains(staged, "winapp-TestApp.exe",
+            "The staged recipe manifest must carry the identity-derived alias");
+
+        var source = await File.ReadAllTextAsync(srcManifest.FullName, TestContext.CancellationToken);
+        Assert.IsFalse(source.Contains("ExecutionAlias", StringComparison.Ordinal),
+            "The user's source manifest must never be modified");
+    }
+
+    [TestMethod]
     public async Task AddLooseLayoutIdentityAsync_MSBuildManifestWithRecipe_RegistersLooseLayout()
     {
         var srcDir = _tempDirectory.CreateSubdirectory("build-output");
