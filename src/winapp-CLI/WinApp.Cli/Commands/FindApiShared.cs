@@ -312,6 +312,10 @@ internal static class FindApiShared
         if (output.Results.Count == 0)
         {
             console.WriteLine($"No results found for: {output.Query}");
+            if (!string.IsNullOrEmpty(output.Note))
+            {
+                console.WriteLine(output.Note);
+            }
             return;
         }
 

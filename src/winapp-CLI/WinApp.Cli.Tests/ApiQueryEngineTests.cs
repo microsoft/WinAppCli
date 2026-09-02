@@ -359,6 +359,46 @@ public sealed class ApiQueryEngineTests
     }
 
     [TestMethod]
+    public void Search_NoResultsAgainstIncompleteIndex_IsFlaggedAsPossiblyFalseNegative()
+    {
+        // Search reports "found nothing" as success with an empty result set, so unlike
+        // members/check-property it has no error message to carry the qualification. A
+        // caller — very often an agent about to conclude an API does not exist — could
+        // not tell that from an index that failed to load.
+        MarkPackageIncomplete(_cacheDir, "Test.Pkg", "1.0.0");
+
+        var result = ApiQueryEngine.Search("Nonexistent", 30, _cacheDir, _manifest);
+
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        Assert.AreEqual(0, result.Data!.Results.Count);
+        Assert.IsNotNull(result.Data.Note, "an empty search against a partial index must be qualified");
+        StringAssert.Contains(result.Data.Note, "Test.Pkg");
+    }
+
+    [TestMethod]
+    public void Search_NoResultsAgainstCompleteIndex_HasNoNote()
+    {
+        // The note has to stay rare, or it becomes noise that callers learn to ignore.
+        var result = ApiQueryEngine.Search("Nonexistent", 30, _cacheDir, _manifest);
+
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        Assert.AreEqual(0, result.Data!.Results.Count);
+        Assert.IsNull(result.Data.Note);
+    }
+
+    [TestMethod]
+    public void Search_WithResultsAgainstIncompleteIndex_HasNoNote()
+    {
+        // A search that found what was asked for is not a false negative.
+        MarkPackageIncomplete(_cacheDir, "Test.Pkg", "1.0.0");
+
+        var result = ApiQueryEngine.Search("Widget", 30, _cacheDir, _manifest);
+
+        Assert.IsTrue(result.Data!.Results.Count > 0);
+        Assert.IsNull(result.Data.Note);
+    }
+
+    [TestMethod]
     public void CheckProperty_MissAgainstIncompleteIndex_IsFlaggedAsPossiblyFalseNegative()
     {
         // A package whose metadata failed to parse contributes no types, so "no such

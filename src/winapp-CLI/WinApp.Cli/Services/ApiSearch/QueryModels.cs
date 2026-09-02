@@ -196,6 +196,13 @@ internal sealed class ApiSearchOutput : IApiScopedOutput
 
     public List<ApiAmbiguityGroup>? Ambiguous { get; init; }
 
+    /// <summary>
+    /// Set when the answer may be a false negative because part of the index could not
+    /// be read. Search returns an empty result set rather than an error, so without this
+    /// a caller cannot tell "this API does not exist" from "the index is broken".
+    /// </summary>
+    public string? Note { get; init; }
+
     public required List<ApiNamespaceHit> Results { get; init; }
 }
 

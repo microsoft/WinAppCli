@@ -186,6 +186,11 @@ internal static class ApiQueryEngine
         {
             Query = query,
             Ambiguous = ambiguousGroups.Count > 0 ? ambiguousGroups : null,
+            // A search that finds nothing is reported as success with no results, so
+            // unlike the exact-lookup verbs it has no error message to carry the note.
+            // Without it, "no such API" and "the index could not be read" are the same
+            // answer.
+            Note = results.Count == 0 ? IncompleteIndexNote(cacheDir, manifest) : null,
             Results = results,
         });
     }

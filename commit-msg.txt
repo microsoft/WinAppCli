@@ -1,25 +1,19 @@
-Resolve generic types written the way callers write them
+Flag an empty find-api search against an index that failed to load
 
-Metadata stores a generic under the name it was compiled with --
-Windows.Foundation.IAsyncOperation`1 -- and resolution compared against that
-verbatim. Nobody types the arity suffix, so every generic in the Windows API
-surface was unreachable:
+members, enums and check-property all qualify a negative answer when part of the
+index could not be read -- the caller is told the result may be a false negative
+and to run 'winapp find-api refresh'. Search never did.
 
-  winapp find-api members IAsyncOperation    -> Type not found: IAsyncOperation
-  winapp find-api members TypedEventHandler  -> Type not found: TypedEventHandler
+Search is the one verb where this matters most and was hardest to notice: it
+reports "found nothing" as a *success* with an empty result set, so it has no
+error message to carry the qualification. A caller -- very often an agent about
+to conclude an API does not exist and write around it -- could not distinguish
+"no such API" from "the index is broken".
 
-Both now resolve, as do the fully-qualified form without the suffix and the C#
-source form an agent writes when generating code (IAsyncOperation<StorageFile>,
-including nested arguments such as Holder<Pair<A, B>>).
+ApiSearchOutput now carries a "note" alongside its results, set only when the
+search found nothing and a package's metadata failed to parse. Text output
+prints it under the "No results found" line; --json exposes it as `note`.
 
-Arity is dropped only when the caller did not state one. Pair`2 and
-Pair<A, B> still select that arity, and a bare "Pair" where both Pair`1 and
-Pair`2 are indexed stays ambiguous and lists them -- answering with either would
-be a confident answer about a type the caller did not ask for. A non-generic
-type asked for with type arguments (Plain<Holder>) is still a miss.
-
-The metadata form keeps working unchanged, so nothing that resolved before stops
-resolving.
-
-Verified live against samples/winui-app: IAsyncOperation, IAsyncOperation<StorageFile>,
-TypedEventHandler and TypedEventHandler`2 all resolve; Button is unaffected.
+The note stays rare on purpose: a search that found results is not a false
+negative, and a complete index produces no note at all. Both are covered by
+tests so it cannot decay into noise callers learn to ignore.
