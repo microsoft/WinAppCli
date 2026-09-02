@@ -62,7 +62,7 @@ internal static class ApiCacheBuilder
             string projectName = Path.GetFileNameWithoutExtension(projectFile);
             report?.Invoke($"Indexing {projectName}…");
 
-            List<PackageWithWinMd> packages = NuGetResolver.FindPackagesWithWinMd(dir, projectFile, winAppSdkRuntimePath);
+            List<PackageWithWinMd> packages = NuGetResolver.FindPackagesWithWinMd(dir, projectFile, winAppSdkRuntimePath, report);
             if (packages.Count == 0)
             {
                 continue;

@@ -169,6 +169,154 @@ public sealed class NuGetResolverTests
             packages[0].WinMdFiles.Select(Path.GetFileName).ToArray());
     }
 
+    private static readonly (string Dir, Version? Version)[] InstalledSdks =
+    [
+        (@"C:\Kits\10.0.28000.0", new Version("10.0.28000.0")),
+        (@"C:\Kits\10.0.26100.0", new Version("10.0.26100.0")),
+        (@"C:\Kits\10.0.19041.0", new Version("10.0.19041.0")),
+    ];
+
+    [TestMethod]
+    public void SelectWindowsSdkDir_PrefersTheExactTargetedVersion()
+    {
+        string? picked = NuGetResolver.SelectWindowsSdkDir(InstalledSdks, "10.0.26100.0", _ => true);
+
+        Assert.AreEqual(@"C:\Kits\10.0.26100.0", picked);
+    }
+
+    [TestMethod]
+    public void SelectWindowsSdkDir_NeverPicksAnSdkNewerThanTheTarget()
+    {
+        // The targeted 10.0.22621.0 is not installed. UnionMetadata is cumulative, so
+        // answering from the newer 10.0.26100.0 would confirm APIs that do not exist at
+        // the target and fail the build with CS0234. Cap at the highest install below it.
+        var warnings = new List<string>();
+        string? picked = NuGetResolver.SelectWindowsSdkDir(
+            InstalledSdks, "10.0.22621.0", _ => true, warnings.Add);
+
+        Assert.AreEqual(@"C:\Kits\10.0.19041.0", picked);
+        Assert.AreEqual(1, warnings.Count);
+        StringAssert.Contains(warnings[0], "10.0.22621.0 is not installed");
+    }
+
+    [TestMethod]
+    public void SelectWindowsSdkDir_FallsBackToClosestNewerWhenNothingAtOrBelowTarget()
+    {
+        // Only newer SDKs are installed, so some overshoot is unavoidable. Take the
+        // smallest one and say the results may include APIs the target does not have.
+        var warnings = new List<string>();
+        string? picked = NuGetResolver.SelectWindowsSdkDir(
+            InstalledSdks, "10.0.17763.0", _ => true, warnings.Add);
+
+        Assert.AreEqual(@"C:\Kits\10.0.19041.0", picked);
+        Assert.AreEqual(1, warnings.Count);
+        StringAssert.Contains(warnings[0], "at or below");
+    }
+
+    [TestMethod]
+    public void SelectWindowsSdkDir_MatchesOnBuildNumberWhenRevisionsDisagree()
+    {
+        var warnings = new List<string>();
+        string? picked = NuGetResolver.SelectWindowsSdkDir(
+            InstalledSdks, "10.0.26100.1742", _ => true, warnings.Add);
+
+        Assert.AreEqual(@"C:\Kits\10.0.26100.0", picked);
+        Assert.AreEqual(0, warnings.Count, "a build-number match is the targeted SDK, so it must not warn");
+    }
+
+    [TestMethod]
+    public void SelectWindowsSdkDir_UsesNewestWhenProjectTargetsNoPlatformVersion()
+    {
+        string? picked = NuGetResolver.SelectWindowsSdkDir(InstalledSdks, null, _ => true);
+
+        Assert.AreEqual(@"C:\Kits\10.0.28000.0", picked);
+    }
+
+    [TestMethod]
+    public void SelectWindowsSdkDir_SkipsCandidatesWithoutWindowsWinmd()
+    {
+        // An SDK folder can exist without UnionMetadata content; it must not be chosen
+        // just because its version matches.
+        string? picked = NuGetResolver.SelectWindowsSdkDir(
+            InstalledSdks, "10.0.26100.0", dir => dir.EndsWith("19041.0", StringComparison.Ordinal));
+
+        Assert.AreEqual(@"C:\Kits\10.0.19041.0", picked);
+    }
+
+    [TestMethod]
+    public void FindPackagesFromAssets_SkipsLibraryAbsentFromSelectedTarget()
+    {
+        // "libraries" is global across every restored target framework. This package is
+        // built only by the non-Windows target, so it is not on the Windows compile
+        // surface. Without the target check it reaches the scan fallback and its .winmd
+        // is indexed, which confirms an API the Windows build cannot compile against.
+        string packageRoot = Path.Combine(_dir, "packages");
+        string offTarget = Path.Combine(packageRoot, "contoso.nonwindows", "1.0.0", "metadata");
+        Directory.CreateDirectory(offTarget);
+        File.WriteAllText(Path.Combine(offTarget, "Contoso.NonWindows.winmd"), "x");
+
+        string inTarget = Path.Combine(packageRoot, "contoso.runtime", "2.0.0", "metadata");
+        Directory.CreateDirectory(inTarget);
+        File.WriteAllText(Path.Combine(inTarget, "Contoso.Runtime.winmd"), "x");
+
+        string path = WriteAssets(JsonSerializer.Serialize(new
+        {
+            packageFolders = new Dictionary<string, object> { [packageRoot] = new { } },
+            targets = new Dictionary<string, object>
+            {
+                ["net8.0-windows10.0.26100.0"] = new Dictionary<string, object>
+                {
+                    ["Contoso.Runtime/2.0.0"] = new { },
+                },
+                ["net8.0"] = new Dictionary<string, object>
+                {
+                    ["Contoso.NonWindows/1.0.0"] = new { },
+                },
+            },
+            libraries = new Dictionary<string, object>
+            {
+                ["Contoso.Runtime/2.0.0"] = new { type = "package", path = "contoso.runtime/2.0.0" },
+                ["Contoso.NonWindows/1.0.0"] = new { type = "package", path = "contoso.nonwindows/1.0.0" },
+            },
+        }));
+
+        List<PackageWithWinMd> packages = NuGetResolver.FindPackagesFromAssets(path);
+
+        Assert.AreEqual(1, packages.Count);
+        Assert.AreEqual("Contoso.Runtime", packages[0].Id);
+        CollectionAssert.AreEquivalent(
+            ScannedRuntimeWinmd,
+            packages[0].WinMdFiles.Select(Path.GetFileName).ToArray());
+    }
+
+    [TestMethod]
+    public void FindPackagesFromAssets_ScansEveryLibraryWhenNoTargetWasSelected()
+    {
+        // With no "targets" element there is no selected target to judge membership
+        // against, so no library may be treated as out-of-target. Every one stays
+        // eligible for the scan fallback, as it was before that check existed.
+        string packageRoot = Path.Combine(_dir, "packages");
+        string metadata = Path.Combine(packageRoot, "contoso.runtime", "2.0.0", "metadata");
+        Directory.CreateDirectory(metadata);
+        File.WriteAllText(Path.Combine(metadata, "Contoso.Runtime.winmd"), "x");
+
+        string path = WriteAssets(JsonSerializer.Serialize(new
+        {
+            packageFolders = new Dictionary<string, object> { [packageRoot] = new { } },
+            libraries = new Dictionary<string, object>
+            {
+                ["Contoso.Runtime/2.0.0"] = new { type = "package", path = "contoso.runtime/2.0.0" },
+            },
+        }));
+
+        List<PackageWithWinMd> packages = NuGetResolver.FindPackagesFromAssets(path);
+
+        Assert.AreEqual(1, packages.Count);
+        CollectionAssert.AreEquivalent(
+            ScannedRuntimeWinmd,
+            packages[0].WinMdFiles.Select(Path.GetFileName).ToArray());
+    }
+
     [TestMethod]
     public void FindPackagesFromAssets_SelectsWindowsTargetWhenSeveralWereRestored()
     {

@@ -16,7 +16,7 @@ namespace WinApp.Cli.Services.ApiSearch;
 /// </summary>
 internal static partial class NuGetResolver
 {
-    public static List<PackageWithWinMd> FindPackagesWithWinMd(string projectDir, string projectFile, string? winAppSdkRuntimePath)
+    public static List<PackageWithWinMd> FindPackagesWithWinMd(string projectDir, string projectFile, string? winAppSdkRuntimePath, Action<string>? warn = null)
     {
         var packages = new List<PackageWithWinMd>();
 
@@ -37,7 +37,14 @@ internal static partial class NuGetResolver
         }
 
         packages.AddRange(FindWinMdFromProjectReferences(projectFile));
-        packages.AddRange(CollectSdkPackages(winAppSdkRuntimePath, targetPlatformVersion));
+
+        // The machine's installed WinAppSDK runtime metadata is part of a project's
+        // compile surface only when the project actually references WinAppSDK. Adding it
+        // unconditionally answers a plain .NET or Win32 project from WinAppSDK metadata
+        // it does not build against, and pins it to whatever runtime happens to be
+        // installed rather than anything the project declares.
+        bool referencesWinAppSdk = packages.Any(package => IsWinAppSdkPackage(package.Id));
+        packages.AddRange(CollectSdkPackages(winAppSdkRuntimePath, targetPlatformVersion, referencesWinAppSdk, warn));
 
         return Deduplicate(packages);
     }
@@ -113,25 +120,40 @@ internal static partial class NuGetResolver
     public static List<PackageWithWinMd> FindSdkPackages(string? winAppSdkRuntimePath) =>
         Deduplicate(CollectSdkPackages(winAppSdkRuntimePath));
 
-    private static List<PackageWithWinMd> CollectSdkPackages(string? winAppSdkRuntimePath, string? preferredSdkVersion = null)
+    private static List<PackageWithWinMd> CollectSdkPackages(
+        string? winAppSdkRuntimePath,
+        string? preferredSdkVersion = null,
+        bool includeWinAppSdkRuntime = true,
+        Action<string>? warn = null)
     {
         var packages = new List<PackageWithWinMd>();
 
-        (List<string> Files, string Version) sdk = FindWindowsSdkWinMd(preferredSdkVersion);
+        (List<string> Files, string Version) sdk = FindWindowsSdkWinMd(preferredSdkVersion, warn);
         if (sdk.Files.Count > 0)
         {
             packages.Add(new PackageWithWinMd("WindowsSDK", sdk.Version, sdk.Files, new List<string>()));
         }
 
-        (List<string> Files, string Version) runtime = FindWinAppSdkRuntimeWinMd(winAppSdkRuntimePath);
-        if (runtime.Files.Count > 0)
+        if (includeWinAppSdkRuntime)
         {
-            packages.Add(new PackageWithWinMd("WinAppSdkRuntime", runtime.Version, runtime.Files, new List<string>()));
+            (List<string> Files, string Version) runtime = FindWinAppSdkRuntimeWinMd(winAppSdkRuntimePath);
+            if (runtime.Files.Count > 0)
+            {
+                packages.Add(new PackageWithWinMd("WinAppSdkRuntime", runtime.Version, runtime.Files, new List<string>()));
+            }
         }
 
         DiscoverSdkXmlDocs(packages);
         return packages;
     }
+
+    /// <summary>
+    /// Whether a package id is WinAppSDK itself or one of its sub-packages
+    /// (<c>Microsoft.WindowsAppSDK.Foundation</c>, <c>.WinUI</c>, and friends).
+    /// </summary>
+    private static bool IsWinAppSdkPackage(string id) =>
+        id.Equals("Microsoft.WindowsAppSDK", StringComparison.OrdinalIgnoreCase)
+        || id.StartsWith("Microsoft.WindowsAppSDK.", StringComparison.OrdinalIgnoreCase);
 
     private static List<PackageWithWinMd> Deduplicate(List<PackageWithWinMd> packages) =>
         packages
@@ -423,11 +445,17 @@ internal static partial class NuGetResolver
             // Map "id/version" -> compile-time .dll/.winmd relative paths from the target
             // the project actually builds for Windows.
             var compileByLibrary = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            // Every library that target builds, including ones with no compile group.
+            // Null when restore named no Windows target at all, in which case nothing can
+            // be judged out-of-target and every library stays eligible for the scan below.
+            HashSet<string>? librariesInSelectedTarget = null;
             if (root.TryGetProperty("targets", out var targetsEl) && targetsEl.ValueKind == JsonValueKind.Object
                 && SelectWindowsTarget(targetsEl) is JsonElement selectedTarget)
             {
+                librariesInSelectedTarget = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (JsonProperty library in selectedTarget.EnumerateObject())
                 {
+                    librariesInSelectedTarget.Add(library.Name);
                     if (!library.Value.TryGetProperty("compile", out var compileEl))
                     {
                         continue;
@@ -450,6 +478,15 @@ internal static partial class NuGetResolver
             foreach (JsonProperty library in librariesEl.EnumerateObject())
             {
                 if (!library.Value.TryGetProperty("type", out var typeEl) || !string.Equals(typeEl.GetString(), "package", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                // "libraries" lists every package restore resolved across all target
+                // frameworks. One the selected Windows target does not build is not on this
+                // project's compile surface: without this it reaches the scan fallback
+                // below and contributes .winmd for a TFM the project never compiles
+                // against, so a query confirms an API that is not actually available.
+                if (librariesInSelectedTarget is not null && !librariesInSelectedTarget.Contains(library.Name))
                 {
                     continue;
                 }
@@ -598,7 +635,7 @@ internal static partial class NuGetResolver
         return null;
     }
 
-    internal static (List<string> Files, string Version) FindWindowsSdkWinMd(string? preferredVersion = null)
+    internal static (List<string> Files, string Version) FindWindowsSdkWinMd(string? preferredVersion = null, Action<string>? warn = null)
     {
         string unionMetadata = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Windows Kits", "10", "UnionMetadata");
         if (!Directory.Exists(unionMetadata))
@@ -614,6 +651,31 @@ internal static partial class NuGetResolver
             .OrderByDescending(x => x.Version)
             .ToList();
 
+        string? selected = SelectWindowsSdkDir(
+            versioned,
+            preferredVersion,
+            dir => File.Exists(Path.Combine(dir, "Windows.winmd")),
+            warn);
+        if (selected is null)
+        {
+            return (new List<string>(), "unknown");
+        }
+        return (new List<string> { Path.Combine(selected, "Windows.winmd") }, Path.GetFileName(selected));
+    }
+
+    /// <summary>
+    /// Chooses which installed Windows SDK answers a query, given the installs found on
+    /// disk (ordered newest first) and the platform version the project targets. Split
+    /// from <see cref="FindWindowsSdkWinMd"/> so the selection rule can be tested without
+    /// a real Windows Kits install; <paramref name="hasWindowsWinmd"/> stands in for the
+    /// on-disk check. Returns null when no candidate carries Windows.winmd.
+    /// </summary>
+    internal static string? SelectWindowsSdkDir(
+        IReadOnlyList<(string Dir, Version? Version)> versionedDescending,
+        string? preferredVersion,
+        Func<string, bool> hasWindowsWinmd,
+        Action<string>? warn = null)
+    {
         // Prefer the SDK the project actually targets. Indexing whatever is newest on
         // the machine reports types the project cannot compile against: a project on
         // 10.0.26100.0 was answered from an installed 10.0.28000.0 and confidently
@@ -622,29 +684,46 @@ internal static partial class NuGetResolver
         // the UnionMetadata folder can disagree in the trailing revision.
         if (!string.IsNullOrEmpty(preferredVersion) && Version.TryParse(preferredVersion, out Version? wanted))
         {
-            var ordered = versioned
+            string? exact = versionedDescending
                 .Where(x => x.Version!.Equals(wanted))
-                .Concat(versioned.Where(x => x.Version!.Build == wanted.Build && !x.Version.Equals(wanted)))
-                .ToList();
-            foreach (var candidate in ordered)
+                .Concat(versionedDescending.Where(x => x.Version!.Build == wanted.Build && !x.Version.Equals(wanted)))
+                .Select(x => x.Dir)
+                .FirstOrDefault(hasWindowsWinmd);
+            if (exact is not null)
             {
-                string targetedWinmd = Path.Combine(candidate.Dir, "Windows.winmd");
-                if (File.Exists(targetedWinmd))
-                {
-                    return (new List<string> { targetedWinmd }, Path.GetFileName(candidate.Dir));
-                }
+                return exact;
             }
+
+            // Never answer a project from an SDK newer than the one it targets.
+            // UnionMetadata is cumulative, so an older SDK can only omit APIs the project
+            // might use — a false "not found" the user can sanity-check — while a newer
+            // one adds APIs that do not exist at the target, which find-api then confirms
+            // and the build rejects with CS0234. Take the highest install at or below the
+            // target; only when there is none fall back to the closest one above, which
+            // keeps the overshoot as small as possible. Say so in both cases.
+            string? capped = versionedDescending
+                .Where(x => x.Version! <= wanted)
+                .Select(x => x.Dir)
+                .FirstOrDefault(hasWindowsWinmd);
+            if (capped is not null)
+            {
+                warn?.Invoke($"Windows SDK {preferredVersion} is not installed; answering from {Path.GetFileName(capped)}. APIs introduced after that version will report as not found.");
+                return capped;
+            }
+
+            string? closestNewer = versionedDescending
+                .Where(x => x.Version! > wanted)
+                .Reverse()
+                .Select(x => x.Dir)
+                .FirstOrDefault(hasWindowsWinmd);
+            if (closestNewer is not null)
+            {
+                warn?.Invoke($"No Windows SDK at or below the targeted {preferredVersion} is installed; answering from {Path.GetFileName(closestNewer)}. Results may include APIs that do not exist at your target.");
+            }
+            return closestNewer;
         }
 
-        foreach (var candidate in versioned)
-        {
-            string windowsWinmd = Path.Combine(candidate.Dir, "Windows.winmd");
-            if (File.Exists(windowsWinmd))
-            {
-                return (new List<string> { windowsWinmd }, Path.GetFileName(candidate.Dir));
-            }
-        }
-        return (new List<string>(), "unknown");
+        return versionedDescending.Select(x => x.Dir).FirstOrDefault(hasWindowsWinmd);
     }
 
     internal static (List<string> Files, string Version) FindWinAppSdkRuntimeWinMd(string? runtimePath)
