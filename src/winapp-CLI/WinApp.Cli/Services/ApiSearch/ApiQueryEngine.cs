@@ -674,7 +674,18 @@ internal static class ApiQueryEngine
             return (exact, null);
         }
 
-        var shortMatches = allTypes.Where(t => t.Name.Equals(typeName, StringComparison.OrdinalIgnoreCase)).ToList();
+        // Metadata stores a generic with the arity suffix it was compiled with
+        // (IAsyncOperation`1), which is not what anyone types: callers write
+        // IAsyncOperation, or the C#/agent form IAsyncOperation<StorageFile>. Comparing
+        // on the base name is what makes those resolve; a stated arity is still honoured
+        // so 'TypedEventHandler`2' picks out that arity rather than every same-named one.
+        (string queryBase, int? queryArity) = SplitGenericName(typeName);
+
+        var shortMatches = allTypes.Where(t => GenericNameMatches(t.FullName, queryBase, queryArity)).ToList();
+        if (shortMatches.Count == 0)
+        {
+            shortMatches = allTypes.Where(t => GenericNameMatches(t.Name, queryBase, queryArity)).ToList();
+        }
 
         // An ABI.* twin mirrors a real type, so it must never manufacture ambiguity.
         // Only fall back to them when they are the sole matches, which keeps a
@@ -718,6 +729,59 @@ internal static class ApiQueryEngine
             > 1 => (null, distinct),
             _ => (null, null),
         };
+    }
+
+    /// <summary>
+    /// Splits a type name into its base name and generic arity, accepting both forms a
+    /// generic is written in: the metadata form <c>IAsyncOperation`1</c> and the source
+    /// form <c>IAsyncOperation&lt;StorageFile&gt;</c>. The arity is <c>null</c> when the
+    /// caller did not state one (<c>IAsyncOperation</c>), which means "any arity".
+    /// </summary>
+    private static (string BaseName, int? Arity) SplitGenericName(string typeName)
+    {
+        int tick = typeName.IndexOf('`');
+        if (tick >= 0)
+        {
+            return int.TryParse(typeName.AsSpan(tick + 1), out int arity)
+                ? (typeName[..tick], arity)
+                : (typeName[..tick], null);
+        }
+
+        int open = typeName.IndexOf('<');
+        if (open < 0 || !typeName.EndsWith('>'))
+        {
+            return (typeName, null);
+        }
+
+        // Count only top-level arguments, so Foo<Bar<A, B>> reads as arity 1, not 2.
+        int depth = 0, args = 1;
+        for (int i = open; i < typeName.Length; i++)
+        {
+            switch (typeName[i])
+            {
+                case '<':
+                    depth++;
+                    break;
+                case '>':
+                    depth--;
+                    break;
+                case ',' when depth == 1:
+                    args++;
+                    break;
+            }
+        }
+        return (typeName[..open], args);
+    }
+
+    /// <summary>
+    /// Whether an indexed type's name matches a caller's base name, and its arity
+    /// matches too when the caller stated one.
+    /// </summary>
+    private static bool GenericNameMatches(string indexedName, string queryBase, int? queryArity)
+    {
+        (string indexedBase, int? indexedArity) = SplitGenericName(indexedName);
+        return indexedBase.Equals(queryBase, StringComparison.OrdinalIgnoreCase)
+            && (queryArity is null || indexedArity == queryArity);
     }
 
     /// <summary>

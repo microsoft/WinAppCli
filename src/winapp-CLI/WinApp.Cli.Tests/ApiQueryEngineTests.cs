@@ -759,6 +759,142 @@ public sealed class ApiQueryEngineTests
         }
     }
 
+    #region Generic type resolution
+
+    /// <summary>
+    /// Metadata stores a generic under the name it was compiled with —
+    /// <c>IAsyncOperation`1</c> — but nobody types the arity suffix. These cover the
+    /// forms a caller (or an agent generating code) actually writes.
+    /// </summary>
+    private static ProjectManifest BuildGenericCache(string cacheDir)
+    {
+        var namespaces = new Dictionary<string, List<WinMdTypeInfo>>(StringComparer.Ordinal)
+        {
+            ["Gen.Ns"] =
+            [
+                SimpleType("Gen.Ns", "Holder`1"),
+                SimpleType("Gen.Ns", "Pair`1"),
+                SimpleType("Gen.Ns", "Pair`2"),
+                SimpleType("Gen.Ns", "Plain"),
+            ],
+        };
+        WriteSyntheticPackage(cacheDir, "Gen.Pkg", namespaces);
+
+        var manifest = new ProjectManifest
+        {
+            ProjectName = "GenApp",
+            ProjectDir = Path.Combine(cacheDir, "src"),
+            ProjectFile = "GenApp.csproj",
+            Packages = [new ProjectPackageRef { Id = "Gen.Pkg", Version = "1.0.0", SourceStamp = TestSourceStamp }],
+            GeneratedAt = DateTime.UtcNow.ToString("o"),
+        };
+        string projectsDir = Path.Combine(cacheDir, "projects");
+        Directory.CreateDirectory(projectsDir);
+        File.WriteAllText(
+            Path.Combine(projectsDir, "GenApp.json"),
+            JsonSerializer.Serialize(manifest, ApiSearchJsonContext.Default.ProjectManifest));
+        return manifest;
+    }
+
+    [TestMethod]
+    // Short name, no arity — the form a caller types.
+    [DataRow("Holder")]
+    // Fully-qualified, still without the arity suffix.
+    [DataRow("Gen.Ns.Holder")]
+    // The C# / source form an agent writes when generating code.
+    [DataRow("Holder<Plain>")]
+    [DataRow("Gen.Ns.Holder<Plain>")]
+    // A nested argument is still one type argument.
+    [DataRow("Holder<Pair<Plain, Plain>>")]
+    // The metadata form itself must keep working.
+    [DataRow("Holder`1")]
+    [DataRow("Gen.Ns.Holder`1")]
+    public void Members_GenericTypeInAnyWrittenForm_Resolves(string typeName)
+    {
+        string cacheDir = NewCacheDir();
+        try
+        {
+            ProjectManifest manifest = BuildGenericCache(cacheDir);
+
+            var result = ApiQueryEngine.Members(typeName, filter: null, cacheDir, manifest);
+
+            Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome, result.Message);
+            Assert.AreEqual("Gen.Ns.Holder`1", result.Data!.FullName);
+        }
+        finally
+        {
+            TryDeleteDir(cacheDir);
+        }
+    }
+
+    [TestMethod]
+    [DataRow("Pair`2")]
+    [DataRow("Pair<Plain, Plain>")]
+    [DataRow("Gen.Ns.Pair<Plain, Plain>")]
+    public void Members_GenericWithStatedArity_SelectsThatArity(string typeName)
+    {
+        // Dropping the arity entirely would make Pair`1 and Pair`2 interchangeable. An
+        // arity the caller actually stated has to keep picking one out.
+        string cacheDir = NewCacheDir();
+        try
+        {
+            ProjectManifest manifest = BuildGenericCache(cacheDir);
+
+            var result = ApiQueryEngine.Members(typeName, filter: null, cacheDir, manifest);
+
+            Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome, result.Message);
+            Assert.AreEqual("Gen.Ns.Pair`2", result.Data!.FullName);
+        }
+        finally
+        {
+            TryDeleteDir(cacheDir);
+        }
+    }
+
+    [TestMethod]
+    public void Members_GenericWithoutArityMatchingSeveralArities_IsAmbiguous()
+    {
+        // "Pair" alone cannot mean Pair`1 or Pair`2 — answering with either would be a
+        // confident answer about a type the caller did not ask for.
+        string cacheDir = NewCacheDir();
+        try
+        {
+            ProjectManifest manifest = BuildGenericCache(cacheDir);
+
+            var result = ApiQueryEngine.Members("Pair", filter: null, cacheDir, manifest);
+
+            Assert.AreEqual(ApiQueryOutcome.InvalidInput, result.Outcome);
+            StringAssert.Contains(result.Message, "Gen.Ns.Pair`1");
+            StringAssert.Contains(result.Message, "Gen.Ns.Pair`2");
+        }
+        finally
+        {
+            TryDeleteDir(cacheDir);
+        }
+    }
+
+    [TestMethod]
+    public void Members_NonGenericTypeNameEndingInAngleBrackets_IsStillNotFound()
+    {
+        // Arity handling must not manufacture matches: a non-generic type asked for with
+        // type arguments is a real mistake and has to stay a miss.
+        string cacheDir = NewCacheDir();
+        try
+        {
+            ProjectManifest manifest = BuildGenericCache(cacheDir);
+
+            var result = ApiQueryEngine.Members("Plain<Holder>", filter: null, cacheDir, manifest);
+
+            Assert.AreEqual(ApiQueryOutcome.NotFound, result.Outcome);
+        }
+        finally
+        {
+            TryDeleteDir(cacheDir);
+        }
+    }
+
+    #endregion
+
     private static string NewCacheDir() =>
         Path.Combine(Path.GetTempPath(), $"ApiQueryEngineDedupe_{Guid.NewGuid():N}");
     private static void TryDeleteDir(string dir)

@@ -1,27 +1,25 @@
-Index after waiting out a contended find-api cache lock
+Resolve generic types written the way callers write them
 
-When another winapp process held the cache lock, the waiter polled for it,
-took it, immediately released it inside the loop's `using`, and then returned
-without indexing anything. The query went on to answer from a cache that was
-never asked to include this caller's project.
+Metadata stores a generic under the name it was compiled with --
+Windows.Foundation.IAsyncOperation`1 -- and resolution compared against that
+verbatim. Nobody types the arity suffix, so every generic in the Windows API
+surface was unreachable:
 
-The cache directory is shared by every project, so the process holding the lock
-is very likely indexing a different project -- falling through was only correct
-in the case where both processes happened to want the same one.
+  winapp find-api members IAsyncOperation    -> Type not found: IAsyncOperation
+  winapp find-api members TypedEventHandler  -> Type not found: TypedEventHandler
 
-The wait now retains the lock it acquires and runs the index pass under it.
-Giving up and querying whatever is on disk is kept for the case the lock is
-still held after the full wait, since the other process may well have indexed
-what this query needs.
+Both now resolve, as do the fully-qualified form without the suffix and the C#
+source form an agent writes when generating code (IAsyncOperation<StorageFile>,
+including nested arguments such as Holder<Pair<A, B>>).
 
-This also removes a second, quieter cost: the old loop always slept the full
-30 seconds even once the lock was free, because `break` only exited the retry,
-after which it returned regardless. The new loop stops as soon as it has the
-lock -- the regression test runs in ~3.8s against ~30.5s before.
+Arity is dropped only when the caller did not state one. Pair`2 and
+Pair<A, B> still select that arity, and a bare "Pair" where both Pair`1 and
+Pair`2 are indexed stays ambiguous and lists them -- answering with either would
+be a confident answer about a type the caller did not ask for. A non-generic
+type asked for with type arguments (Plain<Holder>) is still a miss.
 
-Lock acquisition is now the only thing guarded by the IOException handler
-(TryAcquireIndexLock), preserving the existing property that a genuine I/O
-failure inside Refresh is not misreported as lock contention.
+The metadata form keeps working unchanged, so nothing that resolved before stops
+resolving.
 
-Verified the test fails without the fix: the SDK package source is never asked
-for packages (0 calls, expected 1), and the run takes 30s.
+Verified live against samples/winui-app: IAsyncOperation, IAsyncOperation<StorageFile>,
+TypedEventHandler and TypedEventHandler`2 all resolve; Button is unaffected.
