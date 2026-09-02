@@ -208,7 +208,7 @@ internal static class FindApiShared
 
         foreach (ApiBatchError error in errors)
         {
-            console.MarkupLineInterpolated($"[red]{UiSymbols.Error} {error.Message}[/]");
+            console.WriteLine($"{UiSymbols.Error} {error.Message}");
         }
 
         return allFound ? 0 : 1;
