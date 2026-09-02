@@ -114,9 +114,28 @@ internal partial class RunCommand
                 return true;
             }
 
-            if (!ExecutionAliasResolver.TryGetAliasPackageFamilyName(proxy.FullName, out var owner) ||
-                owner is null ||
-                string.Equals(owner, packageFamilyName, StringComparison.OrdinalIgnoreCase))
+            if (ReadAliasOwner(proxy.FullName) is not { } owner)
+            {
+                // Fail CLOSED. A file exists at the alias path but is not a readable app-exec-link, so
+                // launching it would start something whose identity we could not establish while
+                // reporting that this package was launched.
+                if (decision.Explicit)
+                {
+                    logger.LogError(
+                        "{UISymbol} Could not read which package owns the execution alias '{Alias}' at '{Path}'. Refusing to launch it, since it may belong to another app. Re-run with --without-alias to launch via AUMID.",
+                        UiSymbols.Error,
+                        alias,
+                        proxy.FullName);
+                }
+                else
+                {
+                    logger.LogDebug("Falling back to AUMID activation: alias '{Alias}' exists but its owner could not be read.", alias);
+                }
+
+                return false;
+            }
+
+            if (string.Equals(owner, packageFamilyName, StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }

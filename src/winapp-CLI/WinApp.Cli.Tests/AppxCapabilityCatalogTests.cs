@@ -244,5 +244,26 @@ public class AppxCapabilityCatalogTests
         Assert.AreEqual(0, caps.Count);
     }
 
+    [TestMethod]
+    [DataRow("app:notARealCapability", DisplayName = "unknown app: name is rejected")]
+    [DataRow("app:broadFileSystemAccess", DisplayName = "restricted capability under app: is rejected")]
+    public void Parse_UnknownFoundationCapability_IsRejected(string value)
+    {
+        // The foundation <Capability> set is closed by the schema, so an unknown name there is invalid
+        // rather than merely uncatalogued. Accepting it would defer the failure to registration, which
+        // reports only an opaque schema error naming no capability.
+        Assert.IsFalse(AppxCapabilityCatalog.TryParse(value, out _, out var error));
+        StringAssert.Contains(error, "closed at", "The error should name the closed foundation set");
+    }
+
+    [TestMethod]
+    public void Parse_KnownFoundationCapabilityUnderAppPrefix_IsAccepted()
+    {
+        Assert.IsTrue(AppxCapabilityCatalog.TryParse("app:internetClient", out var caps, out _));
+        Assert.AreEqual(1, caps.Count);
+        Assert.AreEqual("internetClient", caps[0].Name);
+        Assert.IsNull(caps[0].Prefix, "A foundation capability is emitted unprefixed");
+    }
+
     #endregion
 }

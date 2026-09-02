@@ -107,7 +107,8 @@ $extraProps  </PropertyGroup>
                 [switch]$WinAppRunClean,
                 [switch]$WinAppRunSymbols,
                 [string]$WinAppRunExecutable = "",
-                [string]$WinAppRunUseExecutionAlias = ""
+                [string]$WinAppRunUseExecutionAlias = "",
+                [string]$OutputType = "WinExe"
             )
             $dir = Join-Path $script:tempRoot $CaseName
             New-Item -ItemType Directory -Path $dir -Force | Out-Null
@@ -134,7 +135,7 @@ $extraProps  </PropertyGroup>
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
-    <OutputType>WinExe</OutputType>
+    <OutputType>$OutputType</OutputType>
 $extraProps  </PropertyGroup>
   <Import Project="$($script:propsPath)" />
   <Import Project="$($script:targetsPath)" />
@@ -293,13 +294,20 @@ $extraProps  </PropertyGroup>
             $args | Should -Match ' --caller nuget-package$'
         }
 
-        It "Forwards neither alias switch when WinAppRunUseExecutionAlias is unset" {
-            # The property is deliberately not defaulted in the props file: winapp picks the launch
-            # mechanism from OutputType itself, and forwarding a switch here would make every console
-            # app an EXPLICIT alias request, which fails instead of falling back when the alias is taken.
+        It "Forwards neither alias switch for a windowed app when the property is unset" {
             $args = Get-ComputedRunArgs -CaseName 'run-alias-unset'
 
             $args | Should -Not -Match ' --with-alias'
+            $args | Should -Not -Match ' --without-alias'
+        }
+
+        It "Forwards --with-alias for a console app when the property is unset - keeps dotnet run output visible" {
+            # winapp is pointed at the build-output FOLDER here, where it cannot read OutputType, so the
+            # console default has to be decided by these targets. Without this the documented default
+            # silently does not apply to `dotnet run` and console apps print nothing.
+            $args = Get-ComputedRunArgs -CaseName 'run-alias-console' -OutputType 'Exe'
+
+            $args | Should -Match ' --with-alias'
             $args | Should -Not -Match ' --without-alias'
         }
 
@@ -310,10 +318,10 @@ $extraProps  </PropertyGroup>
             $args | Should -Not -Match ' --without-alias'
         }
 
-        It "Maps WinAppRunUseExecutionAlias=false to --without-alias" {
+        It "Maps WinAppRunUseExecutionAlias=false to --without-alias, even for a console app" {
             # Opting out has to be forwarded explicitly, because the CLI would otherwise apply its own
             # OutputType default and launch a console app through its alias anyway.
-            $args = Get-ComputedRunArgs -CaseName 'run-alias-false' -WinAppRunUseExecutionAlias 'false'
+            $args = Get-ComputedRunArgs -CaseName 'run-alias-false' -WinAppRunUseExecutionAlias 'false' -OutputType 'Exe'
 
             $args | Should -Match ' --without-alias'
             $args | Should -Not -Match ' --with-alias '

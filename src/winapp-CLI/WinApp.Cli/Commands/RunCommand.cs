@@ -230,6 +230,14 @@ internal partial class RunCommand : Command, IShortDescription
         internal Func<string, FileInfo?> ResolveAliasProxy { get; set; } = alias => ExecutionAliasResolver.ResolveAliasPath(alias);
         internal Func<ProcessStartInfo, Process?> ProcessStarter { get; set; } = Process.Start;
 
+        /// <summary>
+        /// Reads which package family owns an alias proxy, or null when that cannot be established.
+        /// A third OS boundary: the proxy is an <c>IO_REPARSE_TAG_APPEXECLINK</c> reparse point, which a
+        /// test cannot create, so tests substitute the answer rather than the file.
+        /// </summary>
+        internal Func<string, string?> ReadAliasOwner { get; set; } =
+            path => ExecutionAliasResolver.TryGetAliasPackageFamilyName(path, out var owner) ? owner : null;
+
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
             // input is optional (ArgumentArity.ZeroOrOne). The final FileSystemInfo is resolved
@@ -1036,20 +1044,38 @@ internal partial class RunCommand : Command, IShortDescription
             // would run someone else's app while reporting that this one was registered, so verify
             // ownership first. This is the same hijack the absolute-path resolution above guards against,
             // one layer up: there the risk is a stray a.exe on disk, here it is a stray a.exe alias.
-            if (packageFamilyName != null &&
-                ExecutionAliasResolver.TryGetAliasPackageFamilyName(aliasFile.FullName, out var aliasOwner) &&
-                aliasOwner != null &&
-                !string.Equals(aliasOwner, packageFamilyName, StringComparison.OrdinalIgnoreCase))
+            // An execution alias is a global name, so the proxy that exists may belong to a DIFFERENT
+            // package — a second app declaring the same alias does not take it over. Launching it anyway
+            // would run someone else's app while reporting that this one was registered, so ownership is
+            // verified first, and an unreadable owner is treated as NOT ours: a file at that path which
+            // is not a readable app-exec-link is exactly the hijack this guards against.
+            if (packageFamilyName != null)
             {
-                return FailOrFallBack(
-                    aliasWasRequested,
-                    () => logger.LogError(
-                        "{UISymbol} Execution alias '{Alias}' already belongs to package '{Owner}', not '{Expected}'. Windows gives an alias to the first package that claims it, so launching it would run that app instead. Choose a different package name, unregister the owning package, or run with --without-alias to launch via AUMID.",
-                        UiSymbols.Error,
-                        alias,
-                        aliasOwner,
-                        packageFamilyName),
-                    "alias belongs to another package");
+                var aliasOwner = ReadAliasOwner(aliasFile.FullName);
+                if (aliasOwner is null)
+                {
+                    return FailOrFallBack(
+                        aliasWasRequested,
+                        () => logger.LogError(
+                            "{UISymbol} Could not read which package owns the execution alias '{Alias}' at '{Path}'. Refusing to launch it, since it may belong to another app. Re-run with --without-alias to launch via AUMID.",
+                            UiSymbols.Error,
+                            alias,
+                            aliasFile.FullName),
+                        "alias owner could not be read");
+                }
+
+                if (!string.Equals(aliasOwner, packageFamilyName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return FailOrFallBack(
+                        aliasWasRequested,
+                        () => logger.LogError(
+                            "{UISymbol} Execution alias '{Alias}' already belongs to package '{Owner}', not '{Expected}'. Windows gives an alias to the first package that claims it, so launching it would run that app instead. Choose a different package name, unregister the owning package, or run with --without-alias to launch via AUMID.",
+                            UiSymbols.Error,
+                            alias,
+                            aliasOwner,
+                            packageFamilyName),
+                        "alias belongs to another package");
+                }
             }
 
             // Build the ProcessStartInfo via a static helper so the argument-forwarding

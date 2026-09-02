@@ -71,6 +71,16 @@ internal static partial class AppxCapabilityCatalog
     /// Capability name to its documented element/namespace. Only names whose namespace is stated in
     /// Microsoft's capability documentation appear here.
     /// </summary>
+    /// <summary>
+    /// The foundation <c>&lt;Capability&gt;</c> set, which the AppX schema closes at exactly these names.
+    /// </summary>
+    /// <remarks>
+    /// Declared before <see cref="Known"/> because static field initializers run in textual order and
+    /// <see cref="BuildKnown"/> reads this array.
+    /// </remarks>
+    private static readonly string[] FoundationCapabilityNames =
+        ["internetClient", "internetClientServer", "privateNetworkClientServer", "allJoyn", "codeGeneration"];
+
     private static readonly Dictionary<string, AppxCapability> Known = BuildKnown();
 
     private static Dictionary<string, AppxCapability> BuildKnown()
@@ -78,10 +88,7 @@ internal static partial class AppxCapabilityCatalog
         var known = new Dictionary<string, AppxCapability>(StringComparer.OrdinalIgnoreCase);
 
         // General capabilities — the foundation <Capability> set is closed at exactly these five.
-        foreach (var name in new[]
-        {
-            "internetClient", "internetClientServer", "privateNetworkClientServer", "allJoyn", "codeGeneration",
-        })
+        foreach (var name in FoundationCapabilityNames)
         {
             known[name] = new AppxCapability(name, CapabilityElementName, null, FoundationNs);
         }
@@ -223,6 +230,17 @@ internal static partial class AppxCapabilityCatalog
 
         if (string.Equals(prefix, DefaultPrefixToken, StringComparison.OrdinalIgnoreCase))
         {
+            // The foundation set is closed by the schema, so an unknown name here cannot be a capability
+            // winapp merely hasn't catalogued — it is invalid. Rejecting it now beats registration
+            // failing later with an opaque 0xC00CE169 schema error.
+            if (!FoundationCapabilityNames.Contains(name, StringComparer.Ordinal))
+            {
+                error = $"'{entry}' is not a general capability. The foundation <Capability> set is closed at " +
+                        $"{string.Join(", ", FoundationCapabilityNames)}. Restricted capabilities need their own " +
+                        $"prefix, for example 'rescap:{name}'.";
+                return false;
+            }
+
             capability = new AppxCapability(name, CapabilityElementName, null, FoundationNs);
             return true;
         }
