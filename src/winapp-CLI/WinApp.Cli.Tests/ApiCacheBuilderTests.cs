@@ -174,6 +174,61 @@ public sealed class ApiCacheBuilderTests
     }
 
     [TestMethod]
+    public void DiscoverProjectFiles_Scan_SkipsBuildOutputAndDependencies()
+    {
+        // These trees are pruned before they are descended into, so nothing under
+        // them can be discovered — a copied project left in 'bin' is not a project
+        // the caller wrote.
+        string dir = NewProjectDir("built");
+        File.WriteAllText(Path.Combine(dir, "App.csproj"), "<Project />");
+        foreach (string excluded in new[] { "bin", "obj", "node_modules" })
+        {
+            string nested = Path.Combine(dir, excluded, "nested", "deep");
+            Directory.CreateDirectory(nested);
+            File.WriteAllText(Path.Combine(nested, "Copy.csproj"), "<Project />");
+            File.WriteAllText(Path.Combine(nested, "Copy.vcxproj"), "<Project />");
+            File.WriteAllText(Path.Combine(nested, "winapp.yaml"), "packages: []");
+        }
+
+        List<string> found = ApiCacheBuilder.DiscoverProjectFiles(dir, scan: true);
+
+        Assert.HasCount(1, found);
+        Assert.AreEqual(Path.Combine(dir, "App.csproj"), found[0]);
+    }
+
+    [TestMethod]
+    public void DiscoverProjectFiles_Scan_RootsResultsAtThePathItWasGiven()
+    {
+        // Callers compare these against paths they built from their own input, so the
+        // scan must root results at the string it was handed rather than canonicalize
+        // it. Directory.EnumerateFiles behaves this way and this must match it.
+        string dir = NewProjectDir("as-given");
+        File.WriteAllText(Path.Combine(dir, "App.csproj"), "<Project />");
+        string indirect = Path.Combine(dir, "..", "as-given");
+
+        List<string> found = ApiCacheBuilder.DiscoverProjectFiles(indirect, scan: true);
+
+        CollectionAssert.AreEqual(
+            Directory.GetFiles(indirect, "*.csproj", SearchOption.AllDirectories),
+            found);
+    }
+
+    [TestMethod]
+    public void DiscoverProjectFiles_Scan_IndexesTheDirectoryItWasPointedAt()
+    {
+        // The exclusion applies to directories the scan would descend into, not to
+        // the one the caller named. Asking to scan a directory and getting nothing
+        // back because of what it happens to be called is not a useful answer.
+        string root = NewProjectDir("node_modules");
+        File.WriteAllText(Path.Combine(root, "App.csproj"), "<Project />");
+
+        List<string> found = ApiCacheBuilder.DiscoverProjectFiles(root, scan: true);
+
+        Assert.HasCount(1, found);
+        Assert.AreEqual(Path.Combine(root, "App.csproj"), found[0]);
+    }
+
+    [TestMethod]
     public void ProjectNameFor_WinappYaml_UsesTheDirectoryName()
     {
         // "winapp" is the file's own stem, so it would name every such project

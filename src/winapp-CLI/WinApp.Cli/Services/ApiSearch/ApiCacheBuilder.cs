@@ -3,6 +3,7 @@
 
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.IO.Enumeration;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -577,19 +578,33 @@ internal static class ApiCacheBuilder
             {
                 return results;
             }
+            // Prune the excluded trees before descending into them rather than
+            // filtering their files out afterwards. In an Electron repository
+            // 'node_modules' holds the overwhelming majority of the directories on
+            // disk and contains no project this indexes, so walking it — once per
+            // pattern — made 'refresh --scan' scale with installed dependencies
+            // instead of with project sources.
             var options = new EnumerationOptions
             {
                 RecurseSubdirectories = true,
                 IgnoreInaccessible = true,
                 MatchType = MatchType.Simple,
             };
-            results.AddRange(Directory.EnumerateFiles(inputPath, "*.csproj", options));
-            results.AddRange(Directory.EnumerateFiles(inputPath, "*.vcxproj", options));
-            results.AddRange(Directory.EnumerateFiles(inputPath, WinappConfigFileName, options));
-            return results
-                .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
-                .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
-                .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}node_modules{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            var enumerable = new FileSystemEnumerable<string>(
+                inputPath,
+                // Matches what Directory.EnumerateFiles returns: the path rooted at the
+                // string the caller passed. ToFullPath would canonicalize the root
+                // instead, so results would stop comparing equal to paths built from
+                // the caller's own input.
+                (ref FileSystemEntry entry) => entry.ToSpecifiedFullPath(),
+                options)
+            {
+                ShouldIncludePredicate = static (ref FileSystemEntry entry) =>
+                    !entry.IsDirectory && IsDiscoverableProjectFile(entry.FileName),
+                ShouldRecursePredicate = static (ref FileSystemEntry entry) =>
+                    !IsExcludedScanDirectory(entry.FileName),
+            };
+            return enumerable
                 .Where(f => !IsWinappConfigProject(f) || !DirectoryHasMsBuildProject(Path.GetDirectoryName(f)!))
                 .ToList();
         }
@@ -627,6 +642,21 @@ internal static class ApiCacheBuilder
         }
         return results;
     }
+
+    /// <summary>
+    /// Directory names a recursive scan never descends into: they hold build output
+    /// and installed dependencies, never a project this should index.
+    /// </summary>
+    private static bool IsExcludedScanDirectory(ReadOnlySpan<char> name) =>
+        name.Equals("bin", StringComparison.OrdinalIgnoreCase)
+        || name.Equals("obj", StringComparison.OrdinalIgnoreCase)
+        || name.Equals("node_modules", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>File names a recursive scan treats as a project to index.</summary>
+    private static bool IsDiscoverableProjectFile(ReadOnlySpan<char> name) =>
+        name.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+        || name.EndsWith(".vcxproj", StringComparison.OrdinalIgnoreCase)
+        || name.Equals(WinappConfigFileName, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// The projects a solution lists that this indexer can read, as absolute paths.
