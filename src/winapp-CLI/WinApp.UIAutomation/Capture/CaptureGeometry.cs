@@ -20,10 +20,12 @@ public static class CaptureGeometry
     /// <param name="cropH">Height of the captured region. Must be positive.</param>
     /// <param name="encoderWidth">Width of the surface the content is centered in. Must be positive.</param>
     /// <param name="encoderHeight">Height of the surface the content is centered in. Must be positive.</param>
-    /// <param name="displayWidth">Width the content is scaled to fit. Must be positive.</param>
-    /// <param name="displayHeight">Height the content is scaled to fit. Must be positive.</param>
+    /// <param name="displayWidth">Width the content is scaled to fit. Must be positive and no larger than <paramref name="encoderWidth"/>.</param>
+    /// <param name="displayHeight">Height the content is scaled to fit. Must be positive and no larger than <paramref name="encoderHeight"/>.</param>
     /// <returns>Where to place the content within the surface, and how big it ends up.</returns>
-    /// <exception cref="ArgumentOutOfRangeException">Any dimension is zero or negative.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Any dimension is zero or negative, or a display dimension exceeds its encoder dimension.
+    /// </exception>
     public static (int OffsetX, int OffsetY, int FitW, int FitH) ComputeFittedContentRect(
         int cropW, int cropH, int encoderWidth, int encoderHeight, int displayWidth, int displayHeight)
     {
@@ -36,6 +38,12 @@ public static class CaptureGeometry
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(encoderHeight);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(displayWidth);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(displayHeight);
+
+        // The content is centered inside the encoder surface, so it has to fit: a display dimension
+        // larger than its encoder dimension centers to a negative offset, which a caller then hands
+        // to Buffer.BlockCopy. ComputeTargetSize never produces that, but this is public API.
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(displayWidth, encoderWidth);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(displayHeight, encoderHeight);
 
         var scale = Math.Min(displayWidth / (double)cropW, displayHeight / (double)cropH);
         var fitW = Math.Clamp((int)Math.Round(cropW * scale), 1, displayWidth);

@@ -60,7 +60,10 @@ public sealed class RecordCaptureResult
     /// <summary><see cref="AchievedFps"/> as a fraction of the requested rate. 1.0 means the cadence was met.</summary>
     public double CadenceRatio { get; init; }
 
-    /// <summary>Why recording stopped: "duration_elapsed", "cancelled", or "window_closed".</summary>
+    /// <summary>
+    /// Why recording stopped: "duration_elapsed", "cancelled", "target_closed" when the recorded
+    /// window went away, or "mp4_failed" when the encoder failed partway.
+    /// </summary>
     public string StopReason { get; init; } = "duration_elapsed";
 
     /// <summary>

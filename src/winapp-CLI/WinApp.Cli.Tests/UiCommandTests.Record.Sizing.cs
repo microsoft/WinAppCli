@@ -19,12 +19,16 @@ public partial class UiCommandTests
     [DataRow(100, 100, 640, 0, 640, 480, "encoderHeight")]
     [DataRow(100, 100, 640, 480, 0, 480, "displayWidth")]
     [DataRow(100, 100, 640, 480, 640, 0, "displayHeight")]
-    public void ComputeFittedContentRect_NonPositiveDimension_Throws(
+    [DataRow(100, 100, 64, 64, 128, 64, "displayWidth")]
+    [DataRow(100, 100, 64, 64, 64, 128, "displayHeight")]
+    public void ComputeFittedContentRect_InvalidDimensions_Throws(
         int cropW, int cropH, int encW, int encH, int dispW, int dispH, string expectedParameter)
     {
         // These are pixel dimensions, so none can be zero. The crop values are divisors, and because
         // the division is floating point a zero used to yield Infinity rather than an exception --
-        // the caller silently got a one-pixel rect back instead of an error.
+        // the caller silently got a one-pixel rect back instead of an error. A display dimension
+        // larger than its encoder centers to a negative offset, which the caller then hands to
+        // Buffer.BlockCopy.
         var exception = Assert.ThrowsExactly<ArgumentOutOfRangeException>(
             () => CaptureGeometry.ComputeFittedContentRect(cropW, cropH, encW, encH, dispW, dispH));
 
