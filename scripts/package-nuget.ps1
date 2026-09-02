@@ -176,8 +176,8 @@ try
     Write-Host "[NUGET] Building Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer package..." -ForegroundColor Blue
 
     # Standalone WinUI Roslyn analyzer package. Shares the CLI version (same
-    # $Version computed above); winapp also consumes this package at build time
-    # and embeds the extracted analyzer DLL.
+    # $Version computed above). Shipped in parallel with the CLI; consumers add it
+    # as a PackageReference to get the WUIxxxx analyzer diagnostics.
     $AnalyzerCsproj = Join-Path $ProjectRoot "src\winapp-Analyzer\Microsoft.WindowsAppSDK.Analyzers\Microsoft.WindowsAppSDK.Analyzers.csproj"
 
     dotnet pack $AnalyzerCsproj -c Release -o $OutputPath /p:Version=$Version /p:PackageVersion=$Version
@@ -188,52 +188,6 @@ try
     }
 
     Write-Host "[NUGET] Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer package created successfully!" -ForegroundColor Green
-
-    # ------------------------------------------------------------------------
-    # Provenance byte-match gate (issue #634, design D1)
-    # ------------------------------------------------------------------------
-    # The CLI embeds the analyzer project's build output DLL (via a
-    # ReferenceOutputAssembly=false ProjectReference) and the package packs that
-    # same output under analyzers/dotnet/cs. Assert the DLL inside the produced
-    # nupkg is byte-identical to the analyzer's Release build output, so the
-    # analyzer bits shipped in winapp match the ones published to nuget.org.
-    Write-Host "[VERIFY] Checking analyzer provenance (embedded == packaged)..." -ForegroundColor Blue
-
-    $AnalyzerBuiltDll = Join-Path $ProjectRoot "src\winapp-Analyzer\Microsoft.WindowsAppSDK.Analyzers\bin\Release\netstandard2.0\Microsoft.WindowsAppSDK.Analyzers.dll"
-    if (-not (Test-Path $AnalyzerBuiltDll)) {
-        Write-Error "Provenance gate: analyzer build output not found at $AnalyzerBuiltDll"
-        exit 1
-    }
-    $AnalyzerNupkg = Get-ChildItem $OutputPath -Filter "Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer.*.nupkg" |
-        Sort-Object LastWriteTime | Select-Object -Last 1
-    if (-not $AnalyzerNupkg) {
-        Write-Error "Provenance gate: analyzer nupkg not found in $OutputPath"
-        exit 1
-    }
-
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $zip = [System.IO.Compression.ZipFile]::OpenRead($AnalyzerNupkg.FullName)
-    try {
-        $entry = $zip.Entries | Where-Object { $_.FullName -eq 'analyzers/dotnet/cs/Microsoft.WindowsAppSDK.Analyzers.dll' }
-        if (-not $entry) {
-            Write-Error "Provenance gate: analyzer DLL not found under analyzers/dotnet/cs in $($AnalyzerNupkg.Name)"
-            exit 1
-        }
-        $es = $entry.Open()
-        try {
-            $ms = New-Object System.IO.MemoryStream
-            $es.CopyTo($ms)
-            $sha = [System.Security.Cryptography.SHA256]::Create()
-            $packedHash = [BitConverter]::ToString($sha.ComputeHash($ms.ToArray())).Replace('-','')
-        } finally { $es.Dispose() }
-    } finally { $zip.Dispose() }
-
-    $builtHash = (Get-FileHash $AnalyzerBuiltDll -Algorithm SHA256).Hash
-    if ($packedHash -ne $builtHash) {
-        Write-Error "Provenance gate FAILED: packaged analyzer DLL ($packedHash) != build output ($builtHash)"
-        exit 1
-    }
-    Write-Host "[VERIFY] Analyzer provenance OK (SHA256 $builtHash)" -ForegroundColor Green
     # ============================================================================
     # Summary
     # ============================================================================

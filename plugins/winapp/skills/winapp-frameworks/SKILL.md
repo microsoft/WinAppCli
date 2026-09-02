@@ -80,8 +80,6 @@ winapp run bin\x64\Debug\<tfm>\win-x64\
 
 Replace `<tfm>` with your target framework (e.g., `net10.0-windows10.0.26100.0`), and adjust `x64` to match your target architecture.
 
-> **WinUI analyzer:** when you run a WinUI project from source (`winapp run <csproj>` with `UseWinUI=true`), winapp automatically surfaces the WinUI Roslyn analyzer's `WUIxxxx` warnings in the build output (UWP→WinUI 3 compatibility, runtime, MVVM, and interop issues). Warnings only, scoped to WinUI projects, and skipped if the project already references `Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer`.
-
 ### .NET MAUI
 MAUI has one important quirk: its checked-in `Platforms/Windows/Package.appxmanifest` is full of `$placeholder$` tokens that **`winapp package` does not resolve**. MAUI's **resizetizer** fills them at build/publish time into a generated manifest:
 - Resizetizer manifest: `obj\<Config>\<TFM>\<RID>\resizetizer\m\Package.appxmanifest`

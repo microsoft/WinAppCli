@@ -68,7 +68,7 @@ internal sealed partial class ProjectRunService
     /// no-<c>&lt;Platforms&gt;</c> reference would break (MSB3030/PRI252). <c>EnableDynamicPlatformResolution</c>
     /// is never injected. A user-supplied <c>-p:Platform</c> still flows through (and suppresses injection).
     /// </summary>
-    internal static string BuildBuildPassArguments(FileInfo csproj, ProjectRunOptions options, string verbosity, string? csWinRTMetadataFolder = null, bool nativeTerminal = false, AnalyzerBuildInjection? analyzerInjection = null)
+    internal static string BuildBuildPassArguments(FileInfo csproj, ProjectRunOptions options, string verbosity, string? csWinRTMetadataFolder = null, bool nativeTerminal = false)
     {
         var rid = RunArchHelper.ToRuntimeIdentifier(options.Architecture);
 
@@ -129,16 +129,6 @@ internal sealed partial class ProjectRunService
         if (!string.IsNullOrEmpty(csWinRTMetadataFolder))
         {
             tokens.Add($"-p:CsWinRTWindowsMetadata={csWinRTMetadataFolder}");
-        }
-
-        // WinUI analyzer injection (issue #634), BUILD PASS ONLY. Emitted last so it wins MSBuild's
-        // last-property-wins over any forwarded user -p:CustomAfterMicrosoftCommonTargets; the hook then
-        // re-imports the user's original value threaded via _WinAppChainedCustomAfter (proven by spike A3).
-        // The <Analyzer> item it adds is restore-invisible, so this is safe under --no-restore (spike A1).
-        if (analyzerInjection is not null)
-        {
-            tokens.Add($"-p:CustomAfterMicrosoftCommonTargets={analyzerInjection.HookPropsPath}");
-            tokens.Add($"-p:_WinAppChainedCustomAfter={analyzerInjection.ChainedCustomAfter}");
         }
 
         return WindowsCommandLine.JoinArguments(tokens) ?? string.Empty;

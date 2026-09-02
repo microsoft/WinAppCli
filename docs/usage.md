@@ -766,14 +766,6 @@ Under `--json` or `--quiet` the invocation and build output go to stderr so stdo
 
 **Option applicability:** the identity/loose-layout options (`--manifest`, `--output-appx-directory`, `--no-launch`, `--with-alias`, `--unregister-on-exit`, `--clean`, `--executable`) apply to packaged apps only. They are rejected with a clear error for unpackaged apps (which have no MSIX package). Launch/debug options (`--args`/`--`, `--detach`, `--debug-output`, `--symbols`, `--json`) work in both.
 
-**WinUI analyzer diagnostics:** for **WinUI projects** (`UseWinUI=true`), `winapp run` automatically surfaces the WinUI Roslyn analyzer's warnings (rule IDs `WUIxxxx`) during the build — the same diagnostics you would get from the [`Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer`](https://www.nuget.org/packages/Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer) package. They catch common UWP→WinUI 3 compatibility issues, runtime pitfalls, MVVM regressions, and interop bugs. Details:
-
-- **Scoped to WinUI.** Non-WinUI projects are never touched, and in a mixed solution only the `UseWinUI=true` projects in the build graph are analyzed.
-- **Warnings only.** Every rule ships at `Warning` severity, so the analyzer never fails a build; the warnings appear inline in the streamed build output (and on stderr under `--json`/`--quiet`, alongside all other build diagnostics).
-- **Opt out by referencing it yourself.** If your project already has a `<PackageReference Include="Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer" />` (directly or via `Directory.Packages.props`), `winapp run` detects it and does **not** inject a second copy — your referenced version wins.
-- **Non-invasive.** Injection uses a build-only MSBuild hook; it does not modify your `.csproj`, `Directory.Build.props`, or any file on disk, and it re-chains any `CustomAfterMicrosoftCommonTargets` you already set.
-- **Incremental builds:** like all compiler diagnostics, the warnings are emitted when the project actually compiles. A no-op rebuild (nothing changed) skips compilation and therefore re-prints nothing — edit a file or `--no-build`-off a clean rebuild to see them again.
-
 **Project-mode examples:**
 
 ```bash
@@ -1211,7 +1203,9 @@ Search **WinUI** controls and samples for a working code example. WinUI-only: th
 winapp find-ui "<query>" [options]
 ```
 
-The corpus is fetched from GitHub on first use and cached per-user under `<global .winapp>/cache/find-ui`, so the **first run requires network access**. Subsequent runs are served from the local cache (refreshed at most every 7 days, or on demand with `--refresh`).
+The Gallery, Toolkit, and Reactor corpora ship **inside the CLI**, so `find-ui` works with no network access — including on a first run in an agent sandbox or behind a corporate proxy that blocks `raw.githubusercontent.com`. When GitHub *is* reachable the CLI refreshes from it and caches the result per-user under `<global .winapp>/cache/find-ui`; the built-in corpus is only a floor, never a ceiling. Cached data is refreshed at most every 24 hours, or on demand with `--refresh`.
+
+The built-in corpus is re-fetched from GitHub every time a stable release is built, and a refresh that fails **stops the release build** rather than quietly shipping older data — the baker fetches through the same code path `--refresh` uses, so a failure there means the live refresh is broken too and is worth investigating before shipping. A release can still be cut against the previously committed corpus, but only as an explicit override. When results are served from the built-in copy, `find-ui` says so on stderr and `--json` output carries `"corpus": "embedded"` (other values: `"network"` for a fresh fetch, `"cache"` for the local cache).
 
 **Options:**
 
