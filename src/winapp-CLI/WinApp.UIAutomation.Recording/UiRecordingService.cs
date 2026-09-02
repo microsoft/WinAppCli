@@ -19,7 +19,8 @@ namespace Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation.Recording;
 /// <remarks>
 /// Capture and element resolution come from the UI Automation library through
 /// <see cref="IUiAutomation"/> and <see cref="IWindowCapture"/>; this service owns only the
-/// recording loop, encoding, and frame-artifact output, which are CLI concerns.
+/// recording loop, encoding, and frame-artifact output, which is why they ship separately from
+/// the base package.
 /// </remarks>
 internal sealed partial class UiRecordingService(
     IUiAutomation uiAutomation,

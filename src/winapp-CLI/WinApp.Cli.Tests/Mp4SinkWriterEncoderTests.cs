@@ -1,13 +1,12 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
-using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
 
 /// <summary>
-/// The Media Foundation MP4 encoder behind `ui record`. Recording stays in the CLI, so these
-/// live alongside the other recording tests rather than with the UI Automation library.
+/// The Media Foundation MP4 encoder behind `ui record`. It is internal to the recording package, so
+/// these tests live here, where the assembly grants InternalsVisibleTo.
 /// </summary>
 [TestClass]
 public class Mp4SinkWriterEncoderTests

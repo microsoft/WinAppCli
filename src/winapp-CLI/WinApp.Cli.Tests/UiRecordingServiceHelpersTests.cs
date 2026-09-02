@@ -7,8 +7,8 @@ namespace WinApp.Cli.Tests;
 
 /// <summary>
 /// Pure helpers behind `ui record`: capture retargeting, sizing, offscreen rejection and the
-/// frame fast path. Recording stays in the CLI, so these live here rather than with the UI
-/// Automation library.
+/// frame fast path. They are internal to the recording package, so these tests live here, where
+/// the assembly grants InternalsVisibleTo.
 /// </summary>
 [TestClass]
 public class UiRecordingServiceHelpersTests
