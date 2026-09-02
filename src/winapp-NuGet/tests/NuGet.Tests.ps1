@@ -451,12 +451,14 @@ Describe "UI Automation library packages" -Skip:$script:skip {
             @($nuspec.package.metadata.dependencies.group).Count | Should -Be 2 -Because "each advertised target framework needs its own dependency group."
         }
 
-        It "Declares the recording package's dependency on the base package at the same version" {
+        It "Declares the recording package's dependency on the base package at exactly the same version" {
             $nuspec = Read-Nuspec $script:recordingPkg.FullName
             $deps = @($nuspec.package.metadata.dependencies.group.dependency)
             $baseDep = $deps | Where-Object { $_.id -eq $script:baseId }
             $baseDep | Should -Not -BeNullOrEmpty
-            $baseDep.version | Should -Be $nuspec.package.metadata.version
+            # Bracketed, not bare: a bare version means "[x,)", which would let a consumer pair this
+            # package with a newer base package it was never built against.
+            $baseDep.version | Should -BeExactly "[$($nuspec.package.metadata.version)]"
             @($deps | ForEach-Object { $_.id }) | Should -Contain 'SkiaSharp'
         }
 

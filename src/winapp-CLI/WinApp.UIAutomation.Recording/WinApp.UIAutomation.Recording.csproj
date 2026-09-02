@@ -56,6 +56,20 @@
     <ProjectReference Include="..\WinApp.UIAutomation\WinApp.UIAutomation.csproj" />
   </ItemGroup>
 
+  <!--
+    The two packages ship together from this repo at the same version, and this one calls the base
+    package's public API directly. A bare dependency version means "[x,)", so a consumer could pair
+    this package with a newer base package that no longer matches and only find out at runtime. Pin
+    it to that exact version instead.
+  -->
+  <Target Name="PinBasePackageDependencyToExactVersion" AfterTargets="_GetProjectReferenceVersions">
+    <ItemGroup>
+      <_ProjectReferencesWithVersions Condition="'%(Filename)' == 'WinApp.UIAutomation'">
+        <ProjectVersion>[%(_ProjectReferencesWithVersions.ProjectVersion)]</ProjectVersion>
+      </_ProjectReferencesWithVersions>
+    </ItemGroup>
+  </Target>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
