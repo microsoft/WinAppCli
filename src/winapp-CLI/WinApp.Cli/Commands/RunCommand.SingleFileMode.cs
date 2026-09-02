@@ -172,7 +172,6 @@ internal partial class RunCommand
                 detach,
                 isJson,
                 resolution.Properties.GetValueOrDefault("OutputType"),
-                packageName: null,
                 ReadAliasPreference(resolution.Properties));
 
             withAlias = aliasDecision.UseAlias;
@@ -314,9 +313,10 @@ internal partial class RunCommand
             // Alias launch needs a uap5:ExecutionAlias, which the template does not declare. For a
             // generated manifest the usual advice ("run winapp manifest add-alias") is impossible to
             // follow: this file is regenerated on every run, so any alias the user adds is destroyed by
-            // the next one. Add it here instead, named from the identity just planned.
+            // the next one. Add it here instead, named from the package family just planned.
             if (aliasDecision.UseAlias &&
-                ExecutionAliasResolver.BuildDefaultAliasName(info.PackageName) is { Length: > 0 } aliasName)
+                ExecutionAliasResolver.BuildDefaultAliasName(
+                    appLauncherService.ComputePackageFamilyName(info.PackageName, info.PublisherDN)) is { Length: > 0 } aliasName)
             {
                 await AddGeneratedManifestAliasAsync(generatedManifest, aliasName, isJson, cancellationToken);
             }

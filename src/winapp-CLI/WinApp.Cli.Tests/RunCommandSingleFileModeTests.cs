@@ -577,8 +577,10 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
         XNamespace uap5 = "http://schemas.microsoft.com/appx/manifest/uap/windows10/5";
         var alias = root.Descendants(uap5 + "ExecutionAlias").SingleOrDefault();
         Assert.IsNotNull(alias, "Alias launch must produce a uap5:ExecutionAlias in the generated manifest");
-        Assert.AreEqual("winapp-counter.exe", alias.Attribute("Alias")!.Value,
-            "The alias is derived from package identity and prefixed, so it cannot collide with a real tool on PATH");
+        var aliasValue = alias.Attribute("Alias")!.Value;
+        StringAssert.StartsWith(aliasValue, "winapp-counter_",
+            "The alias is derived from the package family name and prefixed, so it cannot collide with a real tool on PATH or with another publisher's same-named app");
+        StringAssert.EndsWith(aliasValue, ".exe");
     }
 
     [TestMethod]

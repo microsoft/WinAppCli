@@ -91,7 +91,7 @@ Set these MSBuild properties in your `.csproj` to customize behavior:
 |----------|---------|-------------|
 | `EnableWinAppRunSupport` | `true` | Enable/disable the run support functionality |
 | `WinAppLaunchArgs` | (empty) | Arguments to pass to the app on launch |
-| `WinAppRunUseExecutionAlias` | `true` for `OutputType=Exe`, else `false` | Launch via execution alias instead of AUMID activation. Console apps use it by default so their output reaches the terminal; set `false` to force AUMID. |
+| `WinAppRunUseExecutionAlias` | inferred from the app | Launch via execution alias instead of AUMID activation. Left unset, winapp infers it: console apps use an alias so their output reaches the terminal, windowed apps use AUMID. Set `true` or `false` to decide it yourself. |
 | `WinAppRunNoLaunch` | `false` | Only register identity without launching the app |
 | `WinAppRunDebugOutput` | `false` | Capture `OutputDebugString` messages and first-chance exceptions. Only one debugger can attach at a time (prevents VS/VS Code). Use `WinAppRunNoLaunch` instead to attach a different debugger. Cannot be combined with `WinAppRunNoLaunch`. |
 | `WinAppRunDetach` | `false` | Return immediately after launching instead of waiting for the app to exit. Prints the PID. |

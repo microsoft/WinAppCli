@@ -276,31 +276,13 @@ internal partial class RunCommand
             // output reaches this terminal; --without-alias opts back into AUMID activation.
             var aliasDecision = ResolveAliasLaunch(
                 withAlias, withoutAlias, noLaunch, detach, isJson,
-                resolution.OutputType, ReadManifestPackageName(manifest, targetDir));
+                resolution.OutputType);
 
             return await ExecuteRunPipelineAsync(
                 targetDir, manifest, outputAppXDirectory, appArgs,
                 noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, isJson,
                 runtimeArch: resolution.Architecture, projectFile: csproj, framework: resolution.Framework, noRestore: resolution.NoRestore, selfContained: resolution.SelfContained,
                 aliasDecision, cancellationToken);
-        }
-
-        /// <summary>
-        /// Reads <c>Identity/@Name</c> from the project's manifest, so the default alias can be derived
-        /// from package identity before anything is staged. Returns null when it cannot be read; the
-        /// caller then stages no alias and the app keeps AUMID activation.
-        /// </summary>
-        private static string? ReadManifestPackageName(FileInfo? manifest, DirectoryInfo targetDir)
-        {
-            try
-            {
-                var file = manifest ?? FindManifest(targetDir.FullName);
-                return file.Exists ? AppxManifestDocument.Load(file.FullName).IdentityName : null;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
-            {
-                return null;
-            }
         }
 
         /// <summary>

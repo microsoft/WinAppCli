@@ -483,18 +483,69 @@ internal partial class RunCommand : Command, IShortDescription
                     $"{UiSymbols.Search} No .csproj/.sln/.slnx with a runnable app found in '{inputFolder.FullName}' — running it as a build-output folder.");
             }
 
-            // Folder mode has no evaluated OutputType — the input is a build output, not a project — so
-            // the launch mechanism comes from the command line alone. An app that wants alias launch by
-            // default declares it through its project or its .cs file, both of which route elsewhere.
+            // Folder mode has no project to evaluate, so console-ness is read from the built binary's PE
+            // subsystem — which is exactly what OutputType compiles to. That keeps the default INFERRED,
+            // so an unavailable alias degrades to AUMID instead of failing the run, and it means a plain
+            // `winapp run <folder>` on a console app reaches this terminal like every other mode.
             var folderAliasDecision = ResolveAliasLaunch(
                 withAlias, withoutAlias, noLaunch, detach, isJson,
-                outputType: null, packageName: null);
+                outputType: DetectFolderOutputType(inputFolder, executable));
 
             return await ExecuteRunPipelineAsync(
                 inputFolder, manifest, outputAppXDirectory, appArgs,
                 noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, isJson,
                 runtimeArch: null, projectFile: null, framework: null, noRestore: false, selfContained: false,
                 folderAliasDecision, cancellationToken);
+        }
+
+        /// <summary>
+        /// Reports the <c>OutputType</c> a build-output folder's executable corresponds to, read from its
+        /// PE subsystem. Returns null when no single candidate can be identified, and the caller then
+        /// keeps AUMID activation.
+        /// </summary>
+        /// <remarks>
+        /// Only used to choose a launch mechanism, so an ambiguous folder is not worth resolving
+        /// precisely: every WinAppSDK self-contained output ships a <c>RestartAgent.exe</c> beside the
+        /// app, and guessing wrong here would put an alias on a helper binary.
+        /// </remarks>
+        private static string? DetectFolderOutputType(DirectoryInfo inputFolder, string? executable)
+        {
+            try
+            {
+                if (!inputFolder.Exists)
+                {
+                    return null;
+                }
+
+                FileInfo? candidate = null;
+                if (!string.IsNullOrWhiteSpace(executable))
+                {
+                    var named = new FileInfo(Path.Combine(inputFolder.FullName, executable));
+                    candidate = named.Exists ? named : null;
+                }
+                else
+                {
+                    var executables = inputFolder
+                        .EnumerateFiles("*.exe", SearchOption.TopDirectoryOnly)
+                        .Where(f => !string.Equals(f.Name, "RestartAgent.exe", StringComparison.OrdinalIgnoreCase))
+                        .Take(2)
+                        .ToList();
+                    candidate = executables.Count == 1 ? executables[0] : null;
+                }
+
+                return candidate is null
+                    ? null
+                    : PeHelper.IsConsoleSubsystem(candidate.FullName) switch
+                    {
+                        true => "Exe",
+                        false => "WinExe",
+                        null => null,
+                    };
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                return null;
+            }
         }
 
         /// <summary>
@@ -593,13 +644,13 @@ internal partial class RunCommand : Command, IShortDescription
                     if (effectiveAlias.UseAlias)
                     {
                         var probe = AppxManifestDocument.Load(resolvedManifest.FullName);
-                        var declaredAliases = probe.GetExecutionAliases();
-                        var probeAlias = declaredAliases.Count > 0
-                            ? declaredAliases[0]
-                            : ExecutionAliasResolver.BuildDefaultAliasName(probe.IdentityName);
                         var probeFamily = string.IsNullOrEmpty(probe.IdentityName) || string.IsNullOrEmpty(probe.IdentityPublisher)
                             ? null
                             : appLauncherService.ComputePackageFamilyName(probe.IdentityName, probe.IdentityPublisher);
+                        var declaredAliases = probe.GetExecutionAliases();
+                        var probeAlias = declaredAliases.Count > 0
+                            ? declaredAliases[0]
+                            : ExecutionAliasResolver.BuildDefaultAliasName(probeFamily);
 
                         if (!TryConfirmAliasIsAvailable(effectiveAlias with { AliasName = probeAlias }, probeFamily, isJson))
                         {

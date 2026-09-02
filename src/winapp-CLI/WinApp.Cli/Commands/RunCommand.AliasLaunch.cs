@@ -64,7 +64,6 @@ internal partial class RunCommand
             bool detach,
             bool isJson,
             string? outputType,
-            string? packageName,
             bool? preferAlias = null)
         {
             if (noLaunch || detach || isJson || withoutAlias)
@@ -81,10 +80,9 @@ internal partial class RunCommand
                 return AliasLaunchDecision.Aumid;
             }
 
-            return new AliasLaunchDecision(
-                UseAlias: true,
-                AliasName: ExecutionAliasResolver.BuildDefaultAliasName(packageName),
-                Explicit: withAlias);
+            // The alias NAME is resolved later, from the manifest that is actually registered — the
+            // package family it names is not known here for every mode.
+            return new AliasLaunchDecision(UseAlias: true, AliasName: null, Explicit: withAlias);
         }
 
         /// <summary>
@@ -127,9 +125,15 @@ internal partial class RunCommand
                         alias,
                         proxy.FullName);
                 }
-                else
+                else if (!isJson)
                 {
-                    logger.LogDebug("Falling back to AUMID activation: alias '{Alias}' exists but its owner could not be read.", alias);
+                    // Same user-visible consequence as a known different owner — the app prints nothing —
+                    // so it gets the same visibility rather than a Debug line the user will not see.
+                    logger.LogWarning(
+                        "{UISymbol} Could not read which package owns the execution alias '{Alias}', so this app will launch via AUMID and print nothing to this terminal. Remove '{Path}' if it is stale.",
+                        UiSymbols.Warning,
+                        alias,
+                        proxy.FullName);
                 }
 
                 return false;

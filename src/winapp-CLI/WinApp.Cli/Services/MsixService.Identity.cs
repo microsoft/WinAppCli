@@ -499,7 +499,16 @@ internal partial class MsixService
     /// </summary>
     private static bool TryAddDefaultExecutionAlias(AppxManifestDocument document, TaskContext taskContext)
     {
-        var aliasName = ExecutionAliasResolver.BuildDefaultAliasName(document.IdentityName);
+        // Scoped to the package FAMILY, not the bare identity name: two side-loaded packages can share a
+        // name under different publishers and coexist, so a name-only alias would put them in contention
+        // for the one global entry Windows allows.
+        if (string.IsNullOrEmpty(document.IdentityName) || string.IsNullOrEmpty(document.IdentityPublisher))
+        {
+            return false;
+        }
+
+        var familyName = AppLauncherService.ComputeFamilyName(document.IdentityName, document.IdentityPublisher);
+        var aliasName = ExecutionAliasResolver.BuildDefaultAliasName(familyName);
         if (aliasName == null || document.EnsureExecutionAlias(aliasName) == null)
         {
             return false;

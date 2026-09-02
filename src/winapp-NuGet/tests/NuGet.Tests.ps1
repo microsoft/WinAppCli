@@ -305,20 +305,20 @@ $extraProps  </PropertyGroup>
             $args | Should -Match ' --caller nuget-package$'
         }
 
-        It "Forwards neither alias switch for a windowed app when the property is unset" {
+        It "Forwards neither alias switch when the property is unset" {
+            # The console default is winapp's to make: it reads the built binary's subsystem and treats
+            # its own inference as a DEFAULT, which degrades to AUMID when the alias is unavailable.
+            # Forwarding a switch here would spell that as an explicit request and turn it into an error.
             $args = Get-ComputedRunArgs -CaseName 'run-alias-unset'
 
             $args | Should -Not -Match ' --with-alias'
             $args | Should -Not -Match ' --without-alias'
         }
 
-        It "Forwards --with-alias for a console app when the property is unset - keeps dotnet run output visible" {
-            # winapp is pointed at the build-output FOLDER here, where it cannot read OutputType, so the
-            # console default has to be decided by these targets. Without this the documented default
-            # silently does not apply to `dotnet run` and console apps print nothing.
+        It "Forwards neither alias switch for a console app either - winapp infers it" {
             $args = Get-ComputedRunArgs -CaseName 'run-alias-console' -OutputType 'Exe'
 
-            $args | Should -Match ' --with-alias'
+            $args | Should -Not -Match ' --with-alias'
             $args | Should -Not -Match ' --without-alias'
         }
 
@@ -330,37 +330,26 @@ $extraProps  </PropertyGroup>
         }
 
         It "Maps WinAppRunUseExecutionAlias=false to --without-alias, even for a console app" {
-            # Opting out has to be forwarded explicitly, because the CLI would otherwise apply its own
-            # OutputType default and launch a console app through its alias anyway.
             $args = Get-ComputedRunArgs -CaseName 'run-alias-false' -WinAppRunUseExecutionAlias 'false' -OutputType 'Exe'
 
             $args | Should -Match ' --without-alias'
             $args | Should -Not -Match ' --with-alias '
         }
 
-        It "Does not infer the console alias when detaching - the CLI rejects that pair" {
-            # --detach does not wait on a process this terminal owns, so an alias cannot express it. An
-            # inferred alias would break console projects already using WinAppRunDetach.
+        It "Does not add an alias switch alongside detach - the CLI rejects that pair" {
+            # Neither detach nor no-launch waits on a process this terminal owns, so an alias cannot
+            # express them. Since nothing is inferred here, these combinations stay usable.
             $args = Get-ComputedRunArgs -CaseName 'run-alias-detach' -OutputType 'Exe' -WinAppRunDetach
 
             $args | Should -Match ' --detach'
             $args | Should -Not -Match ' --with-alias'
         }
 
-        It "Does not infer the console alias when not launching - the CLI rejects that pair" {
+        It "Does not add an alias switch alongside no-launch" {
             $args = Get-ComputedRunArgs -CaseName 'run-alias-nolaunch' -OutputType 'Exe' -WinAppRunNoLaunch
 
             $args | Should -Match ' --no-launch'
             $args | Should -Not -Match ' --with-alias'
-        }
-
-        It "Still forwards an EXPLICIT alias request alongside detach, so the conflict is reported" {
-            # Suppressing an explicit 'true' would silently ignore what the user asked for. Forwarding it
-            # lets the CLI report the contradiction instead of hiding it.
-            $args = Get-ComputedRunArgs -CaseName 'run-alias-explicit-detach' -OutputType 'Exe' -WinAppRunUseExecutionAlias 'true' -WinAppRunDetach
-
-            $args | Should -Match ' --with-alias'
-            $args | Should -Match ' --detach'
         }
     }
 

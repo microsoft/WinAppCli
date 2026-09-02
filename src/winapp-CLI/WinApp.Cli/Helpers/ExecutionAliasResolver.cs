@@ -202,30 +202,34 @@ internal static partial class ExecutionAliasResolver
 
     /// <summary>
     /// Builds the alias winapp declares for a package that does not author one itself, derived from the
-    /// <b>package identity</b> rather than the executable name.
+    /// <b>package family name</b> rather than the executable name.
     /// </summary>
     /// <remarks>
     /// An execution alias is a single global entry under <c>%LOCALAPPDATA%\Microsoft\WindowsApps</c>, and
     /// Windows gives it to the first package that claims it. Deriving it from the executable is what makes
     /// collisions likely, because unrelated apps share build output names — two different <c>main.cs</c>
-    /// files both produce <c>main.exe</c>, and the second silently launches the first. Identity is unique
-    /// by construction, so distinct apps can no longer contend for one name; two apps that DO collide here
-    /// are the same identity and already replace each other as packages.
+    /// files both produce <c>main.exe</c>, and the second silently launches the first.
+    /// <para>
+    /// The family name is used rather than <c>Identity/@Name</c> alone because identity includes the
+    /// publisher: two side-loaded packages can share a name under different publishers and coexist, so a
+    /// name-only alias would put them back in contention. The family name is unique per installable
+    /// package by construction.
+    /// </para>
     /// <para>
     /// Returns <see langword="null"/> when no safe name can be built, and the caller then launches through
     /// AUMID rather than guessing at one.
     /// </para>
     /// </remarks>
-    public static string? BuildDefaultAliasName(string? packageName)
+    public static string? BuildDefaultAliasName(string? packageFamilyName)
     {
-        if (string.IsNullOrWhiteSpace(packageName))
+        if (string.IsNullOrWhiteSpace(packageFamilyName))
         {
             return null;
         }
 
-        // Package identities are already constrained to [-.A-Za-z0-9], but this value reaches a file name,
-        // so anything outside that set is dropped rather than trusted.
-        var sanitized = new string([.. packageName.Where(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '.')]);
+        // Family names are already constrained to [-.A-Za-z0-9_], but this value reaches a file name, so
+        // anything outside that set is dropped rather than trusted.
+        var sanitized = new string([.. packageFamilyName.Where(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '.' or '_')]);
         sanitized = sanitized.Trim('.', '-', ' ');
 
         if (sanitized.Length == 0)

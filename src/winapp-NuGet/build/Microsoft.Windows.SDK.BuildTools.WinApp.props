@@ -39,11 +39,12 @@
       When true, launch the app using its execution alias instead of AUMID activation.
       The app runs in the current terminal with inherited stdin/stdout/stderr.
 
-      Deliberately left EMPTY rather than defaulted: the targets decide from OutputType at the point
-      the winapp command line is built, because winapp is pointed at the build-output folder and has
-      no project there to read OutputType from. A console app opts in automatically.
+      Deliberately left EMPTY: winapp infers this from the built binary's subsystem, and treats its own
+      inference as a default, so an alias that turns out to be unavailable degrades to AUMID rather than
+      failing the run. Forwarding the inferred case from here would spell it as an explicit request and
+      make that same situation an error.
 
-      Set it to true or false to override that choice.
+      Set it to true or false to decide it yourself.
     -->
 
     <!--
