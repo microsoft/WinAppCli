@@ -242,24 +242,11 @@ internal static class ApiQueryEngine
         bool filtered = !string.IsNullOrWhiteSpace(filter);
 
         // An unfiltered listing without --all is a bulk dump — the one shape that is
-        // routinely expensive (Button: 400 members, ~46k tokens of JSON). Trim the two
-        // parts of it that no caller writes code from, and leave everything else alone:
-        // a targeted --filter query is already small, and its descriptions are the most
-        // useful text in the payload.
+        // routinely expensive (Button: 288 members, ~92 KB of JSON, of which 280 members
+        // are inherited). Trim the parts of it that no caller writes code from, and leave
+        // everything else alone: a targeted --filter query is already small, and its
+        // descriptions are the most useful text in the payload.
         bool bulk = !filtered && !includeAll;
-
-        List<ApiMemberOutput> Project(MemberKind kind) => members
-            .Where(m => m.Member.Kind == kind)
-            .Select(m => ToMemberOutput(m.Member, m.DeclaringType, type.FullName, includeDescription: !bulk))
-            .ToList();
-
-        var allProperties = Project(MemberKind.Property);
-        var allEvents = Project(MemberKind.Event);
-        var allMethods = Project(MemberKind.Method);
-
-        // The GetForCurrentView warning describes the type, not the filtered view,
-        // so it must be computed before filtering or a filter would suppress it.
-        bool getForCurrentView = allMethods.Any(m => m.Name.Equals("GetForCurrentView", StringComparison.Ordinal));
 
         // Dependency-property identifier statics (BackgroundProperty) are 28% of a
         // WinUI control's members and are never what you write in XAML or in a property
@@ -268,19 +255,66 @@ internal static class ApiQueryEngine
         int hiddenDependencyProperties = 0;
         if (bulk)
         {
-            int before = allProperties.Count;
-            allProperties = allProperties.Where(m => !IsDependencyPropertyIdentifier(m)).ToList();
-            hiddenDependencyProperties = before - allProperties.Count;
+            int before = members.Count;
+            members = members.Where(m => !IsDependencyPropertyIdentifier(m.Member)).ToList();
+            hiddenDependencyProperties = before - members.Count;
+        }
+
+        // The GetForCurrentView warning describes the type, not the view, so it is
+        // computed over every member — including inherited ones, which the bulk listing
+        // no longer shows inline.
+        bool getForCurrentView = members.Any(m =>
+            m.Member.Kind == MemberKind.Method && m.Member.Name.Equals("GetForCurrentView", StringComparison.Ordinal));
+
+        bool IsInherited((WinMdMemberInfo Member, string? DeclaringType) m) =>
+            m.DeclaringType is not null && m.DeclaringType != type.FullName;
+
+        // A WinUI control inherits far more than it declares (Button: 8 declared, 280
+        // inherited). Inlining all of it answers a question the caller did not ask and
+        // buries the 8 members that are actually specific to the type, so the bulk
+        // listing shows what the type declares and summarizes the rest by name under the
+        // base type that declares it.
+        var shown = bulk ? members.Where(m => !IsInherited(m)).ToList() : members;
+
+        List<ApiMemberOutput> Project(MemberKind kind) => shown
+            .Where(m => m.Member.Kind == kind)
+            .Select(m => ToMemberOutput(m.Member, m.DeclaringType, type.FullName, includeDescription: !bulk, compact: bulk))
+            .ToList();
+
+        var allProperties = Project(MemberKind.Property);
+        var allEvents = Project(MemberKind.Event);
+        var allMethods = Project(MemberKind.Method);
+
+        List<ApiInheritedMemberGroup>? inheritedGroups = bulk
+            ? members
+                .Where(IsInherited)
+                // Grouping preserves first-appearance order, which is the base chain
+                // walked nearest-first — more useful than any re-sort.
+                .GroupBy(m => m.DeclaringType!, StringComparer.Ordinal)
+                .Select(g => new ApiInheritedMemberGroup
+                {
+                    DeclaringType = g.Key,
+                    Properties = InheritedNames(g, MemberKind.Property),
+                    Events = InheritedNames(g, MemberKind.Event),
+                    Methods = InheritedNames(g, MemberKind.Method),
+                })
+                .ToList()
+            : null;
+        if (inheritedGroups is { Count: 0 })
+        {
+            inheritedGroups = null;
         }
 
         List<ApiMemberOutput> Filter(List<ApiMemberOutput> source) => filtered
             ? source.Where(m => MatchesFilter(m.Name, filter)).ToList()
             : source;
 
-        // Totals describe the type, not the view, so anything hidden — by a filter or by
-        // the bulk-dump trim — must be visible as a count or a narrow view reads as a
-        // small API. When nothing is hidden they stay null and cost nothing.
-        bool anythingHidden = filtered || hiddenDependencyProperties > 0;
+        // Totals describe the type, not the view, so anything hidden — by a filter, by
+        // the dependency-property trim, or by summarizing inherited members — must be
+        // visible as a count or a narrow view reads as a small API. When nothing is
+        // hidden they stay null and cost nothing.
+        int inheritedCount(MemberKind kind) => bulk ? members.Count(m => IsInherited(m) && m.Member.Kind == kind) : 0;
+        bool anythingHidden = filtered || hiddenDependencyProperties > 0 || inheritedGroups is not null;
 
         return ApiQueryResult<ApiMembersOutput>.Ok(new ApiMembersOutput
         {
@@ -290,19 +324,37 @@ internal static class ApiQueryEngine
             BaseType = type.BaseType,
             Deprecated = type.DeprecatedMessage,
             Filter = filtered ? filter : null,
-            TotalProperties = anythingHidden ? allProperties.Count + hiddenDependencyProperties : null,
-            TotalEvents = anythingHidden ? allEvents.Count : null,
-            TotalMethods = anythingHidden ? allMethods.Count : null,
+            TotalProperties = anythingHidden ? allProperties.Count + hiddenDependencyProperties + inheritedCount(MemberKind.Property) : null,
+            TotalEvents = anythingHidden ? allEvents.Count + inheritedCount(MemberKind.Event) : null,
+            TotalMethods = anythingHidden ? allMethods.Count + inheritedCount(MemberKind.Method) : null,
             HiddenDependencyProperties = hiddenDependencyProperties > 0 ? hiddenDependencyProperties : null,
             DescriptionsOmitted = bulk ? true : null,
             Hint = bulk
-                ? "Dependency-property identifiers and member descriptions are omitted from an unfiltered listing. Use --filter <text> to search the full surface, or --all for the complete listing."
+                ? (inheritedGroups is not null
+                    ? "Unfiltered listing: inherited members are listed by name only under 'inherited', and dependency-property identifiers and member descriptions are omitted. Use --filter <text> to search the full surface with signatures and descriptions, or --all for the complete listing."
+                    : "Dependency-property identifiers and member descriptions are omitted from an unfiltered listing. Use --filter <text> to search the full surface, or --all for the complete listing.")
                 : null,
             Properties = Filter(allProperties),
             Events = Filter(allEvents),
             Methods = Filter(allMethods),
+            Inherited = inheritedGroups,
             GetForCurrentViewWarning = getForCurrentView,
         });
+    }
+
+    /// <summary>
+    /// Names of one kind of member in an inherited group, or <see langword="null"/> when
+    /// the group declares none of that kind, so empty arrays do not pad the payload.
+    /// </summary>
+    private static List<string>? InheritedNames(
+        IEnumerable<(WinMdMemberInfo Member, string? DeclaringType)> group, MemberKind kind)
+    {
+        var names = group
+            .Where(m => m.Member.Kind == kind)
+            .Select(m => m.Member.Name)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        return names.Count > 0 ? names : null;
     }
 
     /// <summary>
@@ -310,8 +362,8 @@ internal static class ApiQueryEngine
     /// <c>XxxProperty</c> whose type is <c>DependencyProperty</c>. Both conditions are
     /// required so an ordinary member that merely ends in "Property" is never hidden.
     /// </summary>
-    private static bool IsDependencyPropertyIdentifier(ApiMemberOutput member) =>
-        member.Kind == nameof(MemberKind.Property)
+    private static bool IsDependencyPropertyIdentifier(WinMdMemberInfo member) =>
+        member.Kind == MemberKind.Property
         && member.Name.EndsWith("Property", StringComparison.Ordinal)
         && member.ReturnType is not null
         && (member.ReturnType.EndsWith(".DependencyProperty", StringComparison.Ordinal)
@@ -623,19 +675,24 @@ internal static class ApiQueryEngine
         });
     }
 
-    private static ApiMemberOutput ToMemberOutput(WinMdMemberInfo member, string? declaringType, string ownerFullName, bool includeDescription = true)
+    private static ApiMemberOutput ToMemberOutput(
+        WinMdMemberInfo member, string? declaringType, string ownerFullName,
+        bool includeDescription = true, bool compact = false)
     {
         bool inherited = declaringType != null && declaringType != ownerFullName;
         return new ApiMemberOutput
         {
             Name = member.Name,
-            Kind = member.Kind.ToString(),
+            // In a members listing the kind is already stated by the array the entry
+            // sits in; check-property results are not grouped, so they keep it.
+            Kind = compact ? null : member.Kind.ToString(),
             Signature = member.Signature,
-            ReturnType = member.ReturnType,
+            // Already the leading token of the signature.
+            ReturnType = compact ? null : member.ReturnType,
             Description = includeDescription ? member.Description : null,
             Deprecated = member.DeprecatedMessage,
             DeclaringType = inherited ? declaringType : null,
-            Inherited = inherited,
+            Inherited = inherited ? true : null,
             Writable = PropertyWritable(member),
         };
     }

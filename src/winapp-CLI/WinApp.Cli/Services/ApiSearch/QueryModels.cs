@@ -213,10 +213,19 @@ internal sealed class ApiMemberOutput
 {
     public required string Name { get; init; }
 
-    public required string Kind { get; init; }
+    /// <summary>
+    /// Omitted in an unfiltered <c>members</c> listing, where the array the entry sits
+    /// in (<c>properties</c>/<c>events</c>/<c>methods</c>) already states it. Set on
+    /// <c>check-property</c> results, which are not grouped by kind.
+    /// </summary>
+    public string? Kind { get; init; }
 
     public required string Signature { get; init; }
 
+    /// <summary>
+    /// Omitted in an unfiltered <c>members</c> listing, where it is already the leading
+    /// token of <see cref="Signature"/>.
+    /// </summary>
     public string? ReturnType { get; init; }
 
     public string? Description { get; init; }
@@ -225,13 +234,36 @@ internal sealed class ApiMemberOutput
 
     public string? DeclaringType { get; init; }
 
-    public bool Inherited { get; init; }
+    /// <summary>
+    /// <see langword="true"/> for a member declared on a base type, <see langword="null"/>
+    /// otherwise — which is exactly when <see cref="DeclaringType"/> is set, so the two
+    /// never disagree and the flag costs nothing on the common case.
+    /// </summary>
+    public bool? Inherited { get; init; }
 
     /// <summary>
     /// Whether a property can be assigned. <c>null</c> for non-properties and for
     /// properties whose accessors could not be determined.
     /// </summary>
     public bool? Writable { get; init; }
+}
+
+/// <summary>
+/// The inherited members of a type, by the base type that declares them. An unfiltered
+/// <c>members</c> listing summarizes inheritance this way rather than inlining every
+/// member: a WinUI control inherits far more than it declares (Button declares 8 members
+/// and inherits 280), and the inherited detail dominates the payload while answering a
+/// question — "what does UIElement give me" — that the caller did not ask.
+/// </summary>
+internal sealed class ApiInheritedMemberGroup
+{
+    public required string DeclaringType { get; init; }
+
+    public List<string>? Properties { get; init; }
+
+    public List<string>? Events { get; init; }
+
+    public List<string>? Methods { get; init; }
 }
 
 /// <summary>The result of <c>find-api members &lt;Type&gt;</c>.</summary>
@@ -294,6 +326,13 @@ internal sealed class ApiMembersOutput : IApiScopedOutput
     public required List<ApiMemberOutput> Events { get; init; }
 
     public required List<ApiMemberOutput> Methods { get; init; }
+
+    /// <summary>
+    /// Inherited members, by declaring type, in an unfiltered listing. Names only —
+    /// <c>--filter</c> or <c>--all</c> gets their signatures. <see langword="null"/>
+    /// when the listing already shows every member inline.
+    /// </summary>
+    public List<ApiInheritedMemberGroup>? Inherited { get; init; }
 
     public bool GetForCurrentViewWarning { get; init; }
 }

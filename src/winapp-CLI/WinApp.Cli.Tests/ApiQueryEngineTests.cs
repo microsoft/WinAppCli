@@ -799,6 +799,207 @@ public sealed class ApiQueryEngineTests
         }
     }
 
+    #region Inherited member summarization
+
+    private static readonly string[] ExpectedMiddleProperties = ["FromMiddle"];
+    private static readonly string[] ExpectedMiddleEvents = ["MiddleHappened"];
+    private static readonly string[] ExpectedRootProperties = ["FromRoot"];
+
+    /// <summary>
+    /// A two-level base chain, the shape that makes an unfiltered listing expensive: the
+    /// leaf declares almost nothing and inherits almost everything (the real case is
+    /// Button, which declares 8 members and inherits 280).
+    /// </summary>
+    private static ProjectManifest BuildInheritanceCache(string cacheDir)
+    {
+        WinMdTypeInfo WithMembers(string name, string? baseType, params WinMdMemberInfo[] members) => new()
+        {
+            Namespace = "Inh.Ns",
+            Name = name,
+            FullName = "Inh.Ns." + name,
+            Kind = TypeKind.Class,
+            BaseType = baseType,
+            SourceFile = "inh.winmd",
+            Members = members.ToList(),
+        };
+
+        WinMdMemberInfo Prop(string name) => new()
+        {
+            Name = name,
+            Kind = MemberKind.Property,
+            Signature = $"String {name} {{ get; set; }}",
+            ReturnType = "String",
+            Description = $"The {name}.",
+        };
+
+        WinMdMemberInfo Evt(string name) => new()
+        {
+            Name = name,
+            Kind = MemberKind.Event,
+            Signature = $"event Handler {name}",
+            ReturnType = "Handler",
+        };
+
+        var namespaces = new Dictionary<string, List<WinMdTypeInfo>>(StringComparer.Ordinal)
+        {
+            ["Inh.Ns"] =
+            [
+                WithMembers("Leaf", "Inh.Ns.Middle", Prop("Own")),
+                WithMembers("Middle", "Inh.Ns.Root", Prop("FromMiddle"), Evt("MiddleHappened")),
+                WithMembers("Root", null, Prop("FromRoot")),
+            ],
+        };
+        WriteSyntheticPackage(cacheDir, "Inh.Pkg", namespaces);
+
+        var manifest = new ProjectManifest
+        {
+            ProjectName = "InhApp",
+            ProjectDir = Path.Combine(cacheDir, "src"),
+            ProjectFile = "InhApp.csproj",
+            Packages = [new ProjectPackageRef { Id = "Inh.Pkg", Version = "1.0.0", SourceStamp = TestSourceStamp }],
+            GeneratedAt = DateTime.UtcNow.ToString("o"),
+        };
+        string projectsDir = Path.Combine(cacheDir, "projects");
+        Directory.CreateDirectory(projectsDir);
+        File.WriteAllText(
+            Path.Combine(projectsDir, "InhApp.json"),
+            JsonSerializer.Serialize(manifest, ApiSearchJsonContext.Default.ProjectManifest));
+        return manifest;
+    }
+
+    [TestMethod]
+    public void Members_Unfiltered_ShowsDeclaredInlineAndInheritedByName()
+    {
+        // An unfiltered listing is an orientation view. Inlining every inherited
+        // signature answers a question the caller did not ask ("what does the base type
+        // give me") and buries the members that are actually specific to the type.
+        string cacheDir = NewCacheDir();
+        try
+        {
+            ProjectManifest manifest = BuildInheritanceCache(cacheDir);
+
+            var result = ApiQueryEngine.Members("Inh.Ns.Leaf", filter: null, cacheDir, manifest);
+
+            Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome, result.Message);
+
+            // Declared members stay inline, with their signatures.
+            Assert.AreEqual("Own", result.Data!.Properties.Single().Name);
+            StringAssert.Contains(result.Data.Properties.Single().Signature, "Own");
+
+            // Inherited members are summarized by the type that declares them.
+            Assert.IsNotNull(result.Data.Inherited);
+            var middle = result.Data.Inherited!.Single(g => g.DeclaringType == "Inh.Ns.Middle");
+            var root = result.Data.Inherited!.Single(g => g.DeclaringType == "Inh.Ns.Root");
+            CollectionAssert.AreEqual(ExpectedMiddleProperties, middle.Properties!.ToArray());
+            CollectionAssert.AreEqual(ExpectedMiddleEvents, middle.Events!.ToArray());
+            CollectionAssert.AreEqual(ExpectedRootProperties, root.Properties!.ToArray());
+
+            // A group with no members of a kind carries no empty array.
+            Assert.IsNull(middle.Methods);
+            Assert.IsNull(root.Events);
+
+            // Totals still describe the whole type, so the view is never mistaken for it.
+            Assert.AreEqual(3, result.Data.TotalProperties);
+            Assert.AreEqual(1, result.Data.TotalEvents);
+        }
+        finally
+        {
+            TryDeleteDir(cacheDir);
+        }
+    }
+
+    [TestMethod]
+    public void Members_IncludeAll_InlinesInheritedMembersWithSignatures()
+    {
+        // --all is the escape hatch: it must still produce the complete listing, with
+        // inherited members inline and attributed to their declaring type.
+        string cacheDir = NewCacheDir();
+        try
+        {
+            ProjectManifest manifest = BuildInheritanceCache(cacheDir);
+
+            var result = ApiQueryEngine.Members("Inh.Ns.Leaf", filter: null, cacheDir, manifest, includeAll: true);
+
+            Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+            Assert.IsNull(result.Data!.Inherited, "--all inlines inherited members instead of summarizing them");
+            var names = result.Data.Properties.Select(p => p.Name).ToList();
+            CollectionAssert.Contains(names, "Own");
+            CollectionAssert.Contains(names, "FromMiddle");
+            CollectionAssert.Contains(names, "FromRoot");
+
+            var fromRoot = result.Data.Properties.Single(p => p.Name == "FromRoot");
+            Assert.AreEqual("Inh.Ns.Root", fromRoot.DeclaringType);
+            Assert.IsTrue(fromRoot.Inherited);
+            Assert.AreEqual("The FromRoot.", fromRoot.Description);
+        }
+        finally
+        {
+            TryDeleteDir(cacheDir);
+        }
+    }
+
+    [TestMethod]
+    public void Members_Filter_ReachesInheritedMembersWithSignatures()
+    {
+        // The summary is only useful if the detail is one targeted query away.
+        string cacheDir = NewCacheDir();
+        try
+        {
+            ProjectManifest manifest = BuildInheritanceCache(cacheDir);
+
+            var result = ApiQueryEngine.Members("Inh.Ns.Leaf", "fromroot", cacheDir, manifest);
+
+            Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+            Assert.IsNull(result.Data!.Inherited);
+            var match = result.Data.Properties.Single();
+            Assert.AreEqual("FromRoot", match.Name);
+            Assert.AreEqual("Inh.Ns.Root", match.DeclaringType);
+            Assert.AreEqual("The FromRoot.", match.Description);
+        }
+        finally
+        {
+            TryDeleteDir(cacheDir);
+        }
+    }
+
+    [TestMethod]
+    public void Members_Unfiltered_OmitsRedundantKindAndReturnType()
+    {
+        // kind is already stated by the array the entry sits in, and returnType is the
+        // leading token of the signature. Together they measured ~26% of the payload,
+        // repeated once per member.
+        string cacheDir = NewCacheDir();
+        try
+        {
+            ProjectManifest manifest = BuildInheritanceCache(cacheDir);
+
+            var result = ApiQueryEngine.Members("Inh.Ns.Leaf", filter: null, cacheDir, manifest);
+
+            var own = result.Data!.Properties.Single();
+            Assert.IsNull(own.Kind);
+            Assert.IsNull(own.ReturnType);
+            Assert.IsNull(own.Inherited, "a declared member carries no inherited flag");
+            Assert.IsNull(own.DeclaringType, "a declared member carries no declaringType");
+        }
+        finally
+        {
+            TryDeleteDir(cacheDir);
+        }
+    }
+
+    [TestMethod]
+    public void CheckProperty_StillReportsMemberKind()
+    {
+        // check-property returns a single member that is not grouped by kind, so the
+        // kind is real information there and must survive the members-listing trim.
+        var result = ApiQueryEngine.CheckProperty("My.Ns.Widget", "Color", _cacheDir, _manifest);
+
+        Assert.IsTrue(result.Data!.Found);
+        Assert.AreEqual(nameof(MemberKind.Property), result.Data.Match!.Kind);
+    }
+
+    #endregion
+
     #region Generic type resolution
 
     /// <summary>

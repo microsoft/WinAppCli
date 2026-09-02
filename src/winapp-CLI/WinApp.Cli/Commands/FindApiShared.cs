@@ -364,9 +364,11 @@ internal static class FindApiShared
         }
         console.WriteLine();
 
-        WriteMemberGroup(console, "Properties:", output.Properties);
-        WriteMemberGroup(console, "Events:", output.Events);
-        WriteMemberGroup(console, "Methods:", output.Methods);
+        WriteMemberGroup(console, "Properties:", output.Properties, MemberKind.Property);
+        WriteMemberGroup(console, "Events:", output.Events, MemberKind.Event);
+        WriteMemberGroup(console, "Methods:", output.Methods, MemberKind.Method);
+
+        WriteInheritedGroups(console, output);
 
         WriteTrimNote(console, output);
 
@@ -375,7 +377,7 @@ internal static class FindApiShared
             // Distinguish a filter miss from a type with no members. Rendering nothing at
             // all reads as "this type does not exist", which is the wrong conclusion to
             // hand an agent that is deciding whether to use the API.
-            console.WriteLine(output.Filter is not null ? "  (no members match the filter)" : "  (no members)");
+            console.WriteLine(output.Filter is not null ? "  (no members match the filter)" : "  (no declared members)");
             console.WriteLine();
         }
 
@@ -388,13 +390,49 @@ internal static class FindApiShared
     }
 
     /// <summary>
+    /// Lists inherited members by name under the base type that declares them. An
+    /// unfiltered listing summarizes them this way instead of inlining their signatures,
+    /// which for a WinUI control is almost the entire payload.
+    /// </summary>
+    private static void WriteInheritedGroups(IAnsiConsole console, ApiMembersOutput output)
+    {
+        if (output.Inherited is not { Count: > 0 })
+        {
+            return;
+        }
+
+        int total = output.Inherited.Sum(g =>
+            (g.Properties?.Count ?? 0) + (g.Events?.Count ?? 0) + (g.Methods?.Count ?? 0));
+        console.WriteLine($"  Inherited ({total} member(s) from {output.Inherited.Count} base type(s), names only):");
+        foreach (ApiInheritedMemberGroup group in output.Inherited)
+        {
+            console.WriteLine($"    {group.DeclaringType}");
+            WriteNames(console, "Properties", group.Properties);
+            WriteNames(console, "Events", group.Events);
+            WriteNames(console, "Methods", group.Methods);
+        }
+        console.WriteLine();
+
+        static void WriteNames(IAnsiConsole console, string heading, List<string>? names)
+        {
+            if (names is not { Count: > 0 })
+            {
+                return;
+            }
+            console.WriteLine($"      {heading}: {string.Join(", ", names)}");
+        }
+    }
+
+    /// <summary>
     /// States what an unfiltered listing left out. Without this the trim is invisible,
     /// and a caller who does not see <c>BackgroundProperty</c> could reasonably conclude
     /// the type has no such identifier rather than that it was hidden.
     /// </summary>
     private static void WriteTrimNote(IAnsiConsole console, ApiMembersOutput output)
     {
-        if (output.HiddenDependencyProperties is not > 0 && output.DescriptionsOmitted is not true)
+        if (output.HiddenDependencyProperties is not > 0
+            && output.DescriptionsOmitted is not true
+            && output.Inherited is not { Count: > 0 })
         {
             return;
         }
@@ -408,13 +446,17 @@ internal static class FindApiShared
         {
             parts.Add("member descriptions");
         }
+        if (output.Inherited is { Count: > 0 })
+        {
+            parts.Add("inherited member signatures");
+        }
 
-        console.WriteLine($"  Omitted: {string.Join(" and ", parts)}.");
+        console.WriteLine($"  Omitted: {string.Join(", ", parts)}.");
         console.WriteLine("  Use --filter <text> to search the full surface, or --all to list it in full.");
         console.WriteLine();
     }
 
-    private static void WriteMemberGroup(IAnsiConsole console, string heading, List<ApiMemberOutput> members)
+    private static void WriteMemberGroup(IAnsiConsole console, string heading, List<ApiMemberOutput> members, MemberKind kind)
     {
         if (members.Count == 0)
         {
@@ -423,17 +465,21 @@ internal static class FindApiShared
         console.WriteLine($"  {heading}");
         foreach (ApiMemberOutput member in members)
         {
-            WriteMember(console, member, "    ");
+            WriteMember(console, member, "    ", kind);
         }
         console.WriteLine();
     }
 
-    private static void WriteMember(IAnsiConsole console, ApiMemberOutput member, string indent)
+    private static void WriteMember(IAnsiConsole console, ApiMemberOutput member, string indent, MemberKind? kind = null)
     {
         string deprecatedPrefix = member.Deprecated is not null ? "\U0001f6ab " : "";
         string desc = member.Description is not null ? $" \u2014 {member.Description}" : "";
         string suffix = member is { Inherited: true, DeclaringType: not null } ? $"  (from {member.DeclaringType})" : "";
-        string text = member.Kind == nameof(MemberKind.Event) ? member.Name : member.Signature;
+        // An event's signature is 'event <HandlerType> <Name>', which reads worse than
+        // the bare name. The kind comes from the group being rendered, because an
+        // unfiltered listing omits the per-member kind as redundant.
+        bool isEvent = kind == MemberKind.Event || member.Kind == nameof(MemberKind.Event);
+        string text = isEvent ? member.Name : member.Signature;
         console.WriteLine($"{indent}{deprecatedPrefix}{text}{desc}{suffix}");
         if (member.Deprecated is not null)
         {
