@@ -398,6 +398,21 @@ internal sealed partial class UiAutomationService : IUiAutomation
 
         var mainResults = new List<UiElement>();
 
+        // A slug names exactly one element, and every branch below matches on Query only - so
+        // without this a valid slug silently returns nothing. Resolve it the same way
+        // FindSingleElementAsync does and return zero or one result.
+        if (selector.IsSlug)
+        {
+            var slugMatch = FindElementBySlug(selector.Slug!, root);
+            if (slugMatch is null)
+            {
+                return Task.FromResult<UiElement[]>([]);
+            }
+
+            slugMatch.WindowHandle = uiTarget.WindowHandle;
+            return Task.FromResult<UiElement[]>(maxResults > 0 ? [slugMatch] : []);
+        }
+
         // Try exact AutomationId match first (some UIA providers don't support substring matching on AutomationId)
         if (selector.Query is not null)
         {

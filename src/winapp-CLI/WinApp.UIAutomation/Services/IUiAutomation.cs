@@ -49,10 +49,10 @@ public interface IUiAutomation
 
     /// <summary>Finds every element matching <paramref name="selector"/>, up to <paramref name="maxResults"/>.</summary>
     /// <param name="uiTarget">The app or window to search.</param>
-    /// <param name="selector">What to match.</param>
+    /// <param name="selector">What to match. A slug names one element, so it yields at most one result.</param>
     /// <param name="maxResults">Caps how many matches are returned.</param>
     /// <param name="ct">Cancels the search.</param>
-    /// <returns>The matching elements.</returns>
+    /// <returns>The matching elements, or an empty array when nothing matched.</returns>
     Task<UiElement[]> SearchAsync(UiTarget uiTarget, UiSelector selector, int maxResults, CancellationToken ct);
 
     /// <summary>Finds the one element matching <paramref name="selector"/>.</summary>

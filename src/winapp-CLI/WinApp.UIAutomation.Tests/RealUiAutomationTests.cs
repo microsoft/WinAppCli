@@ -388,6 +388,40 @@ public partial class RealUiAutomationTests
     }
 
     [TestMethod]
+    public async Task SearchAsync_BySlug_ResolvesElement()
+    {
+        // A slug is a valid selector, but every branch of the search matches on Query, so one used to
+        // come back empty even when the element existed -- `winapp ui search <slug>` found nothing.
+        using var fx = new UiaTestFixture();
+        var svc = NewService();
+        var uiTarget = SessionFor(fx);
+        await ResolveAsync(svc, uiTarget, "lstItems");
+        var tree = await svc.InspectAsync(uiTarget, "lstItems", 2, CancellationToken.None);
+        var item = tree.First(e => e.Type == "ListItem" && e.Name == "Item 07");
+        Assert.IsNotNull(item.Selector);
+
+        var results = await svc.SearchAsync(uiTarget, new UiSelector { Slug = item.Selector }, 10, CancellationToken.None);
+
+        Assert.AreEqual(1, results.Length, "a slug names exactly one element");
+        Assert.AreEqual("Item 07", results[0].Name);
+        Assert.AreEqual(fx.Hwnd, (nint)results[0].WindowHandle!.Value);
+    }
+
+    [TestMethod]
+    public async Task SearchAsync_BySlug_NoMatch_ReturnsEmpty()
+    {
+        using var fx = new UiaTestFixture();
+        var svc = NewService();
+        var uiTarget = SessionFor(fx);
+        await ResolveAsync(svc, uiTarget, "btnInvoke");
+
+        var results = await svc.SearchAsync(
+            uiTarget, new UiSelector { Slug = "btn-definitely-missing-0000" }, 10, CancellationToken.None);
+
+        Assert.AreEqual(0, results.Length);
+    }
+
+    [TestMethod]
     public async Task FindSingleElementAsync_NotFound_ReturnsNull()
     {
         using var fx = new UiaTestFixture();
