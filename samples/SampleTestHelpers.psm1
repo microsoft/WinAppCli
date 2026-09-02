@@ -186,6 +186,66 @@ function Test-Prerequisite {
 }
 
 # ============================================================================
+# Network Retry Helpers
+# ============================================================================
+
+function Invoke-WithRetry {
+    <#
+    .SYNOPSIS
+    Runs a script block that shells out to a network-dependent tool, retrying
+    while it reports failure.
+
+    .DESCRIPTION
+    Sample tests download from npm and from GitHub releases, and both fail
+    intermittently in CI for reasons that have nothing to do with winapp — a
+    dropped connection surfaces as 'TypeError: fetch failed' and a nonzero exit
+    code. Treating the first failure as a test failure reports a winapp
+    regression that is not one.
+
+    The script block is responsible for running the command; this returns $true
+    as soon as the block leaves $LASTEXITCODE at 0, and $false if every attempt
+    failed. Waits longer between each attempt, since an immediate retry tends to
+    hit whatever transient condition failed the first one.
+
+    .PARAMETER ScriptBlock
+    The command to run. Must set $LASTEXITCODE, i.e. call a native executable.
+
+    .PARAMETER MaxAttempts
+    How many times to run it before giving up.
+
+    .PARAMETER OperationName
+    Used in the progress messages so a CI log says which download is retrying.
+
+    .PARAMETER OnRetry
+    Optional cleanup run before each retry, e.g. removing a partial download.
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [scriptblock]$ScriptBlock,
+
+        [int]$MaxAttempts = 3,
+
+        [string]$OperationName = "command",
+
+        [scriptblock]$OnRetry
+    )
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        if ($attempt -gt 1) {
+            $delay = 5 * ($attempt - 1)
+            Write-Host "$OperationName failed (attempt $($attempt - 1) of $MaxAttempts). Retrying in ${delay}s..."
+            if ($OnRetry) { & $OnRetry }
+            Start-Sleep -Seconds $delay
+        }
+        & $ScriptBlock
+        if ($LASTEXITCODE -eq 0) {
+            return $true
+        }
+    }
+    Write-Host "$OperationName failed after $MaxAttempts attempts."
+    return $false
+}
+
+# ============================================================================
 # Temp Directory Helpers
 # ============================================================================
 
@@ -230,6 +290,7 @@ Export-ModuleMember -Function @(
     'Install-WinappNpmPackage'
     'Install-WinappGlobal'
     'Test-Prerequisite'
+    'Invoke-WithRetry'
     'New-TempTestDirectory'
     'Remove-TempTestDirectory'
 )
