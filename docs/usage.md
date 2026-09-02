@@ -1006,6 +1006,11 @@ registration came from that file and will skip it — use `winapp unregister --p
 registrations whose files are gone, or `--force` to remove a specific one anyway. If the run used
 `--output-appx-directory`, pass the same directory to `unregister` so it can recognize the layout.
 
+The same applies to a custom output path: ownership is confirmed from the SDK's standard
+`<root>\bin\<configuration>` layout, so a run built with `-p OutputPath=<somewhere-else>` cannot be
+matched to its source file. `unregister` skips it rather than guessing at a wider directory — name the
+layout with `--output-appx-directory`, or use `--force`.
+
 **Single-file examples:**
 
 ```bash

@@ -114,6 +114,63 @@ public class ProjectRunServiceSingleFileTests : IDisposable
 
     #endregion
 
+    #region Build-root ownership
+
+    /// <summary>
+    /// Drives <c>ResolveSingleFileIdentityAsync</c> with a canned evaluate result so the build root it
+    /// infers from <c>OutputPath</c> can be asserted without running MSBuild.
+    /// </summary>
+    private async Task<string?> ResolveBuildRootAsync(string outputPath)
+    {
+        var singleFile = WriteSingleFile();
+        var escaped = outputPath.Replace("\\", "\\\\");
+        var evaluateResult = (0, "{\"Properties\": {\"OutputPath\": \"" + escaped + "\", \"WindowsPackageType\": \"MSIX\"}}", string.Empty);
+        var dotnet = new FakeDotNetService
+        {
+            // The evaluate goes through the string overload; the RID probe uses the argument-list one.
+            // Both answer with the same evaluated properties, exactly as one project would.
+            RunDotnetCommandHandler = _ => evaluateResult,
+            RunDotnetArgumentListHandler = _ => evaluateResult,
+        };
+        var service = new ProjectRunService(
+            dotnet,
+            new ProjectDetectionService(NullLogger<ProjectDetectionService>.Instance, dotnet),
+            new FakeCsWinRTMetadataShimService(),
+            _testConsole,
+            NullLogger<ProjectRunService>.Instance);
+
+        var resolution = await service.ResolveSingleFileIdentityAsync(
+            singleFile, SingleFileIdentityInputs.Default, TestContext.CancellationToken);
+
+        return resolution.BuildRootDirectory;
+    }
+
+    [TestMethod]
+    public async Task ResolveIdentity_StandardBinLayout_InfersTheBuildRoot()
+    {
+        // The SDK's own layout: %TEMP%\dotnet\runfile\<stem>-<hash>\bin\debug. Two levels up is the
+        // per-file root that proves a registration came from THIS .cs.
+        var root = await ResolveBuildRootAsync(@"C:\Temp\dotnet\runfile\counter-abc\bin\debug\");
+
+        Assert.AreEqual(@"C:\Temp\dotnet\runfile\counter-abc", root);
+    }
+
+    [TestMethod]
+    [DataRow(@"C:\apps\B\out\", DisplayName = "custom OutputPath with no bin segment")]
+    [DataRow(@"C:\apps\B\", DisplayName = "OutputPath directly under a project folder")]
+    public async Task ResolveIdentity_NonBinLayout_InfersNoBuildRoot(string outputPath)
+    {
+        // This value becomes a TRUSTED ROOT for removing a registration and its app data, so an
+        // unverified shape must not produce one. '-p OutputPath=C:\apps\B\out' would otherwise reduce to
+        // 'C:\apps', and `winapp unregister B\counter.cs` could then delete a same-identity registration
+        // belonging to 'C:\apps\A'. With no root the caller falls back to identity alone.
+        var root = await ResolveBuildRootAsync(outputPath);
+
+        Assert.IsNull(root, "An unverified layout must not widen the ownership root");
+    }
+
+    #endregion
+
     #region Argument construction
 
     private static SingleFileRunOptions Options(

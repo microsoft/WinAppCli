@@ -379,9 +379,14 @@ internal sealed partial class ProjectRunService
     /// <remarks>
     /// Trimming the <c>bin\&lt;config&gt;[_&lt;rid&gt;]</c> tail is what makes the check independent of
     /// configuration and architecture: <c>bin\debug</c> and <c>bin\release_win-arm64</c> share a root, so
-    /// a package registered by <c>winapp run app.cs -c Release</c> is still recognized here. Returns
-    /// <see langword="null"/> when the shape is unexpected, and the caller then falls back to identity
-    /// alone rather than refusing to unregister.
+    /// a package registered by <c>winapp run app.cs -c Release</c> is still recognized here.
+    /// <para>
+    /// The <c>bin</c> segment is VERIFIED rather than assumed, because this value becomes a trusted root
+    /// for removing a registration and its app data. A custom <c>-p OutputPath=C:\apps\B\out</c> would
+    /// otherwise reduce to <c>C:\apps</c>, and <c>winapp unregister B\counter.cs</c> could then accept and
+    /// delete a same-identity registration under <c>C:\apps\A</c>. Returning <see langword="null"/> makes
+    /// the caller fall back to identity alone rather than trusting an over-wide directory.
+    /// </para>
     /// </remarks>
     private static string? ResolveSingleFileBuildRoot(IReadOnlyDictionary<string, string> props)
     {
@@ -400,7 +405,13 @@ internal sealed partial class ProjectRunService
         // separator, which would otherwise cost one level of the walk.
         var current = Path.GetFullPath(outputPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var binDirectory = Path.GetDirectoryName(current);
-        var buildRoot = binDirectory is null ? null : Path.GetDirectoryName(binDirectory);
+        if (binDirectory is null ||
+            !string.Equals(Path.GetFileName(binDirectory), "bin", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var buildRoot = Path.GetDirectoryName(binDirectory);
         return string.IsNullOrEmpty(buildRoot) ? null : buildRoot;
     }
 
