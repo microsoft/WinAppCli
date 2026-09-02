@@ -100,6 +100,57 @@ public sealed class ApiMetadataServiceTests
         File.WriteAllText(Path.Combine(_projectsDir, (fileName ?? name) + ".json"), JsonSerializer.Serialize(manifest, ApiSearchJsonContext.Default.ProjectManifest));
     }
 
+    /// <summary>
+    /// Records whether the indexing work actually ran. An index pass always ends up
+    /// asking for the SDK packages, so this is a precise witness for "did the pass
+    /// happen" that does not depend on real packages being on the machine.
+    /// </summary>
+    private sealed class RecordingSdkPackageSource : ISdkPackageSource
+    {
+        public int Calls { get; private set; }
+
+        public List<PackageWithWinMd> GetSdkPackages()
+        {
+            Calls++;
+            return [];
+        }
+    }
+
+    [TestMethod]
+    public void RunIndexWithLock_LockReleasedWhileWaiting_StillIndexes()
+    {
+        // The cache directory is shared by every project, so a process holding the
+        // lock is very likely indexing a *different* project. Waiting for it and then
+        // returning leaves this caller's project unindexed, and the query goes on to
+        // answer from a cache that was never asked to include it. After the wait, the
+        // lock has to be taken and the index pass actually run.
+        string cacheDir = Path.Combine(_globalDir, "cache", "find-api");
+        Directory.CreateDirectory(cacheDir);
+        string lockPath = Path.Combine(cacheDir, ".lock");
+
+        var sdkPackages = new RecordingSdkPackageSource();
+        var held = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        var releaser = Task.Run(async () =>
+        {
+            // Long enough that the first acquisition attempt fails, short enough that
+            // the retry loop (which polls once a second) picks it up promptly.
+            await Task.Delay(1500);
+            held.Dispose();
+        });
+
+        try
+        {
+            CreateService(sdkPackages).RunIndexWithLock(_currentDir, cacheDir);
+        }
+        finally
+        {
+            releaser.Wait();
+            held.Dispose();
+        }
+
+        Assert.AreEqual(1, sdkPackages.Calls);
+    }
+
     [TestMethod]
     public void Query_NoIndexAndNoSdk_ReportsSdkUnavailable()
     {

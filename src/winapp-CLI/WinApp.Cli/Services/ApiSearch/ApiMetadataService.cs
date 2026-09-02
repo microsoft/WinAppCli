@@ -431,40 +431,35 @@ internal sealed class ApiMetadataService(
 
     /// <summary>
     /// Runs an index pass under the cache lock. Returns an error message when the
-    /// index failed, or <c>null</c> when it succeeded (or when another process is
-    /// already indexing, which is not this caller's failure).
+    /// index failed, or <c>null</c> when it succeeded (or when another process held
+    /// the lock for the whole wait, which is not this caller's failure).
     /// </summary>
-    private string? RunIndexWithLock(string projectDir, string cacheDir)
+    internal string? RunIndexWithLock(string projectDir, string cacheDir)
     {
         Directory.CreateDirectory(cacheDir);
         string lockPath = Path.Combine(cacheDir, ".lock");
 
-        FileStream lockFile;
-        try
-        {
-            lockFile = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-        }
-        catch (IOException)
+        FileStream? lockFile = TryAcquireIndexLock(lockPath);
+        if (lockFile is null)
         {
             // Another winapp process holds the lock and is indexing the same cache.
-            // Wait briefly for it to finish, then fall through to querying whatever
-            // is on disk. This contention path must NOT wrap the indexing work
-            // below, or a genuine I/O failure during Refresh would be misreported
-            // as lock contention (and trigger a needless 30s wait).
+            // Wait for it to finish and then take the lock ourselves: the cache is
+            // shared by every project, so the other process is very likely indexing
+            // a different one and returning here would leave this caller's project
+            // unindexed.
             logger.LogInformation("API metadata cache is being indexed by another process, waiting…");
-            for (int i = 0; i < 30; i++)
+            for (int i = 0; i < 30 && lockFile is null; i++)
             {
                 Thread.Sleep(1000);
-                try
-                {
-                    using var probe = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-                    break;
-                }
-                catch (IOException)
-                {
-                }
+                lockFile = TryAcquireIndexLock(lockPath);
             }
-            return null;
+            if (lockFile is null)
+            {
+                // Still held after the wait. Fall through to querying whatever is on
+                // disk rather than failing — the other process may well have indexed
+                // what this query needs.
+                return null;
+            }
         }
 
         using (lockFile)
@@ -492,6 +487,23 @@ internal sealed class ApiMetadataService(
             }
         }
         return null;
+    }
+
+    /// <summary>
+    /// Takes the cache lock, or returns <see langword="null"/> when another process
+    /// holds it. Only the acquisition is guarded, so a genuine I/O failure during the
+    /// indexing work itself is never misreported as lock contention.
+    /// </summary>
+    private static FileStream? TryAcquireIndexLock(string lockPath)
+    {
+        try
+        {
+            return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        }
+        catch (IOException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
