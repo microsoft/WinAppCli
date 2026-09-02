@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
 using WinApp.Cli.Helpers;
+using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Services.ApiSearch;
 
@@ -34,6 +35,16 @@ internal static partial class NuGetResolver
             {
                 packages.AddRange(FindPackagesFromConfig(configPath, projectDir));
             }
+        }
+
+        // A project with no MSBuild project file — an Electron or other non-.NET app
+        // driven by winapp.yaml — has no project.assets.json to read. `winapp restore`
+        // records the same information for it in .winapp/winmds.lock.json, so read that
+        // instead. Without this the project indexes to nothing and every query typed in
+        // it reports the API surface as absent.
+        if (packages.Count == 0)
+        {
+            packages.AddRange(FindPackagesFromWinmdsLockfile(projectDir));
         }
 
         packages.AddRange(FindWinMdFromProjectReferences(projectFile));
@@ -351,6 +362,24 @@ internal static partial class NuGetResolver
         return packages;
     }
 
+    /// <summary>
+    /// The file whose modification time says when a project was last restored, and
+    /// therefore when its index went stale: <c>project.assets.json</c> for an MSBuild
+    /// project, or <c>.winapp/winmds.lock.json</c> for a project driven by
+    /// <c>winapp.yaml</c> alone. Null when the project has never been restored, which
+    /// is what tells callers there is nothing to index yet.
+    /// </summary>
+    internal static string? FindRestoreOutput(string projectDir)
+    {
+        string? assetsPath = FindProjectAssetsJson(projectDir);
+        if (assetsPath is not null)
+        {
+            return assetsPath;
+        }
+        string lockfilePath = Path.Combine(projectDir, ".winapp", WinmdsLockfileService.LockfileName);
+        return File.Exists(lockfilePath) ? lockfilePath : null;
+    }
+
     internal static string? FindProjectAssetsJson(string projectDir)
     {
         string direct = Path.Combine(projectDir, "obj", "project.assets.json");
@@ -564,6 +593,102 @@ internal static partial class NuGetResolver
         }
         string[] prefixes = { "System.", "Microsoft.NETCore.", "Microsoft.NET.", "runtime.", "Microsoft.Build.", "Microsoft.CodeAnalysis.", "Microsoft.DiaSymReader." };
         return prefixes.Any(prefix => packageId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// The metadata packages recorded in <c>.winapp/winmds.lock.json</c>, which
+    /// <c>winapp restore</c> writes for projects that have no MSBuild project file
+    /// (Electron and other non-.NET apps driven by <c>winapp.yaml</c>). The lockfile
+    /// already stores exactly what the indexer needs: a package id, its resolved
+    /// version, and the absolute paths of its <c>.winmd</c> files.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <c>project.assets.json</c>, the lockfile names no target framework, so
+    /// there is nothing to judge a package out-of-target against — every entry it
+    /// lists is on the compile surface by construction. A stale lockfile pointing at
+    /// files that no longer exist contributes nothing rather than failing the resolve.
+    /// </remarks>
+    internal static List<PackageWithWinMd> FindPackagesFromWinmdsLockfile(string projectDir)
+    {
+        var packages = new List<PackageWithWinMd>();
+        string winappDir = Path.Combine(projectDir, ".winapp");
+        string lockfilePath = Path.Combine(winappDir, WinmdsLockfileService.LockfileName);
+        if (!File.Exists(lockfilePath) || !IsProbeablePath(lockfilePath))
+        {
+            return packages;
+        }
+
+        try
+        {
+            WinmdsLockfile? lockfile = JsonSerializer.Deserialize(
+                File.ReadAllText(lockfilePath),
+                WinmdsLockfileJsonContext.Default.WinmdsLockfile);
+
+            // A lockfile from a different schema describes a shape this code has not
+            // agreed to read. Ignoring it leaves the project unindexed, which reports
+            // honestly, rather than half-reading it and answering from a partial surface.
+            if (lockfile is null || lockfile.Schema != WinmdsLockfile.CurrentSchema)
+            {
+                return packages;
+            }
+
+            foreach (WinmdsLockfilePackage package in lockfile.Packages)
+            {
+                if (string.IsNullOrEmpty(package.Name) || string.IsNullOrEmpty(package.Version)
+                    || IsFrameworkPackage(package.Name))
+                {
+                    continue;
+                }
+
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var files = package.Winmds
+                    .Where(winmd => IsProbeablePath(winmd) && File.Exists(winmd))
+                    .Where(winmd => seen.Add(Path.GetFileName(winmd)))
+                    .ToList();
+                if (files.Count == 0)
+                {
+                    continue;
+                }
+
+                var xmlDocs = files
+                    .Select(winmd => FindPackageRootForWinMd(winmd, package.Version))
+                    .Where(root => root is not null)
+                    .Select(root => root!)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .SelectMany(FindXmlDocsInPackageFolder)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                packages.Add(new PackageWithWinMd(package.Name, package.Version, files, xmlDocs));
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            // An unreadable or malformed lockfile yields no packages rather than
+            // failing the whole resolve, matching the packages.config path above.
+        }
+
+        return packages;
+    }
+
+    /// <summary>
+    /// The NuGet package root directory containing a <c>.winmd</c>, found by walking up
+    /// until a directory named for the package version — the <c>{id}/{version}/…</c>
+    /// cache layout. Null when the file does not sit under that layout, in which case
+    /// there is no package folder to look for XML docs in.
+    /// </summary>
+    private static string? FindPackageRootForWinMd(string winmdPath, string version)
+    {
+        DirectoryInfo? dir = Directory.GetParent(winmdPath);
+        for (int depth = 0; dir is not null && depth < 8; depth++)
+        {
+            if (dir.Name.Equals(version, StringComparison.OrdinalIgnoreCase))
+            {
+                return dir.FullName;
+            }
+            dir = dir.Parent;
+        }
+        return null;
     }
 
     internal static List<PackageWithWinMd> FindPackagesFromConfig(string configPath, string projectDir)

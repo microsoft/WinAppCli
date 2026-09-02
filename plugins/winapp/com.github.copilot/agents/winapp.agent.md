@@ -284,6 +284,8 @@ Need to know whether a Windows/WinRT API exists, or what a type/enum actually of
 - `find-api packages` / `find-api stats` — show indexed packages / index statistics for the project.
 - `find-api refresh [--scan] [--project <name>]` — rebuild the API index for the project (forces a full re-index).
 
+Works in .NET/C++ projects (from `project.assets.json`) and in Electron or other non-MSBuild apps driven by `winapp.yaml` (from the `.winapp/winmds.lock.json` that `winapp restore` writes). Either way the project must be restored first.
+
 **Batch your lookups.** `search`, `members`, `enums`, and `check-property` each accept
 multiple subjects in one invocation. Cost is dominated by the number of calls, not the
 size of the answer, so verify everything you're unsure about in a single call

@@ -103,4 +103,101 @@ public sealed class ApiCacheBuilderTests
         File.WriteAllText(winmd, content);
         return new PackageWithWinMd(id, version, [winmd], []);
     }
+
+    #region winapp.yaml project discovery
+
+    private string NewProjectDir(string name)
+    {
+        string dir = Path.Combine(_dir, name);
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
+
+    [TestMethod]
+    public void DiscoverProjectFiles_FindsWinappYamlWhenThereIsNoMsBuildProject()
+    {
+        // An Electron app has no .csproj. Without this it discovers no project at all,
+        // indexes nothing, and every query typed in it reports the API surface as absent.
+        string dir = NewProjectDir("my-electron-app");
+        File.WriteAllText(Path.Combine(dir, "winapp.yaml"), "packages: []");
+
+        List<string> found = ApiCacheBuilder.DiscoverProjectFiles(dir, scan: false);
+
+        Assert.HasCount(1, found);
+        Assert.EndsWith("winapp.yaml", found[0]);
+    }
+
+    [TestMethod]
+    public void DiscoverProjectFiles_PrefersTheMsBuildProjectOverWinappYaml()
+    {
+        // A .NET project may use winapp.yaml for its SDK packages. Its .csproj is the
+        // more precise description of what it compiles against, and indexing both would
+        // index the same directory twice under two names.
+        string dir = NewProjectDir("dotnet-app");
+        File.WriteAllText(Path.Combine(dir, "winapp.yaml"), "packages: []");
+        File.WriteAllText(Path.Combine(dir, "App.csproj"), "<Project />");
+
+        List<string> found = ApiCacheBuilder.DiscoverProjectFiles(dir, scan: false);
+
+        Assert.HasCount(1, found);
+        Assert.EndsWith("App.csproj", found[0]);
+    }
+
+    [TestMethod]
+    public void DiscoverProjectFiles_Scan_PrefersTheMsBuildProjectOverWinappYaml()
+    {
+        string dir = NewProjectDir("scanned");
+        string app = Path.Combine(dir, "app");
+        Directory.CreateDirectory(app);
+        File.WriteAllText(Path.Combine(app, "winapp.yaml"), "packages: []");
+        File.WriteAllText(Path.Combine(app, "App.csproj"), "<Project />");
+
+        List<string> found = ApiCacheBuilder.DiscoverProjectFiles(dir, scan: true);
+
+        Assert.HasCount(1, found);
+        Assert.EndsWith("App.csproj", found[0]);
+    }
+
+    [TestMethod]
+    public void DiscoverProjectFiles_Scan_SkipsWinappYamlUnderNodeModules()
+    {
+        string dir = NewProjectDir("with-deps");
+        string nested = Path.Combine(dir, "node_modules", "some-package");
+        Directory.CreateDirectory(nested);
+        File.WriteAllText(Path.Combine(nested, "winapp.yaml"), "packages: []");
+        File.WriteAllText(Path.Combine(dir, "winapp.yaml"), "packages: []");
+
+        List<string> found = ApiCacheBuilder.DiscoverProjectFiles(dir, scan: true);
+
+        Assert.HasCount(1, found);
+        Assert.AreEqual(Path.Combine(dir, "winapp.yaml"), found[0]);
+    }
+
+    [TestMethod]
+    public void ProjectNameFor_WinappYaml_UsesTheDirectoryName()
+    {
+        // "winapp" is the file's own stem, so it would name every such project
+        // identically. The directory is the app's name.
+        string dir = NewProjectDir("my-electron-app");
+        string projectFile = Path.Combine(dir, "winapp.yaml");
+
+        Assert.AreEqual("my-electron-app", ApiCacheBuilder.ProjectNameFor(projectFile));
+    }
+
+    [TestMethod]
+    public void ProjectNameFor_MsBuildProject_StillUsesTheFileName()
+    {
+        Assert.AreEqual("App", ApiCacheBuilder.ProjectNameFor(Path.Combine(_dir, "App.csproj")));
+    }
+
+    [TestMethod]
+    public void FindProjectNameInDir_FindsAWinappYamlProject()
+    {
+        string dir = NewProjectDir("my-electron-app");
+        File.WriteAllText(Path.Combine(dir, "winapp.yaml"), "packages: []");
+
+        Assert.AreEqual("my-electron-app", ApiCacheBuilder.FindProjectNameInDir(dir));
+    }
+
+    #endregion
 }

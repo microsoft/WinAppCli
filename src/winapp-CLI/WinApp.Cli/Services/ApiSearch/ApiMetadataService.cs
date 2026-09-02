@@ -287,7 +287,7 @@ internal sealed class ApiMetadataService(
             return null;
         }
 
-        if (NuGetResolver.FindProjectAssetsJson(projectDir) is null)
+        if (NuGetResolver.FindRestoreOutput(projectDir) is null)
         {
             return null;
         }
@@ -340,8 +340,8 @@ internal sealed class ApiMetadataService(
             {
                 continue;
             }
-            string? assetsPath = NuGetResolver.FindProjectAssetsJson(dir);
-            if (assetsPath is not null && File.GetLastWriteTimeUtc(assetsPath) > lastIndexed)
+            string? restoreOutput = NuGetResolver.FindRestoreOutput(dir);
+            if (restoreOutput is not null && File.GetLastWriteTimeUtc(restoreOutput) > lastIndexed)
             {
                 return true;
             }
@@ -363,9 +363,9 @@ internal sealed class ApiMetadataService(
         {
             return true;
         }
-        string? assetsPath = NuGetResolver.FindProjectAssetsJson(projectDir);
-        if (assetsPath is not null
-            && File.GetLastWriteTimeUtc(assetsPath) > File.GetLastWriteTimeUtc(manifestPath))
+        string? restoreOutput = NuGetResolver.FindRestoreOutput(projectDir);
+        if (restoreOutput is not null
+            && File.GetLastWriteTimeUtc(restoreOutput) > File.GetLastWriteTimeUtc(manifestPath))
         {
             return true;
         }
@@ -612,7 +612,8 @@ internal sealed class ApiMetadataService(
                 // project specifically, and its NuGet packages would be missing — and
                 // do NOT fall back to a same-named manifest from another directory.
                 string available = AvailableProjects(files);
-                return ResolvedScope.Failed($"No indexed API metadata was found for '{fullPath}'. Restore the project (so 'project.assets.json' exists), " +
+                return ResolvedScope.Failed($"No indexed API metadata was found for '{fullPath}'. Restore it first " +
+                    "('winapp restore', or 'dotnet restore' for a .NET project without winapp.yaml), " +
                     $"then run 'winapp find-api refresh' in that directory.{(available.Length == 0 ? "" : $" Indexed projects: {available}.")}");
             }
 
@@ -779,7 +780,8 @@ internal sealed class ApiMetadataService(
     }
 
     private const string NoProjectMessage =
-        "No indexed API metadata was found for this project. Restore the project (so 'project.assets.json' exists), " +
+        "No indexed API metadata was found for this project. Restore it first " +
+        "('winapp restore', or 'dotnet restore' for a .NET project without winapp.yaml), " +
         "then run 'winapp find-api refresh' in the project directory to build the API index.";
 
     private const string NoSdkMessage =

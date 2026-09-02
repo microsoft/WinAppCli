@@ -566,4 +566,135 @@ public sealed class NuGetResolverTests
     {
         Assert.AreEqual("SomethingElse", NuGetResolver.RuntimeReleaseLabel("SomethingElse"));
     }
+
+    #region winapp.yaml projects (Electron and other non-MSBuild apps)
+
+    /// <summary>
+    /// Lays out a project that has no MSBuild project file: <c>winapp.yaml</c> plus the
+    /// <c>.winapp/winmds.lock.json</c> that <c>winapp restore</c> writes, with the named
+    /// package's <c>.winmd</c> files staged under a NuGet-cache-shaped folder so the
+    /// resolver's XML-doc lookup has a real package root to walk up to.
+    /// </summary>
+    private string WriteWinappProject(
+        string packageId,
+        string version,
+        string[] winmdNames,
+        int schema = 3,
+        bool createWinmdFiles = true,
+        string? xmlDocName = null)
+    {
+        string projectDir = Path.Combine(_dir, "app");
+        Directory.CreateDirectory(Path.Combine(projectDir, ".winapp"));
+        File.WriteAllText(Path.Combine(projectDir, "winapp.yaml"), $"packages:\n  - name: {packageId}\n    version: {version}\n");
+
+        string packageRoot = Path.Combine(_dir, "nuget", packageId.ToLowerInvariant(), version);
+        string libDir = Path.Combine(packageRoot, "lib", "uap10.0");
+        Directory.CreateDirectory(libDir);
+
+        var winmdPaths = new List<string>();
+        foreach (string name in winmdNames)
+        {
+            string path = Path.Combine(libDir, name);
+            if (createWinmdFiles)
+            {
+                File.WriteAllText(path, "not real metadata");
+            }
+            winmdPaths.Add(path);
+        }
+        if (xmlDocName is not null)
+        {
+            // FindXmlDocsInPackageFolder skips XML under 1 KB as carrying no real docs.
+            File.WriteAllText(Path.Combine(libDir, xmlDocName), new string('x', 2048));
+        }
+
+        string lockfile = JsonSerializer.Serialize(new
+        {
+            schema,
+            generated_at = DateTime.UtcNow.ToString("o"),
+            packages = new[] { new { name = packageId, version, winmds = winmdPaths } },
+        });
+        File.WriteAllText(Path.Combine(projectDir, ".winapp", "winmds.lock.json"), lockfile);
+        return projectDir;
+    }
+
+    [TestMethod]
+    public void FindPackagesFromWinmdsLockfile_ReadsPackagesForAProjectWithNoProjectFile()
+    {
+        string projectDir = WriteWinappProject("Microsoft.WindowsAppSDK", "1.5.240607001", ["Microsoft.UI.Xaml.winmd", "Microsoft.UI.Text.winmd"]);
+
+        List<PackageWithWinMd> packages = NuGetResolver.FindPackagesFromWinmdsLockfile(projectDir);
+
+        Assert.HasCount(1, packages);
+        Assert.AreEqual("Microsoft.WindowsAppSDK", packages[0].Id);
+        Assert.AreEqual("1.5.240607001", packages[0].Version);
+        Assert.HasCount(2, packages[0].WinMdFiles);
+    }
+
+    [TestMethod]
+    public void FindPackagesFromWinmdsLockfile_FindsXmlDocsInThePackageFolder()
+    {
+        string projectDir = WriteWinappProject(
+            "Microsoft.WindowsAppSDK", "1.5.240607001", ["Microsoft.UI.Xaml.winmd"], xmlDocName: "Microsoft.UI.Xaml.xml");
+
+        List<PackageWithWinMd> packages = NuGetResolver.FindPackagesFromWinmdsLockfile(projectDir);
+
+        Assert.HasCount(1, packages);
+        Assert.HasCount(1, packages[0].XmlDocFiles);
+        Assert.EndsWith("Microsoft.UI.Xaml.xml", packages[0].XmlDocFiles[0]);
+    }
+
+    [TestMethod]
+    public void FindPackagesFromWinmdsLockfile_SkipsEntriesWhoseFilesAreGone()
+    {
+        // A lockfile written before the NuGet cache was cleared still names the files.
+        // Indexing them would fail per-package; contributing nothing is the honest answer.
+        string projectDir = WriteWinappProject(
+            "Microsoft.WindowsAppSDK", "1.5.240607001", ["Microsoft.UI.Xaml.winmd"], createWinmdFiles: false);
+
+        Assert.IsEmpty(NuGetResolver.FindPackagesFromWinmdsLockfile(projectDir));
+    }
+
+    [TestMethod]
+    public void FindPackagesFromWinmdsLockfile_IgnoresAnUnknownSchema()
+    {
+        string projectDir = WriteWinappProject(
+            "Microsoft.WindowsAppSDK", "1.5.240607001", ["Microsoft.UI.Xaml.winmd"], schema: 99);
+
+        Assert.IsEmpty(NuGetResolver.FindPackagesFromWinmdsLockfile(projectDir));
+    }
+
+    [TestMethod]
+    public void FindPackagesFromWinmdsLockfile_ReturnsNothingWhenThereIsNoLockfile()
+    {
+        string projectDir = Path.Combine(_dir, "empty");
+        Directory.CreateDirectory(projectDir);
+
+        Assert.IsEmpty(NuGetResolver.FindPackagesFromWinmdsLockfile(projectDir));
+    }
+
+    [TestMethod]
+    public void FindRestoreOutput_UsesTheLockfileWhenThereIsNoProjectAssetsJson()
+    {
+        string projectDir = WriteWinappProject("Microsoft.WindowsAppSDK", "1.5.240607001", ["Microsoft.UI.Xaml.winmd"]);
+
+        string? restoreOutput = NuGetResolver.FindRestoreOutput(projectDir);
+
+        Assert.IsNotNull(restoreOutput);
+        Assert.EndsWith("winmds.lock.json", restoreOutput);
+    }
+
+    [TestMethod]
+    public void FindRestoreOutput_PrefersProjectAssetsJsonWhenBothExist()
+    {
+        string projectDir = WriteWinappProject("Microsoft.WindowsAppSDK", "1.5.240607001", ["Microsoft.UI.Xaml.winmd"]);
+        Directory.CreateDirectory(Path.Combine(projectDir, "obj"));
+        File.WriteAllText(Path.Combine(projectDir, "obj", "project.assets.json"), "{}");
+
+        string? restoreOutput = NuGetResolver.FindRestoreOutput(projectDir);
+
+        Assert.IsNotNull(restoreOutput);
+        Assert.EndsWith("project.assets.json", restoreOutput);
+    }
+
+    #endregion
 }

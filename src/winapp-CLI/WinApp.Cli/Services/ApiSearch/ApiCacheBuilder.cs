@@ -59,7 +59,7 @@ internal static class ApiCacheBuilder
         foreach (string projectFile in projectFiles)
         {
             string dir = Path.GetDirectoryName(projectFile)!;
-            string projectName = Path.GetFileNameWithoutExtension(projectFile);
+            string projectName = ProjectNameFor(projectFile);
             report?.Invoke($"Indexing {projectName}…");
 
             List<PackageWithWinMd> packages = NuGetResolver.FindPackagesWithWinMd(dir, projectFile, winAppSdkRuntimePath, report);
@@ -546,6 +546,28 @@ internal static class ApiCacheBuilder
         PathSafety.AtomicWriteAllText(path, content);
     }
 
+    /// <summary>
+    /// The file that stands in for an MSBuild project in a project that has none —
+    /// an Electron or other non-.NET app whose Windows metadata is declared in
+    /// <c>winapp.yaml</c> and resolved into <c>.winapp/winmds.lock.json</c>.
+    /// </summary>
+    internal const string WinappConfigFileName = "winapp.yaml";
+
+    /// <summary>Whether a discovered project file is a <c>winapp.yaml</c> stand-in.</summary>
+    internal static bool IsWinappConfigProject(string projectFile) =>
+        Path.GetFileName(projectFile).Equals(WinappConfigFileName, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// A <c>winapp.yaml</c> project has no project name of its own, so it takes the
+    /// name of the directory it sits in — which is the app's name for an Electron or
+    /// similar project. <c>winapp</c> (the file's own stem) would name every such
+    /// project identically.
+    /// </summary>
+    internal static string ProjectNameFor(string projectFile) =>
+        IsWinappConfigProject(projectFile)
+            ? new DirectoryInfo(Path.GetDirectoryName(Path.GetFullPath(projectFile))!).Name
+            : Path.GetFileNameWithoutExtension(projectFile);
+
     internal static List<string> DiscoverProjectFiles(string inputPath, bool scan)
     {
         var results = new List<string>();
@@ -563,10 +585,12 @@ internal static class ApiCacheBuilder
             };
             results.AddRange(Directory.EnumerateFiles(inputPath, "*.csproj", options));
             results.AddRange(Directory.EnumerateFiles(inputPath, "*.vcxproj", options));
+            results.AddRange(Directory.EnumerateFiles(inputPath, WinappConfigFileName, options));
             return results
                 .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
                 .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
                 .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}node_modules{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+                .Where(f => !IsWinappConfigProject(f) || !DirectoryHasMsBuildProject(Path.GetDirectoryName(f)!))
                 .ToList();
         }
         if (File.Exists(inputPath) && (inputPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) || inputPath.EndsWith(".vcxproj", StringComparison.OrdinalIgnoreCase)))
@@ -584,8 +608,34 @@ internal static class ApiCacheBuilder
                 // SDK scope. The projects the solution builds live below it.
                 return DiscoverProjectFiles(inputPath, scan: true);
             }
+            // Only when the directory builds nothing MSBuild understands: a project
+            // that has both is a .NET project that happens to use winapp.yaml for its
+            // SDK packages, and its .csproj is the more precise description of what it
+            // compiles against.
+            if (results.Count == 0)
+            {
+                string winappConfig = Path.Combine(inputPath, WinappConfigFileName);
+                if (File.Exists(winappConfig))
+                {
+                    results.Add(winappConfig);
+                }
+            }
         }
         return results;
+    }
+
+    /// <summary>Whether a directory contains a <c>.csproj</c> or <c>.vcxproj</c>.</summary>
+    private static bool DirectoryHasMsBuildProject(string dir)
+    {
+        try
+        {
+            return Directory.EnumerateFiles(dir, "*.csproj").Any()
+                || Directory.EnumerateFiles(dir, "*.vcxproj").Any();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     /// <summary>Returns the first solution file (<c>.sln</c>/<c>.slnx</c>) in a directory, or null.</summary>
@@ -609,7 +659,6 @@ internal static class ApiCacheBuilder
         }
     }
 
-    /// <summary>Returns the first project name (<c>.csproj</c>/<c>.vcxproj</c>) in a directory, or null.</summary>
     /// <summary>
     /// Cache file name for a project's manifest. The project's full path is hashed
     /// into the name so that identically-named projects in different directories
@@ -619,9 +668,13 @@ internal static class ApiCacheBuilder
     internal static string ManifestName(string projectFile)
     {
         string fullPath = Path.GetFullPath(projectFile);
-        return Path.GetFileNameWithoutExtension(fullPath) + "_" + ApiCachePaths.ShortHash(fullPath);
+        return ProjectNameFor(fullPath) + "_" + ApiCachePaths.ShortHash(fullPath);
     }
 
+    /// <summary>
+    /// Returns the name of the project in a directory (<c>.csproj</c>/<c>.vcxproj</c>,
+    /// or a <c>winapp.yaml</c> project's directory name), or null.
+    /// </summary>
     internal static string? FindProjectNameInDir(string dir)
     {
         if (!Directory.Exists(dir))
@@ -629,7 +682,12 @@ internal static class ApiCacheBuilder
             return null;
         }
         string[] projectFiles = Directory.GetFiles(dir, "*.csproj").Concat(Directory.GetFiles(dir, "*.vcxproj")).ToArray();
-        return projectFiles.Length == 0 ? null : Path.GetFileNameWithoutExtension(projectFiles[0]);
+        if (projectFiles.Length > 0)
+        {
+            return Path.GetFileNameWithoutExtension(projectFiles[0]);
+        }
+        string winappConfig = Path.Combine(dir, WinappConfigFileName);
+        return File.Exists(winappConfig) ? ProjectNameFor(winappConfig) : null;
     }
 
     /// <summary>
