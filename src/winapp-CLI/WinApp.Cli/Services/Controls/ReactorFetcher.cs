@@ -61,7 +61,14 @@ internal static class ReactorFetcher
     /// reader works against real upstream data — and every source that publishes an index
     /// under <see href="https://github.com/microsoft/winappCli/issues/703">#703</see> gets a
     /// fetcher this size instead of a scraper.
+    ///
+    /// <para>Reactor publishes no <c>curatedKeywords</c>, so that slot is empty here and the
+    /// tuple stays two-wide, exactly as <c>ReactorProvider</c> already expects. Its
+    /// <c>keywords</c> continue to feed the 3.0-weighted tag field they always have.</para>
     /// </remarks>
     internal static (Scenario[] scenarios, Dictionary<string, string[]> tags) Parse(string json)
-        => SampleIndexParser.Parse(json, SourceId);
+    {
+        var (scenarios, tags, _) = SampleIndexParser.Parse(json, SourceId);
+        return (scenarios, tags);
+    }
 }

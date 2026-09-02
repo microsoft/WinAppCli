@@ -25,6 +25,7 @@ namespace WinApp.Cli.Tests;
 public class SampleIndexTests
 {
     private static readonly string[] ButtonKeywords = ["click", "press me", "command bar"];
+    private static readonly string[] FlexKeywords = ["css layout", "flexbox"];
     private static readonly string[] ButtonRelated = ["HyperlinkButton", "ToggleButton"];
     private static readonly string[] ButtonXmlns = ["xmlns:controls=\"using:CommunityToolkit.WinUI.Controls\""];
 
@@ -90,8 +91,8 @@ public class SampleIndexTests
         var original = FullyPopulatedScenarios();
         var tags = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase) { ["button"] = ButtonKeywords };
 
-        var json = SampleIndexWriter.Write(original, tags, "gallery");
-        var (roundTripped, _) = SampleIndexParser.Parse(json, "gallery");
+        var json = SampleIndexWriter.Write(original, tags, source: "gallery");
+        var (roundTripped, _, _) = SampleIndexParser.Parse(json, "gallery");
 
         Assert.AreEqual(original.Length, roundTripped.Length, "every scenario must survive the round trip");
 
@@ -121,6 +122,56 @@ public class SampleIndexTests
         }
     }
 
+    /// <summary>
+    /// The two search dictionaries must stay separate through a round trip. They are
+    /// weighted differently by the search engine (author-written terms outrank
+    /// supplementary ones), so collapsing them into one field would silently re-rank
+    /// results — and would have asked upstream for a field that demotes the better signal.
+    /// </summary>
+    [TestMethod]
+    public void RoundTrip_KeepsCuratedKeywordsSeparateFromTags()
+    {
+        string[] supplementary = ["press", "tap"];
+        string[] authorWritten = ["command", "submit"];
+
+        var tags = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase) { ["button"] = supplementary };
+        var curated = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase) { ["button"] = authorWritten };
+
+        var json = SampleIndexWriter.Write(FullyPopulatedScenarios(), tags, curated, "gallery");
+        var (_, roundTrippedTags, roundTrippedCurated) = SampleIndexParser.Parse(json, "gallery");
+
+        CollectionAssert.AreEqual(supplementary, roundTrippedTags["button"], "supplementary terms");
+        CollectionAssert.AreEqual(authorWritten, roundTrippedCurated["button"], "author-written terms");
+    }
+
+    /// <summary>
+    /// An index that omits <c>curatedKeywords</c> — which is every index published today,
+    /// Reactor's included — must still populate the supplementary slot from
+    /// <c>keywords</c>, and must leave the author-written slot empty rather than
+    /// duplicating into it. Changing that mapping would re-weight Reactor's live results.
+    /// </summary>
+    [TestMethod]
+    public void Parse_WithoutCuratedKeywords_LeavesTheAuthorSlotEmpty()
+    {
+        const string json = """
+        {
+          "schemaVersion": 1,
+          "controls": [
+            {
+              "id": "flex",
+              "keywords": ["css layout", "flexbox"],
+              "samples": [ { "code": "new Flex()" } ]
+            }
+          ]
+        }
+        """;
+
+        var (_, tags, curated) = SampleIndexParser.Parse(json, "reactor");
+
+        CollectionAssert.AreEqual(FlexKeywords, tags["flex"]);
+        Assert.AreEqual(0, curated.Count, "an absent curatedKeywords must not be back-filled from keywords");
+    }
+
     /// <summary>Curated keywords are carried by the index, so a source that publishes one
     /// also retires our hand-maintained tag files.</summary>
     [TestMethod]
@@ -128,8 +179,8 @@ public class SampleIndexTests
     {
         var tags = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase) { ["button"] = ButtonKeywords };
 
-        var json = SampleIndexWriter.Write(FullyPopulatedScenarios(), tags, "gallery");
-        var (_, roundTripped) = SampleIndexParser.Parse(json, "gallery");
+        var json = SampleIndexWriter.Write(FullyPopulatedScenarios(), tags, source: "gallery");
+        var (_, roundTripped, _) = SampleIndexParser.Parse(json, "gallery");
 
         CollectionAssert.AreEqual(ButtonKeywords, roundTripped["button"]);
     }
@@ -143,7 +194,7 @@ public class SampleIndexTests
     public void RoundTrip_OutputSurvivesTheScenarioSanitizer()
     {
         var json = SampleIndexWriter.Write(FullyPopulatedScenarios(), source: "gallery");
-        var (scenarios, _) = SampleIndexParser.Parse(json, "gallery");
+        var (scenarios, _, _) = SampleIndexParser.Parse(json, "gallery");
 
         ScenarioSanitizer.SanitizeAll(scenarios);
 
@@ -205,7 +256,7 @@ public class SampleIndexTests
         }
         """;
 
-        var (scenarios, _) = SampleIndexParser.Parse(json, "gallery");
+        var (scenarios, _, _) = SampleIndexParser.Parse(json, "gallery");
 
         Assert.AreEqual(2, scenarios.Length, "samples with neither xaml nor code are skipped");
         Assert.AreEqual("button-1", scenarios[0].Id, "kept ids stay contiguous from 1");
@@ -233,7 +284,7 @@ public class SampleIndexTests
         }
         """;
 
-        var (scenarios, _) = SampleIndexParser.Parse(json, "gallery");
+        var (scenarios, _, _) = SampleIndexParser.Parse(json, "gallery");
 
         Assert.AreEqual(1, scenarios.Length);
         Assert.IsNull(scenarios[0].CSharp, "usings alone are not a sample");
@@ -278,7 +329,7 @@ public class SampleIndexTests
         }
         """;
 
-        var (scenarios, _) = SampleIndexParser.Parse(json, "gallery");
+        var (scenarios, _, _) = SampleIndexParser.Parse(json, "gallery");
 
         Assert.AreEqual(1, scenarios.Length);
         Assert.AreEqual("button-1", scenarios[0].Id);
@@ -293,7 +344,7 @@ public class SampleIndexTests
         { "schemaVersion": 1, "source": "gallery", "controls": [ { "id": "x", "samples": [ { "code": "new X();" } ] } ] }
         """;
 
-        var (scenarios, _) = SampleIndexParser.Parse(json, "reactor");
+        var (scenarios, _, _) = SampleIndexParser.Parse(json, "reactor");
 
         Assert.AreEqual("reactor", scenarios[0].Source);
     }
@@ -323,7 +374,7 @@ public class SampleIndexTests
         }
         """;
 
-        var (scenarios, _) = SampleIndexParser.Parse(json, "reactor");
+        var (scenarios, _, _) = SampleIndexParser.Parse(json, "reactor");
 
         Assert.AreEqual(1, scenarios.Length);
         Assert.AreEqual("Flex", scenarios[0].ControlName);
@@ -364,5 +415,135 @@ public class SampleIndexTests
             expected,
             declared,
             $"the {level} properties in docs/winui-sample-index.schema.json and SampleIndexSchema have drifted apart");
+    }
+
+    private static readonly string[] SegmentedXmlns = ["xmlns:tk=\"using:CommunityToolkit.WinUI.Controls\""];
+    private static readonly string[] SegmentedMediaXmlns = ["xmlns:media=\"using:CommunityToolkit.WinUI.Media\""];
+    private static readonly string[] ContosoXmlns = ["xmlns:c=\"using:Contoso\""];
+    private static readonly Dictionary<string, string[]> NoKeywords = [];
+
+    /// <summary>Two samples of one control that disagree on their prose and their imports —
+    /// the shape every CommunityToolkit control has, because each sample is authored as its
+    /// own markdown file with its own XAML.</summary>
+    private static Scenario[] DivergentSamples() =>
+    [
+        new Scenario
+        {
+            Id = "segmented-1",
+            ControlId = "segmented",
+            ControlName = "Segmented",
+            HeaderText = "Basic Segmented",
+            Xaml = "<tk:Segmented />",
+            Source = "toolkit",
+            Description = "Shows the default Segmented control.",
+            XmlnsImports = SegmentedXmlns,
+        },
+        new Scenario
+        {
+            Id = "segmented-2",
+            ControlId = "segmented",
+            ControlName = "Segmented",
+            HeaderText = "Segmented with icons",
+            Xaml = "<media:Segmented />",
+            Source = "toolkit",
+            Description = "Shows Segmented rendering icon-only items.",
+            XmlnsImports = SegmentedMediaXmlns,
+        },
+    ];
+
+    /// <summary>
+    /// Sibling samples of one control can legitimately need different prose and different
+    /// XAML namespace imports. If the contract could only carry those per control, a Toolkit
+    /// index would silently collapse every sample onto the first one's values — emitting XAML
+    /// with prefixes it never declares.
+    /// </summary>
+    [TestMethod]
+    public void RoundTrip_KeepsDetailsAndImportsPerSampleWhenSiblingsDisagree()
+    {
+        var json = SampleIndexWriter.Write(DivergentSamples(), NoKeywords, NoKeywords, source: "toolkit");
+
+        var control = JsonDocument.Parse(json).RootElement
+            .GetProperty(SampleIndexSchema.Controls)[0];
+        Assert.IsFalse(
+            control.TryGetProperty(SampleIndexSchema.Details, out _),
+            "details must not be hoisted to the control when the samples disagree");
+        Assert.IsFalse(
+            control.TryGetProperty(SampleIndexSchema.XmlnsImports, out _),
+            "xmlnsImports must not be hoisted to the control when the samples disagree");
+
+        var (scenarios, _, _) = SampleIndexParser.Parse(json, "toolkit");
+
+        var basic = scenarios.Single(s => s.HeaderText == "Basic Segmented");
+        var icons = scenarios.Single(s => s.HeaderText == "Segmented with icons");
+        Assert.AreEqual("Shows the default Segmented control.", basic.Description);
+        Assert.AreEqual("Shows Segmented rendering icon-only items.", icons.Description);
+        CollectionAssert.AreEqual(SegmentedXmlns, basic.XmlnsImports);
+        CollectionAssert.AreEqual(SegmentedMediaXmlns, icons.XmlnsImports);
+    }
+
+    /// <summary>
+    /// The common case — every sample of a control shares one description and one set of
+    /// imports, as WinUI-Gallery's do. Writing those once per control instead of once per
+    /// sample is what keeps the published file small, so assert the hoist actually happens
+    /// rather than only that the values survive.
+    /// </summary>
+    [TestMethod]
+    public void Write_HoistsDetailsAndImportsToTheControlWhenEverySampleAgrees()
+    {
+        var json = SampleIndexWriter.Write(FullyPopulatedScenarios(), NoKeywords, NoKeywords, source: "gallery");
+
+        var button = JsonDocument.Parse(json).RootElement
+            .GetProperty(SampleIndexSchema.Controls)
+            .EnumerateArray()
+            .Single(c => c.GetProperty(SampleIndexSchema.Id).GetString() == "button");
+
+        Assert.IsTrue(button.TryGetProperty(SampleIndexSchema.Details, out _));
+        Assert.IsTrue(button.TryGetProperty(SampleIndexSchema.XmlnsImports, out _));
+
+        foreach (var sample in button.GetProperty(SampleIndexSchema.Samples).EnumerateArray())
+        {
+            Assert.IsFalse(
+                sample.TryGetProperty(SampleIndexSchema.Details, out _),
+                "a sample must not repeat the control's details");
+            Assert.IsFalse(
+                sample.TryGetProperty(SampleIndexSchema.XmlnsImports, out _),
+                "a sample must not repeat the control's xmlnsImports");
+        }
+    }
+
+    /// <summary>
+    /// An upstream author writing an index by hand will put shared prose on the control and
+    /// leave it off the samples. Readers must inherit it rather than report no description.
+    /// </summary>
+    [TestMethod]
+    public void Parse_InheritsControlDetailsAndImportsWhenASampleOmitsThem()
+    {
+        const string Json = """
+        {
+          "schemaVersion": 1,
+          "source": "gallery",
+          "controls": [
+            {
+              "id": "button",
+              "name": "Button",
+              "details": "Shared prose written once.",
+              "xmlnsImports": ["xmlns:c=\"using:Contoso\""],
+              "samples": [
+                { "header": "One", "xaml": "<c:Button />" },
+                { "header": "Two", "xaml": "<c:Button IsEnabled=\"False\" />" }
+              ]
+            }
+          ]
+        }
+        """;
+
+        var (scenarios, _, _) = SampleIndexParser.Parse(Json, "gallery");
+
+        Assert.AreEqual(2, scenarios.Length);
+        foreach (var scenario in scenarios)
+        {
+            Assert.AreEqual("Shared prose written once.", scenario.Description);
+            CollectionAssert.AreEqual(ContosoXmlns, scenario.XmlnsImports);
+        }
     }
 }

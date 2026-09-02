@@ -29,6 +29,11 @@ internal static class SnapshotBaker
 
     public const string ManifestFileName = "snapshot-manifest.json";
 
+    /// <summary>Filename for a source's generated upstream index — the artifact offered to
+    /// the repository that owns the samples (see
+    /// <see href="https://github.com/microsoft/winappCli/issues/703">#703</see>).</summary>
+    public static string IndexFileName(string providerId) => $"index-{providerId}.json";
+
     private static readonly Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
     /// <summary>
@@ -148,6 +153,75 @@ internal static class SnapshotBaker
         {
             TryDeleteDirectory(scratchCache);
             TryDeleteDirectory(staging);
+        }
+    }
+
+    /// <summary>
+    /// Fetch every provider fresh and write each one's data as a sample index in the shared
+    /// contract (<c>docs/winui-sample-index.schema.json</c>) to
+    /// <paramref name="outputDirectory"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>This is the reference generator behind
+    /// <see href="https://github.com/microsoft/winappCli/issues/703">#703</see>. Its output
+    /// belongs in the repository that owns the samples, not this one — so each upstream ask
+    /// can be "here is the file, here is the schema it validates against, and here is the
+    /// tested code that produced it" rather than a request that someone else design a
+    /// format. Nothing it writes is committed here or shipped: the corpus we embed is the
+    /// Brotli snapshot written by <see cref="BakeAsync"/>, and an index checked in
+    /// alongside it would be the same data a second time.</para>
+    ///
+    /// <para>Deliberately separate from <see cref="BakeAsync"/> rather than an extra output
+    /// of it. The bake runs on every release and its failure mode is a release-blocking
+    /// error; generating an artifact for someone else's repository is occasional, manual
+    /// work that must not be able to fail a release.</para>
+    /// </remarks>
+    /// <returns>The ids of providers that could not be fetched. Empty means every source
+    /// was written.</returns>
+    public static async Task<IReadOnlyList<string>> EmitIndexesAsync(
+        string outputDirectory,
+        Action<string> report,
+        CancellationToken cancellationToken = default)
+    {
+        Directory.CreateDirectory(outputDirectory);
+
+        // Same reasoning as BakeAsync: a warm local cache must not be able to masquerade
+        // as a fresh fetch, so providers load through a throwaway cache directory.
+        var scratchCache = Path.Join(Path.GetTempPath(), $"winapp-index-{Guid.NewGuid():N}");
+        var failures = new List<string>();
+
+        try
+        {
+            foreach (var provider in ProviderRegistry.CreateProviders(scratchCache))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                report($"Fetching {provider.DisplayName}…");
+
+                var data = await provider.LoadAsync(forceRefresh: true, cancellationToken: cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (data.Origin != CorpusOrigin.Network || data.Scenarios.Length == 0)
+                {
+                    report($"  FAILED: {provider.DisplayName} returned no fetched data.");
+                    failures.Add(provider.Id);
+                    continue;
+                }
+
+                var index = SampleIndexWriter.Write(data.Scenarios, data.Tags, data.Keywords, provider.Id);
+                var path = Path.Join(outputDirectory, IndexFileName(provider.Id));
+
+                await PathSafety.AtomicWriteAllTextAsync(path, index, Utf8NoBom, cancellationToken)
+                    .ConfigureAwait(false);
+
+                var controls = data.Scenarios.Select(s => s.ControlId).Distinct(StringComparer.Ordinal).Count();
+                report($"  {provider.Id}: {controls} controls, {data.Scenarios.Length} samples → {Path.GetFileName(path)}");
+            }
+
+            return failures;
+        }
+        finally
+        {
+            TryDeleteDirectory(scratchCache);
         }
     }
 

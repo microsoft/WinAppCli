@@ -47,7 +47,7 @@
           "type": "string"
         },
         "details": {
-          "description": "Longer prose description, where the source has one distinct from the one-line summary. Separate from 'description' because sources such as WinUI-Gallery maintain both a short subtitle and a full description.",
+          "description": "Longer prose description, where the source has one distinct from the one-line summary. Separate from 'description' because sources such as WinUI-Gallery maintain both a short subtitle and a full description. Acts as the default for samples that do not set their own 'details'.",
           "type": "string"
         },
         "apiNamespace": {
@@ -64,7 +64,7 @@
           "items": { "type": "string" }
         },
         "xmlnsImports": {
-          "description": "Full XAML namespace declarations required by this control's XAML samples (e.g. 'xmlns:controls=\"using:CommunityToolkit.WinUI.Controls\"'). Emitted verbatim by consumers, so include the whole attribute rather than just the URI.",
+          "description": "Full XAML namespace declarations required by this control's XAML samples (e.g. 'xmlns:controls=\"using:CommunityToolkit.WinUI.Controls\"'). Emitted verbatim by consumers, so include the whole attribute rather than just the URI. Acts as the default for samples that do not set their own 'xmlnsImports'.",
           "type": "array",
           "items": { "type": "string" }
         },
@@ -74,7 +74,12 @@
           "items": { "type": "string" }
         },
         "keywords": {
-          "description": "Curated search terms for this control, including multi-word intent phrases (e.g. 'css layout'). Served verbatim by consumers rather than tokenized, so phrase entries survive.",
+          "description": "Supplementary search terms for this control, including multi-word intent phrases (e.g. 'css layout'). Served verbatim by consumers rather than tokenized, so phrase entries survive. Use this for terms derived or gathered to aid discovery; for terms the sample's own author wrote, prefer 'curatedKeywords', which consumers weigh more heavily.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "curatedKeywords": {
+          "description": "Search terms written by the sample's author, typically alongside the sample itself (for example a documentation file's frontmatter). Consumers weigh these above 'keywords' because they state intent first-hand rather than being inferred. Kept separate from 'keywords' so an author's own terms are not diluted by supplementary ones.",
           "type": "array",
           "items": { "type": "string" }
         },
@@ -130,6 +135,15 @@
         "language": {
           "description": "Language of 'code'. Informational; consumers assume C#.",
           "type": "string"
+        },
+        "details": {
+          "description": "Longer prose describing this specific sample, when it differs from the control's 'details'. Omit it when the control-level value applies — consumers fall back to that. Sources whose samples each carry their own documentation (for example a per-sample markdown file) will normally set it here rather than on the control.",
+          "type": "string"
+        },
+        "xmlnsImports": {
+          "description": "XAML namespace declarations required by this specific sample, when they differ from the control's 'xmlnsImports'. Omit it when the control-level value applies. Needed because sibling samples of one control can pull in different namespaces.",
+          "type": "array",
+          "items": { "type": "string" }
         }
       },
       "additionalProperties": true

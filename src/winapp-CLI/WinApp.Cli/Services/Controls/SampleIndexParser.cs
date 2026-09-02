@@ -24,30 +24,38 @@ using System.Text.Json;
 internal static class SampleIndexParser
 {
     /// <summary>
-    /// Map an index document to <see cref="Scenario"/>[] plus the per-control curated tag
-    /// dictionary. <paramref name="source"/> is stamped onto every scenario
+    /// Map an index document to <see cref="Scenario"/>[] plus the two per-control search
+    /// dictionaries. <paramref name="source"/> is stamped onto every scenario
     /// (<see cref="Scenario.Source"/>) rather than read from the document, so a source can
     /// never mislabel its samples as another's.
     /// </summary>
+    /// <returns>
+    /// <c>tags</c> feeds <c>ProviderData.Tags</c> (search weight 3.0) and
+    /// <c>curatedKeywords</c> feeds <c>ProviderData.Keywords</c> (weight 5.0). They are
+    /// deliberately separate: an author's own terms outrank supplementary ones, and
+    /// collapsing them would either dilute the former or inflate the latter.
+    /// </returns>
     /// <remarks>
     /// Throws <see cref="JsonException"/> on malformed JSON — callers treat that as a fetch
     /// failure. A structurally valid document that simply carries nothing we understand
     /// (wrong <c>schemaVersion</c>, missing <c>controls</c>) yields an empty result instead.
     /// </remarks>
-    internal static (Scenario[] scenarios, Dictionary<string, string[]> tags) Parse(string json, string source)
+    internal static (Scenario[] scenarios, Dictionary<string, string[]> tags, Dictionary<string, string[]> curatedKeywords) Parse(
+        string json, string source)
     {
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
 
         var scenarios = new List<Scenario>();
         var tags = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+        var curatedKeywords = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
 
-        if (root.ValueKind != JsonValueKind.Object || !IsSupportedVersion(root)) return ([], tags);
+        if (root.ValueKind != JsonValueKind.Object || !IsSupportedVersion(root)) return ([], tags, curatedKeywords);
 
         if (!root.TryGetProperty(SampleIndexSchema.Controls, out var controls)
             || controls.ValueKind != JsonValueKind.Array)
         {
-            return ([], tags);
+            return ([], tags, curatedKeywords);
         }
 
         foreach (var control in controls.EnumerateArray())
@@ -66,11 +74,13 @@ internal static class SampleIndexParser
             var xmlnsImports = GetStringArray(control, SampleIndexSchema.XmlnsImports);
             var usings = GetStringArray(control, SampleIndexSchema.Usings);
             var keywords = GetStringArray(control, SampleIndexSchema.Keywords);
+            var authorKeywords = GetStringArray(control, SampleIndexSchema.CuratedKeywords);
             var docs = GetDocLinks(control);
 
-            // Curated keywords -> 3.0-weighted enrichment tag field, verbatim (not
-            // stop-word cleaned) so multi-word intent terms like "css layout" survive.
+            // Both dictionaries are served verbatim (not stop-word cleaned) so multi-word
+            // intent terms like "css layout" survive; cleaning would drop "layout".
             if (keywords.Length > 0) tags[controlId] = keywords;
+            if (authorKeywords.Length > 0) curatedKeywords[controlId] = authorKeywords;
 
             // Control-level usings are prepended to EACH sample's code so a snippet
             // compiles standalone. Sources are asked not to repeat them inside samples.
@@ -93,6 +103,16 @@ internal static class SampleIndexParser
                 var xaml = GetString(sample, SampleIndexSchema.Xaml);
                 var code = GetString(sample, SampleIndexSchema.Code);
 
+                // details/xmlnsImports are control-level defaults a sample may override:
+                // sibling samples of one control legitimately differ (Toolkit gives each
+                // sample its own description and its own namespace imports).
+                var sampleDetails = sample.TryGetProperty(SampleIndexSchema.Details, out _)
+                    ? GetString(sample, SampleIndexSchema.Details)
+                    : details;
+                var sampleXmlns = sample.TryGetProperty(SampleIndexSchema.XmlnsImports, out _)
+                    ? GetStringArray(sample, SampleIndexSchema.XmlnsImports)
+                    : xmlnsImports;
+
                 // A sample with neither XAML nor code has no usable content. Guard on the
                 // raw code (before the usings prefix) so a control that declares only
                 // control-level usings can't slip a using-only stub through.
@@ -113,16 +133,16 @@ internal static class SampleIndexParser
                     Source = source,
                     NuGetPackage = NullIfEmpty(nugetPackage),
                     ApiNamespace = NullIfEmpty(apiNamespace),
-                    Description = NullIfEmpty(details),
+                    Description = NullIfEmpty(sampleDetails),
                     ControlDescription = NullIfEmpty(summary),
                     RelatedControls = relatedControls,
-                    XmlnsImports = xmlnsImports,
+                    XmlnsImports = sampleXmlns,
                     Docs = docs,
                 });
             }
         }
 
-        return (scenarios.ToArray(), tags);
+        return (scenarios.ToArray(), tags, curatedKeywords);
     }
 
     /// <summary>

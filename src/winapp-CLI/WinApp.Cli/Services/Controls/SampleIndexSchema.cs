@@ -43,7 +43,17 @@ internal static class SampleIndexSchema
     public const string RelatedControls = "relatedControls";
     public const string XmlnsImports = "xmlnsImports";
     public const string Usings = "usings";
+    /// <summary>Supplementary search terms. Maps to <c>ProviderData.Tags</c>, which the
+    /// search engine weights at 3.0. This is what the published Reactor index already means
+    /// by <c>keywords</c>, so the mapping is kept rather than redefined — re-pointing it at
+    /// the higher-weighted slot would silently re-rank live results for Reactor's controls.</summary>
     public const string Keywords = "keywords";
+
+    /// <summary>Author-written search terms. Maps to <c>ProviderData.Keywords</c>, weighted
+    /// 5.0 — above <see cref="Keywords"/> — because they state intent first-hand. Today only
+    /// the Toolkit has these (its samples' markdown frontmatter); an index that omits the
+    /// field simply contributes nothing to that slot.</summary>
+    public const string CuratedKeywords = "curatedKeywords";
     public const string Docs = "docs";
     public const string Samples = "samples";
 
@@ -63,11 +73,14 @@ internal static class SampleIndexSchema
 
     /// <summary>Every control-level property the contract defines.</summary>
     public static readonly string[] ControlProperties =
-        [Id, Name, Description, Details, ApiNamespace, NuGetPackage, RelatedControls, XmlnsImports, Usings, Keywords, Docs, Samples];
+        [Id, Name, Description, Details, ApiNamespace, NuGetPackage, RelatedControls, XmlnsImports, Usings, Keywords, CuratedKeywords, Docs, Samples];
 
     /// <summary>Every doc-link property the contract defines.</summary>
     public static readonly string[] DocLinkProperties = [Title, Uri];
 
-    /// <summary>Every sample-level property the contract defines.</summary>
-    public static readonly string[] SampleProperties = [Header, Xaml, Code, Language];
+    /// <summary>Every sample-level property the contract defines. <see cref="Details"/> and
+    /// <see cref="XmlnsImports"/> appear at BOTH levels: they are control-level defaults that
+    /// an individual sample may override, because Toolkit samples legitimately carry their own
+    /// description and their own XAML namespace imports.</summary>
+    public static readonly string[] SampleProperties = [Header, Xaml, Code, Language, Details, XmlnsImports];
 }
