@@ -601,12 +601,16 @@ internal static class ApiCacheBuilder
         {
             results.AddRange(Directory.GetFiles(inputPath, "*.csproj"));
             results.AddRange(Directory.GetFiles(inputPath, "*.vcxproj"));
-            if (results.Count == 0 && FindSolutionFileInDir(inputPath) is not null)
+            if (results.Count == 0 && FindSolutionFileInDir(inputPath) is { } solutionFile)
             {
                 // A solution directory holds no project of its own, so indexing it as
                 // given records nothing and every query typed there falls back to the
-                // SDK scope. The projects the solution builds live below it.
-                return DiscoverProjectFiles(inputPath, scan: true);
+                // SDK scope. The projects the solution builds live below it — and the
+                // solution, not the directory tree, is what says which those are. A
+                // sibling directory can hold a project the solution deliberately
+                // excludes; indexing it makes the caller disambiguate against a project
+                // their solution does not build.
+                return DiscoverSolutionProjectFiles(solutionFile, inputPath);
             }
             // Only when the directory builds nothing MSBuild understands: a project
             // that has both is a .NET project that happens to use winapp.yaml for its
@@ -622,6 +626,23 @@ internal static class ApiCacheBuilder
             }
         }
         return results;
+    }
+
+    /// <summary>
+    /// The projects a solution lists that this indexer can read, as absolute paths.
+    /// Falls back to a recursive scan when the solution lists nothing readable — an
+    /// unparseable or empty solution means "membership unknown", and scanning is a
+    /// better answer there than indexing nothing at all.
+    /// </summary>
+    private static List<string> DiscoverSolutionProjectFiles(string solutionFile, string solutionDir)
+    {
+        List<string> listed = SolutionProjectReader.ReadProjectPaths(solutionFile)
+            .Where(p => p.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+                || p.EndsWith(".vcxproj", StringComparison.OrdinalIgnoreCase))
+            .Where(File.Exists)
+            .ToList();
+
+        return listed.Count > 0 ? listed : DiscoverProjectFiles(solutionDir, scan: true);
     }
 
     /// <summary>Whether a directory contains a <c>.csproj</c> or <c>.vcxproj</c>.</summary>

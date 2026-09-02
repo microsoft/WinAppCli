@@ -101,6 +101,31 @@ public sealed class ApiMetadataServiceTests
     }
 
     /// <summary>
+    /// Writes a package cache entry the staleness check will accept, so a manifest
+    /// referencing this package reads as fresh rather than as never-indexed.
+    /// </summary>
+    private static void WritePackageCache(string cacheDir, ProjectPackageRef package)
+    {
+        Assert.IsTrue(ApiCachePaths.TryPackageCacheDir(cacheDir, package, out string dir));
+        Directory.CreateDirectory(dir);
+        var meta = new PackageMeta
+        {
+            Format = ApiCachePaths.CacheFormatVersion,
+            PackageId = package.Id,
+            Version = package.Version,
+            SourceStamp = package.SourceStamp,
+            WinMdFiles = [],
+            TotalTypes = 0,
+            TotalMembers = 0,
+            TotalNamespaces = 0,
+            GeneratedAt = DateTime.UtcNow.ToString("o"),
+        };
+        File.WriteAllText(
+            Path.Combine(dir, "meta.json"),
+            JsonSerializer.Serialize(meta, ApiSearchJsonContext.Default.PackageMeta));
+    }
+
+    /// <summary>
     /// Records whether the indexing work actually ran. An index pass always ends up
     /// asking for the SDK packages, so this is a precise witness for "did the pass
     /// happen" that does not depend on real packages being on the machine.
@@ -149,6 +174,38 @@ public sealed class ApiMetadataServiceTests
         }
 
         Assert.AreEqual(1, sdkPackages.Calls);
+    }
+
+    [TestMethod]
+    public void LockTimedOutResult_StillStale_RefusesToAnswer()
+    {
+        // The lock is only waited on because the index was already stale. Falling
+        // through after the wait answers confidently from metadata that does not
+        // describe the project — the caller gets a wrong answer, not a slow one.
+        string cacheDir = Path.Combine(_globalDir, "cache", "find-api");
+        Directory.CreateDirectory(cacheDir);
+        WriteProjectFile(_currentDir, "App");
+
+        string? error = CreateService().LockTimedOutResult(_currentDir, cacheDir);
+
+        Assert.IsNotNull(error);
+        StringAssert.Contains(error, "out of date");
+        StringAssert.Contains(error, "find-api refresh");
+    }
+
+    [TestMethod]
+    public void LockTimedOutResult_OtherProcessMadeItFresh_Answers()
+    {
+        // The process that held the lock may have been indexing this very project.
+        // Refusing then would be a spurious failure, so the staleness is re-checked
+        // rather than the timeout being treated as failure on its own.
+        string cacheDir = Path.Combine(_globalDir, "cache", "find-api");
+        Directory.CreateDirectory(cacheDir);
+        WriteProjectFile(_currentDir, "App");
+        WriteManifest("App", _currentDir, "App_11111111");
+        WritePackageCache(cacheDir, new ProjectPackageRef { Id = "Some.Pkg", Version = "1.0.0", SourceStamp = "0a1b2c3d" });
+
+        Assert.IsNull(CreateService().LockTimedOutResult(_currentDir, cacheDir));
     }
 
     [TestMethod]
@@ -528,6 +585,81 @@ public sealed class ApiMetadataServiceTests
         Assert.AreEqual(ApiQueryOutcome.NoProject, result.Outcome);
         StringAssert.Contains(result.Message, "ambiguous");
         StringAssert.Contains(result.Message, "--project-dir");
+    }
+
+    [TestMethod]
+    public void Query_TwoProjectsInOneDirectory_AsksWhichOne()
+    {
+        // A directory may legally hold two projects, and they reference different
+        // packages. Answering from whichever manifest was enumerated first makes the
+        // API surface depend on file ordering, with nothing telling the caller the
+        // other project even exists.
+        WriteProjectFile(_currentDir, "App");
+        WriteProjectFile(_currentDir, "Other");
+        WriteManifest("App", _currentDir, "App_11111111");
+        WriteManifest("Other", _currentDir, "Other_22222222");
+
+        var result = CreateService().Namespaces(null, new ApiRequestScope(null, null));
+
+        Assert.AreEqual(ApiQueryOutcome.NoProject, result.Outcome);
+        StringAssert.Contains(result.Message, "'App'");
+        StringAssert.Contains(result.Message, "'Other'");
+        StringAssert.Contains(result.Message, "--project <name>");
+    }
+
+    [TestMethod]
+    public void Query_TwoProjectsInOneDirectory_NamedByProjectDir_AsksWhichOne()
+    {
+        // A directory must not mean two different things depending on whether it is the
+        // current directory or was named with --project-dir.
+        string dir = Path.Combine(Directory.GetParent(_currentDir)!.FullName, "pair");
+        WriteProjectFile(dir, "App");
+        WriteProjectFile(dir, "Other");
+        WriteManifest("App", dir, "App_11111111");
+        WriteManifest("Other", dir, "Other_22222222");
+
+        var result = CreateService().Namespaces(null, new ApiRequestScope(dir, null));
+
+        Assert.AreEqual(ApiQueryOutcome.NoProject, result.Outcome);
+        StringAssert.Contains(result.Message, "'App'");
+        StringAssert.Contains(result.Message, "'Other'");
+    }
+
+    [TestMethod]
+    public void Query_TwoProjectsInOneDirectory_NamingOneResolvesIt()
+    {
+        // The ambiguity message tells the caller to pass '--project <name>', so that
+        // must actually work from the same directory.
+        WriteProjectFile(_currentDir, "App");
+        WriteProjectFile(_currentDir, "Other");
+        WriteManifest("App", _currentDir, "App_11111111");
+        WriteManifest("Other", _currentDir, "Other_22222222");
+
+        var result = CreateService().Namespaces(null, new ApiRequestScope(null, "Other"));
+
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        Assert.AreEqual("Other", result.Data!.ProjectName);
+    }
+
+    [TestMethod]
+    public void Query_SolutionDir_IgnoresIndexedProjectsTheSolutionDoesNotList()
+    {
+        // A sibling directory may hold a project the solution deliberately excludes.
+        // Counting it forces the caller to disambiguate against something their
+        // solution never builds.
+        File.WriteAllText(Path.Combine(_currentDir, "App.slnx"),
+            """<Solution><Project Path="src/Alpha/Alpha.csproj" /></Solution>""");
+        WriteProjectFile(Path.Combine(_currentDir, "src", "Alpha"), "Alpha");
+        WriteProjectFile(Path.Combine(_currentDir, "tools", "Beta"), "Beta");
+        WriteManifest("Alpha", Path.Combine(_currentDir, "src", "Alpha"));
+        WriteManifest("Beta", Path.Combine(_currentDir, "tools", "Beta"));
+        WriteSdkManifest();
+
+        var result = CreateService().Namespaces(null, new ApiRequestScope(null, null));
+
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        Assert.AreEqual(ApiScopeNames.Project, result.Data!.Scope);
+        Assert.AreEqual("Alpha", result.Data.ProjectName);
     }
 
     [TestMethod]

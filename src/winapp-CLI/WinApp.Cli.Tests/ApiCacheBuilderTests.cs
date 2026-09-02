@@ -200,4 +200,108 @@ public sealed class ApiCacheBuilderTests
     }
 
     #endregion
+
+    #region solution membership
+
+    [TestMethod]
+    public void DiscoverProjectFiles_SolutionDir_IndexesOnlyTheProjectsTheSolutionLists()
+    {
+        // A solution directory holds no project of its own. Recursing the tree there also
+        // picks up sibling projects the solution deliberately excludes, and the caller is
+        // then told to disambiguate against a project their solution never builds.
+        string root = NewProjectDir("sln-listed");
+        string listed = Path.Combine(root, "src", "App");
+        string excluded = Path.Combine(root, "tools", "Unrelated");
+        Directory.CreateDirectory(listed);
+        Directory.CreateDirectory(excluded);
+        File.WriteAllText(Path.Combine(listed, "App.csproj"), "<Project />");
+        File.WriteAllText(Path.Combine(excluded, "Unrelated.csproj"), "<Project />");
+        File.WriteAllText(Path.Combine(root, "App.slnx"),
+            """<Solution><Project Path="src/App/App.csproj" /></Solution>""");
+
+        List<string> found = ApiCacheBuilder.DiscoverProjectFiles(root, scan: false);
+
+        Assert.HasCount(1, found);
+        Assert.EndsWith(Path.Combine("App", "App.csproj"), found[0]);
+    }
+
+    [TestMethod]
+    public void DiscoverProjectFiles_ClassicSln_IndexesOnlyTheProjectsTheSolutionLists()
+    {
+        string root = NewProjectDir("sln-classic");
+        string listed = Path.Combine(root, "src", "App");
+        string excluded = Path.Combine(root, "tools", "Unrelated");
+        Directory.CreateDirectory(listed);
+        Directory.CreateDirectory(excluded);
+        File.WriteAllText(Path.Combine(listed, "App.csproj"), "<Project />");
+        File.WriteAllText(Path.Combine(excluded, "Unrelated.csproj"), "<Project />");
+        File.WriteAllText(Path.Combine(root, "App.sln"),
+            """
+            Microsoft Visual Studio Solution File, Format Version 12.00
+            Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "App", "src\App\App.csproj", "{11111111-1111-1111-1111-111111111111}"
+            EndProject
+            """);
+
+        List<string> found = ApiCacheBuilder.DiscoverProjectFiles(root, scan: false);
+
+        Assert.HasCount(1, found);
+        Assert.EndsWith(Path.Combine("App", "App.csproj"), found[0]);
+    }
+
+    [TestMethod]
+    public void DiscoverProjectFiles_SolutionThatListsNothingReadable_FallsBackToScanning()
+    {
+        // An unparseable solution means membership is unknown, not that the solution
+        // builds nothing. Indexing nothing there would report every API as absent.
+        string root = NewProjectDir("sln-opaque");
+        string app = Path.Combine(root, "src", "App");
+        Directory.CreateDirectory(app);
+        File.WriteAllText(Path.Combine(app, "App.csproj"), "<Project />");
+        File.WriteAllText(Path.Combine(root, "App.slnx"), "not xml at all <<<");
+
+        List<string> found = ApiCacheBuilder.DiscoverProjectFiles(root, scan: false);
+
+        Assert.HasCount(1, found);
+        Assert.EndsWith(Path.Combine("App", "App.csproj"), found[0]);
+    }
+
+    [TestMethod]
+    public void DiscoverProjectFiles_SolutionListingAMissingProject_FallsBackToScanning()
+    {
+        // Every listed path is gone (a stale solution). Treating that as "builds nothing"
+        // would leave the projects that are actually present unindexed.
+        string root = NewProjectDir("sln-stale");
+        string app = Path.Combine(root, "src", "App");
+        Directory.CreateDirectory(app);
+        File.WriteAllText(Path.Combine(app, "App.csproj"), "<Project />");
+        File.WriteAllText(Path.Combine(root, "App.slnx"),
+            """<Solution><Project Path="src/Gone/Gone.csproj" /></Solution>""");
+
+        List<string> found = ApiCacheBuilder.DiscoverProjectFiles(root, scan: false);
+
+        Assert.HasCount(1, found);
+        Assert.EndsWith(Path.Combine("App", "App.csproj"), found[0]);
+    }
+
+    [TestMethod]
+    public void DiscoverProjectFiles_ExplicitScan_StillWalksTheWholeTree()
+    {
+        // 'refresh --scan' is the caller explicitly asking for everything below a
+        // directory, so solution membership must not narrow it.
+        string root = NewProjectDir("sln-scan");
+        string listed = Path.Combine(root, "src", "App");
+        string excluded = Path.Combine(root, "tools", "Unrelated");
+        Directory.CreateDirectory(listed);
+        Directory.CreateDirectory(excluded);
+        File.WriteAllText(Path.Combine(listed, "App.csproj"), "<Project />");
+        File.WriteAllText(Path.Combine(excluded, "Unrelated.csproj"), "<Project />");
+        File.WriteAllText(Path.Combine(root, "App.slnx"),
+            """<Solution><Project Path="src/App/App.csproj" /></Solution>""");
+
+        List<string> found = ApiCacheBuilder.DiscoverProjectFiles(root, scan: true);
+
+        Assert.HasCount(2, found);
+    }
+
+    #endregion
 }

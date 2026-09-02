@@ -4,6 +4,7 @@
 using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Services.ApiSearch;
 
 namespace WinApp.Cli.Services;
@@ -355,21 +356,47 @@ internal sealed class ApiMetadataService(
     /// <see cref="IsCachedIndexStale"/>. Manifests are matched on their recorded
     /// <c>ProjectDir</c>, not on file name, so a same-named project in another directory
     /// cannot be mistaken for this one and suppress indexing of the project being queried.
+    /// A directory holding several projects is stale until every one of them is indexed,
+    /// so a second project added beside the first does not stay invisible.
     /// </summary>
     private static bool IsProjectDirStale(string[] manifestFiles, string projectDir, string cacheDir)
     {
-        string? manifestPath = FindManifestPathForDir(manifestFiles, projectDir);
-        if (manifestPath is null)
+        List<string> manifestPaths = FindManifestPathsForDir(manifestFiles, projectDir);
+        if (manifestPaths.Count == 0)
+        {
+            return true;
+        }
+        if (manifestPaths.Count < CountProjectsInDir(projectDir))
         {
             return true;
         }
         string? restoreOutput = NuGetResolver.FindRestoreOutput(projectDir);
-        if (restoreOutput is not null
-            && File.GetLastWriteTimeUtc(restoreOutput) > File.GetLastWriteTimeUtc(manifestPath))
+        foreach (string manifestPath in manifestPaths)
         {
-            return true;
+            if (restoreOutput is not null
+                && File.GetLastWriteTimeUtc(restoreOutput) > File.GetLastWriteTimeUtc(manifestPath))
+            {
+                return true;
+            }
+            if (IsCachedIndexStale(manifestPath, projectDir, cacheDir))
+            {
+                return true;
+            }
         }
-        return IsCachedIndexStale(manifestPath, projectDir, cacheDir);
+        return false;
+    }
+
+    /// <summary>How many indexable project files a directory declares, ignoring failures.</summary>
+    private static int CountProjectsInDir(string projectDir)
+    {
+        try
+        {
+            return ApiCacheBuilder.DiscoverProjectFiles(projectDir, scan: false).Count;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return 0;
+        }
     }
 
     /// <summary>
@@ -430,9 +457,29 @@ internal sealed class ApiMetadataService(
     }
 
     /// <summary>
+    /// What to report when the cache lock is still held after the wait. This point is
+    /// only reached because the index was already known to be stale, so simply carrying
+    /// on would answer confidently from metadata that no longer describes the project.
+    /// The other process may however have just indexed it, so the staleness is
+    /// re-checked rather than either outcome being assumed. Returns <c>null</c> when the
+    /// index is now usable, or a retryable error message when it is not.
+    /// </summary>
+    internal string? LockTimedOutResult(string projectDir, string cacheDir)
+    {
+        if (!IsProjectDirStale(ManifestFiles(cacheDir), projectDir, cacheDir))
+        {
+            return null;
+        }
+        logger.LogWarning("Timed out waiting for the API metadata cache lock.");
+        return "The API metadata index for this project is out of date, and another winapp process " +
+            "has held the cache lock for 30 seconds. Answering now would use metadata that no longer " +
+            "describes the project. Retry once the other process finishes, or run " +
+            "'winapp find-api refresh' to rebuild the index.";
+    }
+
+    /// <summary>
     /// Runs an index pass under the cache lock. Returns an error message when the
-    /// index failed, or <c>null</c> when it succeeded (or when another process held
-    /// the lock for the whole wait, which is not this caller's failure).
+    /// index failed or could not be run, or <c>null</c> when the index is usable.
     /// </summary>
     internal string? RunIndexWithLock(string projectDir, string cacheDir)
     {
@@ -455,10 +502,7 @@ internal sealed class ApiMetadataService(
             }
             if (lockFile is null)
             {
-                // Still held after the wait. Fall through to querying whatever is on
-                // disk rather than failing — the other process may well have indexed
-                // what this query needs.
-                return null;
+                return LockTimedOutResult(projectDir, cacheDir);
             }
         }
 
@@ -521,16 +565,63 @@ internal sealed class ApiMetadataService(
     /// name: identically-named projects in different directories must never resolve
     /// to each other, and legacy caches may still hold unhashed manifest names.
     /// </summary>
-    private static string? FindManifestPathForDir(string[] files, string projectDir)
+    private static string? FindManifestPathForDir(string[] files, string projectDir) =>
+        FindManifestPathsForDir(files, projectDir).FirstOrDefault();
+
+    /// <summary>
+    /// Every cached manifest recorded for one project directory. A directory normally
+    /// holds one project, but it may legally hold several (<c>App.csproj</c> and
+    /// <c>Other.csproj</c> side by side), and those reference different packages — so
+    /// callers that answer a query must distinguish "one project" from "several" rather
+    /// than letting manifest enumeration order pick the API surface.
+    /// </summary>
+    private static List<string> FindManifestPathsForDir(string[] files, string projectDir)
     {
         string fullPath = Path.GetFullPath(projectDir);
+        var matches = new List<string>();
         foreach (string path in files)
         {
             ProjectManifest? manifest = DeserializeManifest(path);
             if (manifest is not null && manifest.ProjectDir.Equals(fullPath, StringComparison.OrdinalIgnoreCase))
             {
-                return path;
+                matches.Add(path);
             }
+        }
+        return matches;
+    }
+
+    /// <summary>
+    /// Resolves the scope for a directory that holds indexed projects: the project when
+    /// there is exactly one, an ambiguity failure when there are several, or
+    /// <see langword="null"/> when none are indexed so the caller's own fallback runs.
+    /// </summary>
+    private static ResolvedScope? ResolveDirScope(string[] files, string projectDir)
+    {
+        List<ProjectManifest> manifests = FindManifestPathsForDir(files, projectDir)
+            .Select(DeserializeManifest)
+            .Where(m => m is not null)
+            .Select(m => m!)
+            .ToList();
+
+        List<IGrouping<string, ProjectManifest>> distinct = manifests
+            .GroupBy(m => m.ProjectName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (distinct.Count == 1)
+        {
+            return ResolvedScope.Project(distinct[0].First());
+        }
+        if (distinct.Count > 1)
+        {
+            // Two projects in one directory reference different packages, so choosing
+            // one would make the answer depend on manifest enumeration order — and the
+            // caller would have no sign that the other project exists.
+            string names = string.Join(", ", distinct
+                .Select(g => $"'{g.Key}'")
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase));
+            return ResolvedScope.Failed(
+                $"This directory has {distinct.Count} indexed projects: {names}. " +
+                "Pick one with '--project <name>', or use '--project sdk' for the Windows SDK scope.");
         }
         return null;
     }
@@ -599,10 +690,9 @@ internal sealed class ApiMetadataService(
                     "or use '--project sdk' to query the machine-wide Windows SDK scope.");
             }
 
-            string? match = FindManifestPathForDir(files, fullPath);
-            if (match is not null)
+            if (ResolveDirScope(files, fullPath) is { } dirScope)
             {
-                return ResolvedScope.Project(DeserializeManifest(match));
+                return dirScope;
             }
             string? dirProjectName = ApiCacheBuilder.FindProjectNameInDir(fullPath);
             if (dirProjectName is not null)
@@ -633,10 +723,9 @@ internal sealed class ApiMetadataService(
         {
             // Resolve strictly by directory. Matching a same-named manifest from a
             // different directory would answer from an unrelated project's packages.
-            string? match = FindManifestPathForDir(files, cwd);
-            if (match is not null)
+            if (ResolveDirScope(files, cwd) is { } cwdScope)
             {
-                return ResolvedScope.Project(DeserializeManifest(match));
+                return cwdScope;
             }
             return ResolvedScope.Failed(NoProjectMessage);
         }
@@ -663,12 +752,29 @@ internal sealed class ApiMetadataService(
     /// </summary>
     private static ResolvedScope? ResolveSolutionScope(string dir, string[] files)
     {
-        if (ApiCacheBuilder.FindSolutionFileInDir(dir) is null)
+        if (ApiCacheBuilder.FindSolutionFileInDir(dir) is not { } solutionFile)
         {
             return null;
         }
 
-        List<IGrouping<string, ProjectManifest>> underSolution = FindManifestsUnderDir(files, dir)
+        // The solution says which projects it builds. A project indexed earlier from a
+        // sibling directory the solution excludes must not make the caller disambiguate
+        // against something their solution does not contain. An unreadable or empty
+        // solution leaves membership unknown, so everything indexed under the directory
+        // stays eligible.
+        var solutionProjectDirs = SolutionProjectReader.ReadProjectPaths(solutionFile)
+            .Select(Path.GetDirectoryName)
+            .Where(d => !string.IsNullOrEmpty(d))
+            .Select(d => Path.GetFullPath(d!))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        IEnumerable<ProjectManifest> candidates = FindManifestsUnderDir(files, dir);
+        if (solutionProjectDirs.Count > 0)
+        {
+            candidates = candidates.Where(m => solutionProjectDirs.Contains(Path.GetFullPath(m.ProjectDir)));
+        }
+
+        List<IGrouping<string, ProjectManifest>> underSolution = candidates
             .GroupBy(m => Path.GetFullPath(m.ProjectDir), StringComparer.OrdinalIgnoreCase)
             .ToList();
         if (underSolution.Count == 1)
