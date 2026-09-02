@@ -14,10 +14,12 @@
     <!-- Enable Code Analysis -->
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisMode>Recommended</AnalysisMode>
-    <!-- NU5123: the package id is long, so lib/<tfm>/<assembly>.dll inside the package trips
-         NuGet''s advisory long-path check once a long prerelease label is appended to the version.
-         Restore and consumption work on any system with long-path support, which .NET 10 requires. -->
-    <NoWarn>CA1852;NU5123</NoWarn>
+    <NoWarn>CA1852</NoWarn>
+    <!-- NU5123 measures "<id>/<version>/lib/<tfm>/<file>" against NuGet's 200-character advisory
+         limit. Released versions are nowhere near it: 1.0.0 gives 145 characters here. Only a
+         branch-named prerelease label makes it long, and those builds are never published. Suppress
+         it just for those, so a release pack still fails loudly if the id or file names ever grow. -->
+    <NoWarn Condition="$(Version.Contains('-')) AND $(Version.Length) &gt; 20">$(NoWarn);NU5123</NoWarn>
 
     <!-- Ship IntelliSense with the package, and let CS1591 hold the public surface to account. -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>

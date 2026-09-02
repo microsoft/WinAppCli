@@ -422,6 +422,44 @@ public partial class RealUiAutomationTests
     }
 
     [TestMethod]
+    public async Task PublicMethods_AlreadyCancelledToken_ThrowBeforeWalkingTheTree()
+    {
+        // The interface documents `ct` as cancelling each call, so an already-cancelled token must
+        // not quietly complete an expensive UIA traversal and return results.
+        using var fx = new UiaTestFixture();
+        var svc = NewService();
+        var uiTarget = SessionFor(fx);
+        var element = await ResolveAsync(svc, uiTarget, "btnInvoke");
+
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        var ct = cts.Token;
+
+        var selector = new UiSelector { Query = "btnInvoke" };
+        Func<Task>[] calls =
+        [
+            () => svc.InspectAsync(uiTarget, null, 1, ct),
+            () => svc.InspectAncestorsAsync(uiTarget, element.Selector!, ct),
+            () => svc.SearchAsync(uiTarget, selector, 5, ct),
+            () => svc.FindSingleElementAsync(uiTarget, selector, ct),
+            () => svc.GetPropertiesAsync(uiTarget, element, "Name", ct),
+            () => svc.ScreenshotAsync(uiTarget, null, false, false, ct),
+            () => svc.InvokeAsync(uiTarget, element, ct),
+            () => svc.SetValueAsync(uiTarget, element, "x", ct),
+            () => svc.FocusAsync(uiTarget, element, ct),
+            () => svc.ScrollIntoViewAsync(uiTarget, element, ct),
+            () => svc.ScrollContainerAsync(uiTarget, element, "down", null, ct),
+            () => svc.GetFocusedElementAsync(uiTarget, ct),
+            () => svc.GetTextAsync(uiTarget, element, ct),
+        ];
+
+        foreach (var call in calls)
+        {
+            await Assert.ThrowsExactlyAsync<OperationCanceledException>(call);
+        }
+    }
+
+    [TestMethod]
     public async Task FindSingleElementAsync_NotFound_ReturnsNull()
     {
         using var fx = new UiaTestFixture();

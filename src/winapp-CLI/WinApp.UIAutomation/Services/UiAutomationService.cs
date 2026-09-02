@@ -158,6 +158,8 @@ internal sealed partial class UiAutomationService : IUiAutomation
 
     public Task<UiElement[]> InspectAsync(UiTarget uiTarget, string? elementId, int depth, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+
         _logger.LogDebug("Inspecting process {Pid} at depth {Depth}", uiTarget.ProcessId, depth);
         var nextElementId = 0;
 
@@ -294,6 +296,8 @@ internal sealed partial class UiAutomationService : IUiAutomation
 
     public Task<UiElement[]> InspectAncestorsAsync(UiTarget uiTarget, string elementId, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+
         _logger.LogDebug("Inspecting ancestors of {ElementId}", elementId);
         var nextElementId = 0;
 
@@ -387,6 +391,8 @@ internal sealed partial class UiAutomationService : IUiAutomation
 
     public Task<UiElement[]> SearchAsync(UiTarget uiTarget, UiSelector selector, int maxResults, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+
         _logger.LogDebug("Searching in process {Pid}", uiTarget.ProcessId);
         var nextElementId = 0;
 
@@ -546,6 +552,8 @@ internal sealed partial class UiAutomationService : IUiAutomation
 
     public Task<UiElement?> FindSingleElementAsync(UiTarget uiTarget, UiSelector selector, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+
         _logger.LogDebug("Finding single element in process {Pid}", uiTarget.ProcessId);
 
         var root = GetRootElement(uiTarget);
@@ -714,6 +722,8 @@ return Task.FromResult<UiElement?>(null);
 
     public Task<Dictionary<string, object?>> GetPropertiesAsync(UiTarget uiTarget, UiElement element, string? propertyName, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+
         // Basic properties from the UiElement model
         var props = new Dictionary<string, object?>
         {
@@ -820,6 +830,8 @@ return Task.FromResult<UiElement?>(null);
 
     public Task<string> InvokeAsync(UiTarget uiTarget, UiElement element, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+
         _logger.LogDebug("Invoking element {ElementId}", element.Id);
 
         var comElement = ResolveComElement(uiTarget, element);
@@ -874,6 +886,8 @@ return Task.FromResult<UiElement?>(null);
 
     public Task SetValueAsync(UiTarget uiTarget, UiElement element, string text, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+
         _logger.LogDebug("Setting value on element {ElementId}", element.Id);
 
         var comElement = ResolveComElement(uiTarget, element);
@@ -891,6 +905,8 @@ return Task.FromResult<UiElement?>(null);
 
     public Task FocusAsync(UiTarget uiTarget, UiElement element, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+
         _logger.LogDebug("Focusing element {ElementId}", element.Id);
 
         var comElement = ResolveComElement(uiTarget, element);
@@ -905,6 +921,8 @@ return Task.FromResult<UiElement?>(null);
 
     public Task<string?> GetTextAsync(UiTarget uiTarget, UiElement element, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+
         _logger.LogDebug("Getting text from element {ElementId}", element.Id);
 
         var comElement = ResolveComElement(uiTarget, element);
@@ -981,6 +999,8 @@ return Task.FromResult<UiElement?>(null);
 
     public Task ScrollIntoViewAsync(UiTarget uiTarget, UiElement element, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+
         _logger.LogDebug("Scrolling element {ElementId} into view", element.Id);
 
         var comElement = ResolveComElement(uiTarget, element);
@@ -1051,6 +1071,8 @@ return Task.FromResult<UiElement?>(null);
 
     public Task ScrollContainerAsync(UiTarget uiTarget, UiElement element, string? direction, string? destination, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+
         _logger.LogDebug("Scrolling container {ElementId}", element.Id);
 
         var comElement = ResolveComElement(uiTarget, element);
@@ -1169,6 +1191,8 @@ return Task.FromResult<UiElement?>(null);
 
     public Task<UiElement?> GetFocusedElementAsync(UiTarget uiTarget, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+
         _logger.LogDebug("Getting focused element for process {Pid}", uiTarget.ProcessId);
 
         IUIAutomationElement? focused;

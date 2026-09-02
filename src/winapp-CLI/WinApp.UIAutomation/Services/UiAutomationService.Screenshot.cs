@@ -31,6 +31,8 @@ internal sealed partial class UiAutomationService
     /// </remarks>
     public async Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiTarget uiTarget, string? elementId, bool captureScreen, bool focus, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+
         _logger.LogDebug("Taking screenshot of process {Pid} (captureScreen={CaptureScreen}, focus={Focus})", uiTarget.ProcessId, captureScreen, focus);
 
         var root = GetRootElement(uiTarget);
