@@ -38,21 +38,34 @@ internal sealed class SimpleTypeProvider : ISignatureTypeProvider<string, object
         };
     }
 
-    public string GetTypeFromDefinition(MetadataReader reader, TypeDefinitionHandle handle, byte rawTypeKind)
-    {
-        TypeDefinition typeDefinition = reader.GetTypeDefinition(handle);
-        string name = reader.GetString(typeDefinition.Name);
-        string ns = reader.GetString(typeDefinition.Namespace);
-        return string.IsNullOrEmpty(ns) ? name : ns + "." + name;
-    }
+    public string GetTypeFromDefinition(MetadataReader reader, TypeDefinitionHandle handle, byte rawTypeKind) =>
+        WinMdParser.BuildFullTypeName(reader, reader.GetTypeDefinition(handle));
 
-    public string GetTypeFromReference(MetadataReader reader, TypeReferenceHandle handle, byte rawTypeKind)
+    public string GetTypeFromReference(MetadataReader reader, TypeReferenceHandle handle, byte rawTypeKind) =>
+        BuildReferenceName(reader, handle, depth: 0);
+
+    /// <summary>
+    /// Names a referenced type the way <see cref="WinMdParser.BuildFullTypeName"/> names a
+    /// defined one. A reference to a nested type carries only its own simple name and
+    /// resolves its parent through <see cref="TypeReference.ResolutionScope"/>, so reading
+    /// its namespace alone renders a field or parameter as a bare <c>Inner</c> — a name
+    /// that matches no indexed type, or matches an arbitrary same-named one.
+    /// </summary>
+    private static string BuildReferenceName(MetadataReader reader, TypeReferenceHandle handle, int depth)
     {
         TypeReference typeReference = reader.GetTypeReference(handle);
         string name = reader.GetString(typeReference.Name);
+        if (depth < MaxNestingDepth && typeReference.ResolutionScope.Kind == HandleKind.TypeReference)
+        {
+            string outer = BuildReferenceName(reader, (TypeReferenceHandle)typeReference.ResolutionScope, depth + 1);
+            return outer + "." + name;
+        }
         string ns = reader.GetString(typeReference.Namespace);
         return string.IsNullOrEmpty(ns) ? name : ns + "." + name;
     }
+
+    /// <summary>Bounds the resolution-scope walk against malformed or circular metadata.</summary>
+    private const int MaxNestingDepth = 32;
 
     public string GetSZArrayType(string elementType) => elementType + "[]";
 

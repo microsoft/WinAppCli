@@ -41,17 +41,17 @@ internal static class WinMdParser
             {
                 TypeDefinition typeDef = reader.GetTypeDefinition(handle);
                 string name = reader.GetString(typeDef.Name);
-                string ns = reader.GetString(typeDef.Namespace);
                 if (ShouldSkipType(name, typeDef))
                 {
                     continue;
                 }
+                string ns = BuildNamespace(reader, typeDef);
 
                 TypeKind typeKind = DetermineTypeKind(reader, typeDef);
                 string? baseTypeName = GetBaseTypeName(reader, typeDef);
                 List<WinMdMemberInfo> members = ParseMembers(reader, typeDef, typeProvider);
                 List<string>? enumValues = typeKind == TypeKind.Enum ? ParseEnumValues(reader, typeDef) : null;
-                string fullName = string.IsNullOrEmpty(ns) ? name : ns + "." + name;
+                string fullName = BuildFullTypeName(reader, typeDef);
                 string? deprecatedMessage = GetDeprecatedMessage(reader, typeDef.GetCustomAttributes());
                 results.Add(new WinMdTypeInfo
                 {
@@ -77,6 +77,72 @@ internal static class WinMdParser
             return new WinMdParseResult(results, ex.Message);
         }
         return new WinMdParseResult(results, null);
+    }
+
+    /// <summary>
+    /// Maximum nesting depth walked when qualifying a nested type. Real metadata nests
+    /// a handful of levels at most; the bound only stops a malformed or hostile file
+    /// whose declaring-type chain is circular from spinning here.
+    /// </summary>
+    private const int MaxNestingDepth = 32;
+
+    /// <summary>
+    /// The fully-qualified name of a type as a caller would write it.
+    /// <para>
+    /// A nested type carries no namespace of its own — ECMA-335 puts the namespace on
+    /// the outermost enclosing type and links the nested type to its parent through the
+    /// NestedClass table. Reading <c>typeDef.Namespace</c> for one therefore yields an
+    /// empty string, so naming it from its own namespace and name alone drops it into
+    /// the global namespace under its bare name. In Win32 metadata that is not a corner
+    /// case: <c>_Anonymous_e__Union</c> alone occurs thousands of times, so every one of
+    /// those types collides with all the others under a single meaningless name.
+    /// </para>
+    /// </summary>
+    internal static string BuildFullTypeName(MetadataReader reader, TypeDefinition typeDef)
+    {
+        string name = reader.GetString(typeDef.Name);
+        if (!typeDef.IsNested)
+        {
+            string ownNs = reader.GetString(typeDef.Namespace);
+            return string.IsNullOrEmpty(ownNs) ? name : ownNs + "." + name;
+        }
+        var parts = new List<string> { name };
+        TypeDefinition outermost = typeDef;
+        for (int depth = 0; depth < MaxNestingDepth && outermost.IsNested; depth++)
+        {
+            TypeDefinitionHandle declaring = outermost.GetDeclaringType();
+            if (declaring.IsNil)
+            {
+                break;
+            }
+            outermost = reader.GetTypeDefinition(declaring);
+            parts.Add(reader.GetString(outermost.Name));
+        }
+        parts.Reverse();
+        // Joined with '.', not the '+' of reflection names, because find-api answers
+        // "what do I type in my code" and C# spells a nested type Outer.Inner.
+        string nested = string.Join('.', parts);
+        string ns = reader.GetString(outermost.Namespace);
+        return string.IsNullOrEmpty(ns) ? nested : ns + "." + nested;
+    }
+
+    /// <summary>
+    /// The namespace a type belongs to, taken from its outermost enclosing type when it
+    /// is nested. See <see cref="BuildFullTypeName"/>.
+    /// </summary>
+    internal static string BuildNamespace(MetadataReader reader, TypeDefinition typeDef)
+    {
+        TypeDefinition outermost = typeDef;
+        for (int depth = 0; depth < MaxNestingDepth && outermost.IsNested; depth++)
+        {
+            TypeDefinitionHandle declaring = outermost.GetDeclaringType();
+            if (declaring.IsNil)
+            {
+                break;
+            }
+            outermost = reader.GetTypeDefinition(declaring);
+        }
+        return reader.GetString(outermost.Namespace);
     }
 
     internal static bool ShouldSkipType(string name, TypeDefinition typeDef)

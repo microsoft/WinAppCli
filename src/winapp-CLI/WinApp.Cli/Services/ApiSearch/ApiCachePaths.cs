@@ -16,13 +16,15 @@ internal static class ApiCachePaths
 {
     /// <summary>
     /// Version of the on-disk cache layout. Bump this whenever the *shape* or
-    /// *naming* of the files under a package cache directory changes: a cache
+    /// *naming* of the files under a package cache directory changes, and also
+    /// whenever the *meaning* of what is recorded in them changes: a cache
     /// written by an older layout is otherwise reused and reads as an empty
-    /// index rather than an error. <see cref="PackageMeta.Format"/> records the
-    /// version a cache was written with, and the builder refuses to reuse a
-    /// package whose recorded version is not this one.
+    /// index rather than an error, and one written with older naming keeps
+    /// answering with names this build no longer produces. <see cref="PackageMeta.Format"/>
+    /// records the version a cache was written with, and the builder refuses to
+    /// reuse a package whose recorded version is not this one.
     /// </summary>
-    internal const int CacheFormatVersion = 3;
+    internal const int CacheFormatVersion = 4;
 
     /// <summary>
     /// File name of the machine-wide "SDK scope" manifest, written as a sibling of
