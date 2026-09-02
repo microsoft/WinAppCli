@@ -751,7 +751,8 @@ internal static class ApiQueryEngine
             }
             foreach (var m in baseType.Members)
             {
-                if (seenSignatures.Add(MemberDedupKey(m)))
+                string dedupKey = MemberDedupKey(m);
+                if (seenSignatures.Add(dedupKey))
                 {
                     result.Add((m, baseType.FullName));
                 }

@@ -292,17 +292,10 @@ internal sealed class ApiMetadataService(
             return null;
         }
 
-        bool needsUpdate;
-        if (manifestFiles.Length == 0)
-        {
-            needsUpdate = true;
-        }
-        else
-        {
-            // Only a directory that actually holds a project is indexed from here.
-            needsUpdate = ApiCacheBuilder.FindProjectNameInDir(projectDir) is not null
-                && IsProjectDirStale(manifestFiles, projectDir, cacheDir);
-        }
+        // Only a directory that actually holds a project is indexed from here.
+        bool needsUpdate = manifestFiles.Length == 0
+            || (ApiCacheBuilder.FindProjectNameInDir(projectDir) is not null
+                && IsProjectDirStale(manifestFiles, projectDir, cacheDir));
 
         if (needsUpdate)
         {
@@ -329,19 +322,16 @@ internal sealed class ApiMetadataService(
             indexed.Select(m => Path.GetFullPath(m.ProjectDir).TrimEnd(Path.DirectorySeparatorChar)),
             StringComparer.OrdinalIgnoreCase);
 
-        DateTime lastIndexed = DateTime.MinValue;
-        foreach (ProjectManifest manifest in indexed)
-        {
-            if (DateTime.TryParse(
+        DateTime lastIndexed = indexed
+            .Select(manifest => DateTime.TryParse(
                     manifest.GeneratedAt,
                     CultureInfo.InvariantCulture,
                     DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal,
                     out DateTime generated)
-                && generated > lastIndexed)
-            {
-                lastIndexed = generated;
-            }
-        }
+                ? generated
+                : DateTime.MinValue)
+            .DefaultIfEmpty(DateTime.MinValue)
+            .Max();
 
         foreach (string projectFile in ApiCacheBuilder.DiscoverProjectFiles(solutionDir, scan: false))
         {
@@ -395,15 +385,13 @@ internal sealed class ApiMetadataService(
     {
         DateTime manifestWriteTime = File.GetLastWriteTimeUtc(manifestPath);
 
-        foreach (string projectFile in ApiCacheBuilder.DiscoverProjectFiles(projectDir, scan: false))
+        bool referencedWinmdIsNewer = ApiCacheBuilder.DiscoverProjectFiles(projectDir, scan: false)
+            .SelectMany(NuGetResolver.FindWinMdFromProjectReferences)
+            .SelectMany(reference => reference.WinMdFiles)
+            .Any(winmd => File.GetLastWriteTimeUtc(winmd) > manifestWriteTime);
+        if (referencedWinmdIsNewer)
         {
-            foreach (PackageWithWinMd reference in NuGetResolver.FindWinMdFromProjectReferences(projectFile))
-            {
-                if (reference.WinMdFiles.Any(winmd => File.GetLastWriteTimeUtc(winmd) > manifestWriteTime))
-                {
-                    return true;
-                }
-            }
+            return true;
         }
 
         try
@@ -699,17 +687,11 @@ internal sealed class ApiMetadataService(
     private static List<ProjectManifest> FindManifestsUnderDir(string[] files, string root)
     {
         string prefix = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        var found = new List<ProjectManifest>();
-        foreach (string path in files)
-        {
-            ProjectManifest? manifest = DeserializeManifest(path);
-            if (manifest is not null
-                && Path.GetFullPath(manifest.ProjectDir).StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            {
-                found.Add(manifest);
-            }
-        }
-        return found;
+        return files
+            .Select(DeserializeManifest)
+            .OfType<ProjectManifest>()
+            .Where(manifest => Path.GetFullPath(manifest.ProjectDir).StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .ToList();
     }
 
     private static bool IsSdkScopeName(string name) =>

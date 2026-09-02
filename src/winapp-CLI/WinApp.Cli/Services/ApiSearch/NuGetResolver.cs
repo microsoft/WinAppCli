@@ -70,20 +70,13 @@ internal static partial class NuGetResolver
             // read (see SelectWindowsTarget). Taking the first moniker instead would let
             // a multi-targeted project read 26100 package assets against 19041 SDK
             // metadata and report a 26100 API as missing.
-            string? best = null;
-            Version? bestVersion = null;
-            foreach (string moniker in monikers)
-            {
-                Match match = WindowsPlatformMoniker.Match(moniker);
-                if (match.Success
-                    && Version.TryParse(match.Groups[1].Value, out Version? platform)
-                    && (bestVersion is null || platform > bestVersion))
-                {
-                    bestVersion = platform;
-                    best = match.Groups[1].Value;
-                }
-            }
-            return best;
+            return monikers
+                .Select(moniker => WindowsPlatformMoniker.Match(moniker))
+                .Where(match => match.Success)
+                .Select(match => match.Groups[1].Value)
+                .Where(platform => Version.TryParse(platform, out _))
+                .OrderByDescending(Version.Parse)
+                .FirstOrDefault();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -417,13 +410,9 @@ internal static partial class NuGetResolver
             var packageFolders = new List<string>();
             if (root.TryGetProperty("packageFolders", out var packageFoldersEl))
             {
-                foreach (JsonProperty folder in packageFoldersEl.EnumerateObject())
-                {
-                    if (IsProbeablePath(folder.Name))
-                    {
-                        packageFolders.Add(folder.Name);
-                    }
-                }
+                packageFolders.AddRange(packageFoldersEl.EnumerateObject()
+                    .Where(folder => IsProbeablePath(folder.Name))
+                    .Select(folder => folder.Name));
             }
 
             if (!root.TryGetProperty("libraries", out var librariesEl))
