@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -94,6 +94,11 @@
          dev/CI builds can resolve the bits locally; end users download them on first use. -->
     <PackageReference Include="Microsoft.Debugging.Platform.DbgEng" ExcludeAssets="all" PrivateAssets="all" GeneratePathProperty="true" />
     <PackageReference Include="Microsoft.Debugging.Platform.SymSrv" ExcludeAssets="all" PrivateAssets="all" GeneratePathProperty="true" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WinApp.UIAutomation\WinApp.UIAutomation.csproj" />
+    <ProjectReference Include="..\WinApp.UIAutomation.Recording\WinApp.UIAutomation.Recording.csproj" />
   </ItemGroup>
 
   <ItemGroup>
