@@ -10,11 +10,10 @@
     <!--
       Packing is driven by scripts/package-nuget.ps1 (GeneratePackageOnBuild stays
       off so ordinary solution builds don't pack). The package is published
-      standalone as Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer; winapp also
-      consumes it at build time and embeds the extracted analyzer DLL. The
-      PackageId differs from the AssemblyName on purpose: the assembly identity
-      (and the WUIxxxx rule IDs) stay stable while the package rides winappCli's
-      own Microsoft.Windows.SDK.BuildTools.* namespace.
+      standalone as Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer. The PackageId
+      differs from the AssemblyName on purpose: the assembly identity (and the
+      WUIxxxx rule IDs) stay stable while the package rides winappCli's own
+      Microsoft.Windows.SDK.BuildTools.* namespace.
     -->
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
     <PackageId>Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer</PackageId>

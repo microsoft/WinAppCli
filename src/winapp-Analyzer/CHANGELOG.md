@@ -11,9 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Migrated into the `microsoft/winappCli` repo** (from `microsoft/win-dev-skills`)
   and repackaged as **`Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer`** (the assembly
   name stays `Microsoft.WindowsAppSDK.Analyzers`). The package is packed by
-  `scripts/package-nuget.ps1`, shares the CLI version, and is embedded in the `winapp`
-  CLI so `winapp run` surfaces the diagnostics for WinUI project-mode builds. **Not yet
-  published** — the first nuget.org release is cut by the repo's `rel/v*` pipeline.
+  `scripts/package-nuget.ps1` and shares the CLI version. Consumers add it as a
+  `PackageReference` to get the diagnostics. **Not yet published** — the first
+  nuget.org release is cut by the repo's `rel/v*` pipeline.
+- **Graceful self-deactivation contract** — when a consumer (or a future Windows
+  App SDK that bundles these analyzers) sets
+  `<WindowsAppSDKProvidesWinUIAnalyzer>true</WindowsAppSDKProvidesWinUIAnalyzer>`,
+  the package's `.targets` drops its analyzer from `@(Analyzer)` and skips its XAML
+  target, so a project referencing both never sees duplicate `WUIxxxx` diagnostics.
 - **`WUI1001` / `WUI1002` — Data-driven UWP→WinAppSDK API mapping rules**
   sourced from the [Microsoft Learn API mapping table](https://learn.microsoft.com/windows/apps/windows-app-sdk/migrate-to-windows-app-sdk/api-mapping-table).
   ~30 mappings shipped; adding more is a data PR (one row in `ApiMappings.g.cs` + one test).

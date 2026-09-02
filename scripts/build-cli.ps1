@@ -433,6 +433,15 @@ try
         if ($LASTEXITCODE -ne 0 -and $TestExitCode -eq 0) {
             $TestExitCode = $LASTEXITCODE
         }
+
+        # Verify the analyzer package's MSBuild self-deactivation contract (the .targets
+        # stand-down when WindowsAppSDKProvidesWinUIAnalyzer=true). The xUnit suite runs
+        # Roslyn in-memory and can't cover MSBuild targets, so this guards it separately.
+        Write-Host "[TEST] Verifying WinUI analyzer stand-down contract..." -ForegroundColor Blue
+        & "$ProjectRoot\src\winapp-Analyzer\tests\Test-StandDownContract.ps1"
+        if ($LASTEXITCODE -ne 0 -and $TestExitCode -eq 0) {
+            $TestExitCode = $LASTEXITCODE
+        }
     
         # Copy test results to artifacts BEFORE checking for failure - find all TRX files
         Write-Host "[TEST] Collecting test results..." -ForegroundColor Blue

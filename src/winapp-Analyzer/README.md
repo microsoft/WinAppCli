@@ -61,32 +61,34 @@ The analyzer references the oldest supported Roslyn (`Microsoft.CodeAnalysis.CSh
 
 ## Distribution
 
-The analyzer is delivered two ways from a single build (see the design in the
-`winappCli` repo and `scripts/package-nuget.ps1`):
+The analyzer ships as a **standalone NuGet package**, packed by
+`scripts/package-nuget.ps1` and pushed to nuget.org by the repo's `rel/v*` release
+pipeline (it shares the CLI version and is signed there):
 
-* **Standalone NuGet package** — packed as
-  **`Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer`** (note: the package ID
-  differs from the assembly name, which stays `Microsoft.WindowsAppSDK.Analyzers`).
+* **`Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer`** — note the package ID differs
+  from the assembly name, which stays `Microsoft.WindowsAppSDK.Analyzers`.
   `dotnet build`, Visual Studio, and CI pick it up through the normal
-  `analyzers/dotnet/cs` convention. Reference it directly to get the diagnostics
-  without the CLI.
-* **Embedded in the `winapp` CLI** — `winapp run` extracts and injects the same
-  analyzer DLL for WinUI project-mode builds, so you get the diagnostics even
-  without a `PackageReference`. A build-time provenance gate asserts the embedded
-  DLL is byte-identical to the one packed into the NuGet package.
+  `analyzers/dotnet/cs` convention. Add it as a `PackageReference` to get the
+  diagnostics.
 
-Both artifacts share the CLI version and are signed and pushed to nuget.org by the
-repo's `rel/v*` release pipeline.
+### Turning it off
+
+* **Automatic hand-off (coordination contract).** If the Windows App SDK later
+  ships these analyzers itself, this package stands down automatically when the
+  SDK's build sets `<WindowsAppSDKProvidesWinUIAnalyzer>true</WindowsAppSDKProvidesWinUIAnalyzer>`
+  — it drops its analyzer from `@(Analyzer)` and skips its XAML target, so a
+  project referencing both never sees duplicate `WUIxxxx` diagnostics. You can set
+  the same property yourself to force it off.
+* **Manual opt-out.** Use NuGet's built-in switch on the reference:
+  `<PackageReference Include="Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer" ExcludeAssets="analyzers" />`.
 
 ## Status
 
 **Preview / `0.x`.** Rule IDs are immutable, but the rule set itself will grow.
 Every rule has a `helpLinkUri` into the rule catalog (`RULES.md`). Rules ship at
 `Warning` severity (never `Error`) so adding a rule can never break someone's build
-by default. When `winapp run` injects the analyzer it also exempts the `WUIxxxx`
-IDs from `TreatWarningsAsErrors`, so an automatic injection can never turn a
-passing build red (a user can still opt an individual rule into an error via their
-own `WarningsAsErrors`).
+by default (a user can still opt an individual rule into an error via their own
+`WarningsAsErrors`).
 
 ## Contributing
 
@@ -95,5 +97,3 @@ own `WarningsAsErrors`).
   `helpLinkUri` into `HelpLinks.cs`, and add positive / negative / FP-guard
   tests under `Microsoft.WindowsAppSDK.Analyzers.Tests/Rules/`. Update
   `RULES.md`, `CHANGELOG.md`, and the rule list in `AnalyzerReleases.Unshipped.md`.
-  If `winapp run`'s injected `WarningsNotAsErrors` list should cover the new ID,
-  add it in `src/winapp-CLI/WinApp.Cli/Services/AnalyzerInjectionService.cs`.
