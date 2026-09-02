@@ -110,7 +110,7 @@ internal partial class MsixService
         return new MsixIdentityResult(debugIdentity.PackageName, debugIdentity.Publisher, debugIdentity.ApplicationId);
     }
 
-    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, bool clean = false, string? executable = null, string? runtimeArch = null, FileInfo? projectFile = null, string? framework = null, bool noRestore = false, bool selfContained = false, CancellationToken cancellationToken = default)
+    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, bool clean = false, string? executable = null, string? runtimeArch = null, FileInfo? projectFile = null, string? framework = null, bool noRestore = false, bool selfContained = false, bool ensureExecutionAlias = false, CancellationToken cancellationToken = default)
     {
         // Validate inputs
         if (!appxManifestPath.Exists)
@@ -298,6 +298,20 @@ internal partial class MsixService
             manifestContent, null, null, executableMatch.FullName,
             sparse: false, selfContained,
             dotNetPackageList, taskContext, cancellationToken);
+
+        // Give the app an execution alias when it needs one to reach this terminal and does not author one
+        // itself. This edits the manifest STAGED in the AppX layout, never the one the user checked in —
+        // the alias is a launch mechanism winapp chose, so it should not appear in their source tree.
+        if (ensureExecutionAlias)
+        {
+            var staged = AppxManifestDocument.Parse(manifestContent);
+            var aliasName = ExecutionAliasResolver.BuildDefaultAliasName(staged.IdentityName);
+            if (aliasName != null && staged.EnsureExecutionAlias(aliasName) != null)
+            {
+                manifestContent = staged.ToXml();
+                taskContext.AddDebugMessage($"{UiSymbols.Link} Staged execution alias '{aliasName}'");
+            }
+        }
 
         await File.WriteAllTextAsync(copiedAppxManifestPath.FullName, manifestContent, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
 

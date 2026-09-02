@@ -133,6 +133,7 @@ internal partial class RunCommand
             // Shared launch/identity options (validity depends on packaging, checked below).
             var noLaunch = parseResult.GetValue(NoLaunchOption);
             var withAlias = parseResult.GetValue(WithAliasOption);
+            var withoutAlias = parseResult.GetValue(WithoutAliasOption);
             var debugOutput = parseResult.GetValue(DebugOutputOption);
             var unregisterOnExit = parseResult.GetValue(UnregisterOnExitOption);
             var detach = parseResult.GetValue(DetachOption);
@@ -222,7 +223,7 @@ internal partial class RunCommand
             return resolution.Packaging == ProjectPackaging.Packaged
                 ? await RunPackagedProjectAsync(
                     resolution, csproj, manifest, outputAppXDirectory, appArgs,
-                    noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, noBuild, isJson,
+                    noLaunch, withAlias, withoutAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, noBuild, isJson,
                     cancellationToken)
                 : await RunUnpackagedProjectAsync(
                     resolution, csproj, appArgs,
@@ -243,6 +244,7 @@ internal partial class RunCommand
             string? appArgs,
             bool noLaunch,
             bool withAlias,
+            bool withoutAlias,
             bool debugOutput,
             bool unregisterOnExit,
             bool detach,
@@ -270,10 +272,35 @@ internal partial class RunCommand
                 return Fail(message, isJson);
             }
 
+            // A console project (OutputType=Exe) launches through its execution alias by default so its
+            // output reaches this terminal; --without-alias opts back into AUMID activation.
+            var aliasDecision = ResolveAliasLaunch(
+                withAlias, withoutAlias, noLaunch, detach, isJson,
+                resolution.OutputType, ReadManifestPackageName(manifest, targetDir));
+
             return await ExecuteRunPipelineAsync(
                 targetDir, manifest, outputAppXDirectory, appArgs,
                 noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, isJson,
-                runtimeArch: resolution.Architecture, projectFile: csproj, framework: resolution.Framework, noRestore: resolution.NoRestore, selfContained: resolution.SelfContained, cancellationToken);
+                runtimeArch: resolution.Architecture, projectFile: csproj, framework: resolution.Framework, noRestore: resolution.NoRestore, selfContained: resolution.SelfContained,
+                aliasDecision, cancellationToken);
+        }
+
+        /// <summary>
+        /// Reads <c>Identity/@Name</c> from the project's manifest, so the default alias can be derived
+        /// from package identity before anything is staged. Returns null when it cannot be read; the
+        /// caller then stages no alias and the app keeps AUMID activation.
+        /// </summary>
+        private static string? ReadManifestPackageName(FileInfo? manifest, DirectoryInfo targetDir)
+        {
+            try
+            {
+                var file = manifest ?? FindManifest(targetDir.FullName);
+                return file.Exists ? AppxManifestDocument.Load(file.FullName).IdentityName : null;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
+            {
+                return null;
+            }
         }
 
         /// <summary>

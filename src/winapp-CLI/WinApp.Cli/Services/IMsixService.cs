@@ -98,6 +98,7 @@ internal interface IMsixService
         string? framework = null,
         bool noRestore = false,
         bool selfContained = false,
+        bool ensureExecutionAlias = false,
         CancellationToken cancellationToken = default);
 
     /// <summary>

@@ -832,7 +832,7 @@ using static Microsoft.UI.Reactor.Factories;
 ReactorApp.Run<MyApp>("Hello");
 ```
 
-**Manifest properties.** All five are optional; each falls back to a sensible default:
+**Manifest properties.** All are optional; each falls back to a sensible default:
 
 | Property | Sets | Default |
 |----------|------|---------|
@@ -921,17 +921,33 @@ assets, and refreshed on every run.
 `-p/--property`.
 
 > [!TIP]
-> **A console app needs `--with-alias` to show its output.** A packaged app launched through AUMID has
-> no console, so a console-only file-based app runs correctly but prints nothing. `--with-alias` keeps
-> stdin/stdout in your terminal, and winapp adds the required `uap5:ExecutionAlias` to the generated
-> manifest for you — you still get package identity:
+> **A console app prints to your terminal by default.** A packaged app launched through AUMID has no
+> console, so a console-only app would run correctly and print nothing. winapp avoids that: an app with
+> `OutputType=Exe` is launched through an execution alias instead, which inherits this terminal's
+> stdin/stdout/stderr. You still get package identity, and you don't have to ask for it:
 >
 > ```bash
-> winapp run counter.cs --with-alias
+> winapp run counter.cs
 > ```
 >
-> The alias also registers `counter.exe` as a command on your PATH, so it is added only when you ask
-> for it. An authored manifest is used as-is; declare the alias there yourself.
+> Pass `--without-alias` to force AUMID activation instead — the app then runs without a console and
+> prints nothing here. A windowed app (`WinExe`) shows a window, so it keeps AUMID activation; pass
+> `--with-alias` if you want one in this terminal anyway. To fix the choice in the file rather than on
+> every command line, set the same property a `.csproj` uses:
+>
+> ```csharp
+> #:property WinAppRunUseExecutionAlias=false
+> ```
+
+The alias winapp declares is named after the **package identity**, with a `winapp-` prefix — so
+`com.contoso.counter` gets `winapp-com.contoso.counter.exe`. Two different apps can never contend for
+one name, and the prefix keeps it clear of real commands: an app in `python.cs` gets
+`winapp-python.exe`, never `python.exe`. If you author your own manifest, the alias you declare there is
+used as-is and winapp adds nothing.
+
+The alias is a command on your PATH that lasts as long as the package stays registered. If some other
+package already owns the name, winapp says so and launches via AUMID instead rather than starting the
+wrong app.
 
 Two project-mode options do **not** apply, because a file-based app configures itself. They are
 rejected with a message naming the directive to use instead:
@@ -1045,7 +1061,7 @@ The following MSBuild properties can be set in your `.csproj` to control behavio
 |----------|---------|-------------|
 | `EnableWinAppRunSupport` | `true` | Enable/disable the run support functionality |
 | `WinAppLaunchArgs` | (empty) | Arguments to pass to the app on launch |
-| `WinAppRunUseExecutionAlias` | `false` | Launch via execution alias instead of AUMID activation |
+| `WinAppRunUseExecutionAlias` | `true` for `OutputType=Exe`, else `false` | Launch via execution alias instead of AUMID activation. A console app uses it by default so its output reaches the terminal; set `false` to force AUMID. |
 | `WinAppRunNoLaunch` | `false` | Only register identity without launching |
 | `WinAppRunDebugOutput` | `false` | Capture `OutputDebugString` messages and first-chance exceptions. Only one debugger can attach at a time (prevents VS/VS Code). Use `WinAppRunNoLaunch` instead to attach a different debugger. |
 | `WinAppRunDetach` | `false` | Return immediately after launching instead of waiting for the app to exit. Prints the PID. |

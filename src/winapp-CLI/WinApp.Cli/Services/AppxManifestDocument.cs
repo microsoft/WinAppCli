@@ -538,6 +538,103 @@ internal class AppxManifestDocument
     }
 
     /// <summary>
+    /// Returns the execution aliases the given application declares, or all of them when
+    /// <paramref name="appId"/> is null.
+    /// </summary>
+    public IReadOnlyList<string> GetExecutionAliases(string? appId = null)
+    {
+        var app = FindApplication(appId);
+        if (app == null)
+        {
+            return [];
+        }
+
+        return [.. app.Element(DefaultNs + "Extensions")
+            ?.Elements(Uap5Ns + "Extension")
+            .Where(e => string.Equals(e.Attribute("Category")?.Value, "windows.appExecutionAlias", StringComparison.OrdinalIgnoreCase))
+            .Descendants(Uap5Ns + "ExecutionAlias")
+            .Select(e => e.Attribute("Alias")?.Value)
+            .Where(v => !string.IsNullOrEmpty(v))
+            .Select(v => v!) ?? []];
+    }
+
+    /// <summary>
+    /// Declares <paramref name="aliasName"/> as an execution alias, unless the application already
+    /// declares one. Returns the alias now in effect, or <see langword="null"/> if none could be added.
+    /// </summary>
+    /// <remarks>
+    /// An alias the app author wrote is always left alone — they chose the command name deliberately, and
+    /// replacing it would rename a command their users already type. This exists so winapp can add one to
+    /// the <b>staged</b> manifest in the AppX layout, which lets a console app's output reach the terminal
+    /// without editing the manifest the user has checked in.
+    /// </remarks>
+    public string? EnsureExecutionAlias(string aliasName, string? appId = null)
+    {
+        var root = _document.Root;
+        var app = FindApplication(appId);
+        if (root == null || app == null || !ExecutionAliasResolver.IsSafeAliasName(aliasName))
+        {
+            return null;
+        }
+
+        var existing = GetExecutionAliases(appId);
+        if (existing.Count > 0)
+        {
+            return existing[0];
+        }
+
+        EnsureNamespace("uap5", Uap5Ns);
+        AddIgnorableNamespace("uap5");
+
+        var extensions = app.Element(DefaultNs + "Extensions");
+        if (extensions == null)
+        {
+            extensions = new XElement(DefaultNs + "Extensions");
+            app.Add(extensions);
+        }
+
+        var aliasElement = new XElement(Uap5Ns + "ExecutionAlias", new XAttribute("Alias", aliasName));
+
+        var aliasExtension = extensions.Elements(Uap5Ns + "Extension")
+            .FirstOrDefault(e => string.Equals(e.Attribute("Category")?.Value, "windows.appExecutionAlias", StringComparison.OrdinalIgnoreCase));
+
+        if (aliasExtension == null)
+        {
+            extensions.Add(new XElement(
+                Uap5Ns + "Extension",
+                new XAttribute("Category", "windows.appExecutionAlias"),
+                new XElement(Uap5Ns + "AppExecutionAlias", aliasElement)));
+        }
+        else
+        {
+            var appExecAlias = aliasExtension.Element(Uap5Ns + "AppExecutionAlias");
+            if (appExecAlias == null)
+            {
+                aliasExtension.Add(new XElement(Uap5Ns + "AppExecutionAlias", aliasElement));
+            }
+            else
+            {
+                appExecAlias.Add(aliasElement);
+            }
+        }
+
+        return aliasName;
+    }
+
+    private XElement? FindApplication(string? appId)
+    {
+        var applications = _document.Root?.Descendants(DefaultNs + "Application").ToList() ?? [];
+        if (applications.Count == 0)
+        {
+            return null;
+        }
+
+        return string.IsNullOrEmpty(appId)
+            ? applications[0]
+            : applications.FirstOrDefault(a => string.Equals(a.Attribute("Id")?.Value, appId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
     /// Raises every <c>TargetDeviceFamily/@MaxVersionTested</c> that is below <paramref name="minimum"/>.
     /// </summary>
     /// <remarks>

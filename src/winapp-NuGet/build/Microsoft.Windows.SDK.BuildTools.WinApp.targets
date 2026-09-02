@@ -221,6 +221,7 @@
       <_WinAppRunArgs Condition="'$(_WinAppLooseLayoutPathArg)' != ''">$(_WinAppRunArgs) --output-appx-directory "$(_WinAppLooseLayoutPathArg)"</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(WinAppLaunchArgs)' != ''">$(_WinAppRunArgs) --args "$(WinAppLaunchArgs)"</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(WinAppRunUseExecutionAlias)' == 'true'">$(_WinAppRunArgs) --with-alias</_WinAppRunArgs>
+      <_WinAppRunArgs Condition="'$(WinAppRunUseExecutionAlias)' == 'false'">$(_WinAppRunArgs) --without-alias</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(WinAppRunNoLaunch)' == 'true'">$(_WinAppRunArgs) --no-launch</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(WinAppRunDebugOutput)' == 'true'">$(_WinAppRunArgs) --debug-output</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(WinAppRunDetach)' == 'true'">$(_WinAppRunArgs) --detach</_WinAppRunArgs>

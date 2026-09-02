@@ -79,7 +79,8 @@ internal sealed record ProjectRunResolution(
     string Architecture,
     string? Framework = null,
     bool NoRestore = false,
-    string? RunArguments = null);
+    string? RunArguments = null,
+    string? OutputType = null);
 
 /// <summary>
 /// User-provided build inputs for project mode, forwarded to <c>dotnet build</c> / <c>dotnet msbuild</c>.

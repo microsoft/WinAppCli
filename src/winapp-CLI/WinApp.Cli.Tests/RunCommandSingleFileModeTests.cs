@@ -566,7 +566,7 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
     {
         // The generated manifest is rebuilt on every run, so "add one with winapp manifest add-alias" is
         // advice a user cannot act on here — any alias they add is destroyed by the next run. Without
-        // this, --with-alias can never succeed for a file-based app.
+        // this, alias launch can never succeed for a file-based app.
         var (singleFile, outputDir) = CreateSingleFileApp();
         SetOutcome(singleFile, outputDir);
         var command = GetRequiredService<RunCommand>();
@@ -576,9 +576,9 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
         var root = LoadGeneratedManifest(outputDir).Root!;
         XNamespace uap5 = "http://schemas.microsoft.com/appx/manifest/uap/windows10/5";
         var alias = root.Descendants(uap5 + "ExecutionAlias").SingleOrDefault();
-        Assert.IsNotNull(alias, "--with-alias must produce a uap5:ExecutionAlias in the generated manifest");
-        Assert.AreEqual("counter.exe", alias.Attribute("Alias")!.Value,
-            "The alias is inferred from the manifest's own Executable");
+        Assert.IsNotNull(alias, "Alias launch must produce a uap5:ExecutionAlias in the generated manifest");
+        Assert.AreEqual("winapp-counter.exe", alias.Attribute("Alias")!.Value,
+            "The alias is derived from package identity and prefixed, so it cannot collide with a real tool on PATH");
     }
 
     [TestMethod]
@@ -598,18 +598,38 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task SingleFileMode_ConsoleApp_HintsAtAliasWhenLaunchedViaAumid()
+    public async Task SingleFileMode_ConsoleApp_LaunchesViaAliasByDefault()
     {
-        // A packaged console app launched by AUMID writes to a console that does not exist, so the run
-        // looks like it did nothing. The hint names the flag that fixes it.
+        // The point of the default: a console app launched by AUMID has no console and prints nothing,
+        // which is the single most confusing thing about running one with identity. The user should not
+        // have to know that to see their own output.
         var (singleFile, outputDir) = CreateSingleFileApp();
         SetOutcome(singleFile, outputDir, "counter.exe", ("OutputType", "Exe"));
         var command = GetRequiredService<RunCommand>();
 
         await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName]);
 
-        StringAssert.Contains(TestAnsiConsole.Output, "--with-alias",
-            "A console app launched via AUMID should point the user at --with-alias");
+        XNamespace uap5 = "http://schemas.microsoft.com/appx/manifest/uap/windows10/5";
+        Assert.IsNotNull(LoadGeneratedManifest(outputDir).Root!.Descendants(uap5 + "ExecutionAlias").SingleOrDefault(),
+            "A console app should get an execution alias without the user asking for one");
+    }
+
+    [TestMethod]
+    public async Task SingleFileMode_ConsoleAppWithoutAlias_LaunchesViaAumidAndSaysSo()
+    {
+        // --without-alias is the opt-out. Losing console output is the surprising part of an otherwise
+        // reasonable request, so it is called out rather than left to be discovered.
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir, "counter.exe", ("OutputType", "Exe"));
+        var command = GetRequiredService<RunCommand>();
+
+        await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--without-alias"]);
+
+        XNamespace uap5 = "http://schemas.microsoft.com/appx/manifest/uap/windows10/5";
+        Assert.AreEqual(0, LoadGeneratedManifest(outputDir).Root!.Descendants(uap5 + "ExecutionAlias").Count(),
+            "--without-alias must not add an alias");
+        StringAssert.Contains(TestAnsiConsole.Output, "will not print here",
+            "The user should be told their console app produces no output this way");
     }
 
     [TestMethod]
@@ -624,6 +644,70 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
 
         Assert.IsFalse(TestAnsiConsole.Output.Contains("gives it no console", StringComparison.Ordinal),
             "A windowed app should not be told about the console hint");
+    }
+
+    [TestMethod]
+    public async Task SingleFileMode_UseExecutionAliasProperty_LaunchesViaAliasWithoutTheFlag()
+    {
+        // A windowed app keeps AUMID by default, so the property is how one opts in.
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir, "counter.exe",
+            ("OutputType", "WinExe"), ("WinAppRunUseExecutionAlias", "true"));
+        var command = GetRequiredService<RunCommand>();
+
+        await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName]);
+
+        var root = LoadGeneratedManifest(outputDir).Root!;
+        XNamespace uap5 = "http://schemas.microsoft.com/appx/manifest/uap/windows10/5";
+        Assert.IsNotNull(root.Descendants(uap5 + "ExecutionAlias").SingleOrDefault(),
+            "WinAppRunUseExecutionAlias=true must opt a windowed app into alias launch");
+    }
+
+    [TestMethod]
+    public async Task SingleFileMode_UseExecutionAliasPropertyFalse_OptsAConsoleAppOutOfTheDefault()
+    {
+        // The property overrides the output-type default in BOTH directions, so a console app can opt
+        // out from inside the file rather than needing --without-alias on every run.
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir, "counter.exe",
+            ("OutputType", "Exe"), ("WinAppRunUseExecutionAlias", "false"));
+        var command = GetRequiredService<RunCommand>();
+
+        await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName]);
+
+        XNamespace uap5 = "http://schemas.microsoft.com/appx/manifest/uap/windows10/5";
+        Assert.AreEqual(0, LoadGeneratedManifest(outputDir).Root!.Descendants(uap5 + "ExecutionAlias").Count(),
+            "WinAppRunUseExecutionAlias=false must keep AUMID activation for a console app");
+    }
+
+    [TestMethod]
+    public async Task SingleFileMode_UseExecutionAliasProperty_DoesNotOverrideAnExplicitLaunchSwitch()
+    {
+        // --detach describes a launch model an alias cannot express. A property in a checked-in app must
+        // not turn an unrelated command line into an error, so the command line wins.
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir, "counter.exe",
+            ("OutputType", "Exe"), ("WinAppRunUseExecutionAlias", "true"));
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--detach"]);
+
+        Assert.AreEqual(0, exitCode, "--detach must still succeed when the file prefers alias launch");
+        XNamespace uap5 = "http://schemas.microsoft.com/appx/manifest/uap/windows10/5";
+        Assert.AreEqual(0, LoadGeneratedManifest(outputDir).Root!.Descendants(uap5 + "ExecutionAlias").Count(),
+            "The explicit launch switch wins, so no alias is added");
+    }
+
+    [TestMethod]
+    public async Task SingleFileMode_WithAliasAndWithoutAlias_IsRejected()
+    {
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir);
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--with-alias", "--without-alias"]);
+
+        Assert.AreNotEqual(0, exitCode, "Asking for both launch mechanisms at once is a contradiction");
     }
 
     #endregion

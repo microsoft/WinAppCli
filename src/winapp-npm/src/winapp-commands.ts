@@ -637,8 +637,10 @@ export interface RunOptions extends CommonOptions {
   symbols?: boolean;
   /** Unregister the development package after the application exits. Only removes packages registered in development mode. */
   unregisterOnExit?: boolean;
-  /** Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use "winapp manifest add-alias" to add an execution alias to the manifest. */
+  /** Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Console apps (OutputType=Exe) already do this by default; pass this to force it for a windowed app. winapp adds a uap5:ExecutionAlias to the manifest it stages for you, so no manifest edit is needed. */
   withAlias?: boolean;
+  /** Launch via AUMID activation even for a console app, instead of the default execution alias. The app then runs without a console, so it prints nothing to this terminal. */
+  withoutAlias?: boolean;
   /** Arguments to pass to the launched application (forwarded after --). */
   appArgs?: string | string[];
 }
@@ -673,6 +675,7 @@ export async function run(options: RunOptions = {}): Promise<WinappResult> {
   if (options.symbols) args.push('--symbols');
   if (options.unregisterOnExit) args.push('--unregister-on-exit');
   if (options.withAlias) args.push('--with-alias');
+  if (options.withoutAlias) args.push('--without-alias');
   if (options.appArgs !== undefined) {
     const appArgsArr = Array.isArray(options.appArgs) ? options.appArgs : [options.appArgs];
     if (appArgsArr.length > 0) {

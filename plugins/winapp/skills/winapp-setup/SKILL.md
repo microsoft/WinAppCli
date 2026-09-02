@@ -215,12 +215,13 @@ Describe the package with `#:property` directives in the file. All are optional:
 | `WinAppVersion` | `Identity/@Version` | `$(Version)`, normalized to four 0–65535 parts (`1.2.3-preview.4` ⇒ `1.2.3.0`) |
 | `WinAppDescription` | Install/Settings description | the display name |
 | `WinAppCapabilities` | Capabilities to declare, separated by `;` or `,` | none |
+| `WinAppRunUseExecutionAlias` | Launch via execution alias instead of AUMID, so console output stays in the terminal | `true` for `OutputType=Exe`, else `false` |
 
 - **Capabilities for gated APIs.** Full trust covers notifications, protocol handlers and shell integration, but some APIs need a declared capability regardless — the Windows AI APIs most notably. `#:property WinAppCapabilities=systemAIModels` is all Phi Silica needs from the manifest. winapp writes each name into the element and namespace it actually requires (`<systemai:Capability>`, `<Capability>`, `<DeviceCapability>` — they differ), declares that namespace, and raises `MaxVersionTested` when required. An unknown bare name is rejected rather than guessed; qualify it yourself with `rescap:`, `uap:`, `systemai:`, `device:` or `app:`.
 
 - **Bring your own manifest** with `--manifest`, `#:property WinAppManifestPath=…`, or a manifest next to the `.cs` named `<filename>.appxmanifest`. Only that per-file name is auto-detected — a shared `Package.appxmanifest` in the folder is ignored, since several `.cs` files can live together. Otherwise one is generated into the build output (with default assets) and refreshed each run.
 - **Packaged and unpackaged both work**, from the effective `WindowsPackageType` — same as project mode. `None` builds, installs the Windows App Runtime, and launches the `.exe` directly; identity options apply to packaged apps only.
-- **Console apps need `--with-alias`** to show output — a packaged app launched by AUMID has no console. winapp adds the `uap5:ExecutionAlias` to the generated manifest when you pass the flag (it also puts the exe on PATH, so it is opt-in). An authored manifest must declare its own.
+- **Console apps print to the terminal by default.** An app with `OutputType=Exe` is launched through an execution alias rather than AUMID activation, because an AUMID-launched packaged app has no console and would print nothing. Pass `--without-alias` (or set `#:property WinAppRunUseExecutionAlias=false`) to force AUMID; pass `--with-alias` to get one for a windowed app. The alias is named from package identity with a `winapp-` prefix (`com.contoso.counter` → `winapp-com.contoso.counter.exe`), so it can never contend with a real command on PATH or with another app. An authored manifest's own alias is used as-is. If another package already owns the name, winapp reports it and falls back to AUMID rather than launching the wrong app.
 - **Rejected options** (the file configures itself): `-f` ⇒ `#:property TargetFramework=…`; `--project` ⇒ not applicable. `--arch`/`-r` work as in project mode and default to the **machine architecture** — required for self-contained WinAppSDK apps, which fail as `AnyCPU`. Everything else works as usual.
 - **The package outlives the run.** winapp says so the first time it registers an app. Remove it with `winapp unregister counter.cs` (no manifest path needed — it resolves the same identity), or run with `--unregister-on-exit`.
 - Requires **.NET SDK 10.0.300+**.
@@ -239,7 +240,7 @@ Describe the package with `#:property` directives in the file. All are optional:
 
 **Default to `winapp run`.** Use `create-debug-identity` when you need your IDE to launch and debug the exe directly (startup debugging), or when the exe is separate from your source (Electron).
 
-For console apps, add `--with-alias` to preserve stdin/stdout in the current terminal.
+Console apps keep stdin/stdout in the current terminal automatically when winapp knows the app is a console app — that is, running a `.csproj`/`.sln` or a `.cs` file, where `OutputType` is evaluated. Running a **build-output folder** gives winapp no project to read, so add `--with-alias` there.
 
 > **`--debug-output` caveat:** Captures `OutputDebugString` and crash diagnostics (minidump + automatic analysis for both managed and native crashes) but attaches winapp as the debugger — you cannot also attach VS Code or WinDbg. Use `--no-launch` if you need your own debugger. Add `--symbols` to download PDB symbols for richer native crash analysis. For WinUI 3 apps, a stowed-exception triage pass runs automatically (surfacing the originating HRESULT and native XAML dispatch stack); the debugger components it needs are downloaded on first use, or set `WINAPP_DBGTOOLS_DIR` to a directory containing `dbgeng.dll` and `JsProvider.dll` for offline/locked-down environments.
 

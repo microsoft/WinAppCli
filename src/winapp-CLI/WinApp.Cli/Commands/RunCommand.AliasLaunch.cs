@@ -1,0 +1,146 @@
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
+// Licensed under the MIT License.
+
+using Microsoft.Extensions.Logging;
+using WinApp.Cli.Helpers;
+
+namespace WinApp.Cli.Commands;
+
+/// <summary>
+/// How <c>winapp run</c> decides whether to launch a packaged app through its execution alias or through
+/// AUMID activation.
+/// </summary>
+/// <remarks>
+/// A packaged app launched by AUMID activation has no console, so a console app runs correctly and prints
+/// nothing — a silent success, and the single most confusing thing about running a console app with
+/// identity. Launching through an execution alias is an ordinary <c>CreateProcess</c>, so the app inherits
+/// this terminal's stdin/stdout/stderr.
+/// <para>
+/// Because that is what a console app almost always wants, it is the DEFAULT for <c>OutputType=Exe</c>
+/// rather than something the user has to know to ask for. A windowed app (<c>WinExe</c>) shows a window
+/// and gains nothing from it, so it keeps AUMID activation.
+/// </para>
+/// </remarks>
+internal partial class RunCommand
+{
+    public partial class Handler
+    {
+        /// <summary>
+        /// The launch mechanism chosen for a run, and the alias name it needs when that mechanism is the
+        /// execution alias.
+        /// </summary>
+        /// <param name="UseAlias">Whether to launch through the execution alias.</param>
+        /// <param name="AliasName">
+        /// The alias winapp should declare in the manifest it stages. Null when the app already declares
+        /// its own, or when alias launch is not being used.
+        /// </param>
+        /// <param name="Explicit">
+        /// Whether the user asked for alias launch by name (<c>--with-alias</c>). An explicit request that
+        /// cannot be honored is an error; the default silently falls back to AUMID, because a default must
+        /// not turn a run that works today into a failure.
+        /// </param>
+        internal readonly record struct AliasLaunchDecision(bool UseAlias, string? AliasName, bool Explicit)
+        {
+            public static AliasLaunchDecision Aumid => new(UseAlias: false, AliasName: null, Explicit: false);
+        }
+
+        /// <summary>
+        /// Decides how to launch, from the command line, the app's own preference, and its output type.
+        /// </summary>
+        /// <param name="outputType">Evaluated <c>OutputType</c>; <c>Exe</c> means a console app.</param>
+        /// <param name="packageName">Package identity, used to build a collision-free default alias.</param>
+        /// <param name="preferAlias">
+        /// The app's own <c>WinAppRunUseExecutionAlias</c> preference, when it declares one.
+        /// </param>
+        /// <remarks>
+        /// <c>--no-launch</c>, <c>--detach</c> and <c>--json</c> each describe a launch the alias cannot
+        /// express — nothing is started, nothing is waited on, or stdout must stay machine-readable — so
+        /// they keep AUMID regardless of what the app prefers.
+        /// </remarks>
+        internal static AliasLaunchDecision ResolveAliasLaunch(
+            bool withAlias,
+            bool withoutAlias,
+            bool noLaunch,
+            bool detach,
+            bool isJson,
+            string? outputType,
+            string? packageName,
+            bool? preferAlias = null)
+        {
+            if (noLaunch || detach || isJson || withoutAlias)
+            {
+                return AliasLaunchDecision.Aumid;
+            }
+
+            var isConsoleApp = string.Equals(outputType?.Trim(), "Exe", StringComparison.OrdinalIgnoreCase);
+
+            // Precedence: the command line, then the app's declared preference, then the output type.
+            var useAlias = withAlias || (preferAlias ?? isConsoleApp);
+            if (!useAlias)
+            {
+                return AliasLaunchDecision.Aumid;
+            }
+
+            return new AliasLaunchDecision(
+                UseAlias: true,
+                AliasName: ExecutionAliasResolver.BuildDefaultAliasName(packageName),
+                Explicit: withAlias);
+        }
+
+        /// <summary>
+        /// Checks that the alias winapp is about to declare is not already owned by a different package,
+        /// BEFORE anything is registered.
+        /// </summary>
+        /// <remarks>
+        /// Windows gives an alias to the first package that claims it and silently ignores later claims,
+        /// so registering into a taken name produces an app whose alias launches something else. Checking
+        /// first means the run never reaches that state.
+        /// <para>
+        /// The generated alias is derived from package identity and prefixed, so this should be
+        /// unreachable in practice; it exists because the cost of being wrong is launching another app.
+        /// An explicitly requested alias fails the run, while the default degrades to AUMID with a warning.
+        /// </para>
+        /// </remarks>
+        private bool TryConfirmAliasIsAvailable(AliasLaunchDecision decision, string? packageFamilyName, bool isJson)
+        {
+            if (decision.AliasName is not { Length: > 0 } alias)
+            {
+                return true;
+            }
+
+            var proxy = ExecutionAliasResolver.ResolveAliasPath(alias);
+            if (proxy is null || !proxy.Exists)
+            {
+                return true;
+            }
+
+            if (!ExecutionAliasResolver.TryGetAliasPackageFamilyName(proxy.FullName, out var owner) ||
+                owner is null ||
+                string.Equals(owner, packageFamilyName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (decision.Explicit)
+            {
+                logger.LogError(
+                    "{UISymbol} Execution alias '{Alias}' already belongs to package '{Owner}'. Windows gives an alias to the first package that claims it, so launching it would run that app instead. Unregister the owning package, or re-run with --without-alias to launch via AUMID.",
+                    UiSymbols.Error,
+                    alias,
+                    owner);
+                return false;
+            }
+
+            if (!isJson)
+            {
+                logger.LogWarning(
+                    "{UISymbol} Execution alias '{Alias}' already belongs to package '{Owner}', so this app will launch via AUMID and print nothing to this terminal. Unregister the owning package to get console output.",
+                    UiSymbols.Warning,
+                    alias,
+                    owner);
+            }
+
+            return false;
+        }
+    }
+}

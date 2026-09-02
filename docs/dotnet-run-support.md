@@ -77,7 +77,7 @@ samples/
 | `WinAppLooseLayoutPath` | `$(OutputPath)AppX\` | Output directory for loose-layout package |
 | `WinAppLaunchArgs` | (empty) | Arguments to pass to the app on launch |
 | `WinAppCliPath` | (in package) | Path to the winapp.exe CLI |
-| `WinAppRunUseExecutionAlias` | `false` | Launch via execution alias instead of AUMID. Keeps console I/O in the current terminal. Requires `uap5:ExecutionAlias` in the manifest. Cannot be combined with `WinAppRunNoLaunch`. |
+| `WinAppRunUseExecutionAlias` | `true` for `OutputType=Exe`, else `false` | Launch via execution alias instead of AUMID activation. Keeps console I/O in the current terminal, which is why a console app uses it by default. Set to `false` (or pass `--without-alias`) to force AUMID. Cannot be combined with `WinAppRunNoLaunch`. |
 | `WinAppRunNoLaunch` | `false` | Only register package identity without launching the app. Cannot be combined with `WinAppRunUseExecutionAlias`. |
 | `WinAppRunDebugOutput` | `false` | Attach as a debugger to capture `OutputDebugString` messages and first-chance exceptions. Only one debugger can attach at a time, so Visual Studio or VS Code cannot debug simultaneously. Use `WinAppRunNoLaunch` instead to attach a different debugger. Cannot be combined with `WinAppRunNoLaunch`. |
 | `WinAppRunDetach` | `false` | Return immediately after launching instead of waiting for the app to exit. Prints the PID. |
