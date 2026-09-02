@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Text.RegularExpressions;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
@@ -12,8 +13,10 @@ namespace WinApp.Cli.Tests;
 [TestClass]
 public class SingleFileManifestPlannerTests
 {
-    private static FileInfo SingleFile(string name = "counter.cs") =>
-        new(Path.Join(Path.GetTempPath(), name));
+    private static FileInfo SingleFile(string name = "counter.cs", string? folder = null) =>
+        new(folder is null
+            ? Path.Join(Path.GetTempPath(), name)
+            : Path.Join(Path.GetTempPath(), folder, name));
 
     private static Dictionary<string, string> Props(params (string Name, string Value)[] values)
     {
@@ -32,11 +35,47 @@ public class SingleFileManifestPlannerTests
     {
         var info = SingleFileManifestPlanner.Plan(SingleFile(), Props(), defaultPublisher: "CN=tester");
 
-        Assert.AreEqual("counter", info.PackageName);
-        Assert.AreEqual("counter", info.DisplayName);
+        // The identity carries a hash of the file's path, so two counter.cs files in different folders
+        // do not share an identity — and therefore do not share LocalState.
+        StringAssert.Matches(info.PackageName, PathHashedName("counter"));
+        Assert.AreEqual("counter", info.DisplayName, "the display name stays the readable stem");
         Assert.AreEqual("CN=tester", info.PublisherDN);
         Assert.AreEqual("1.0.0.0", info.Version);
         Assert.AreEqual("counter", info.Description, "description falls back to the display name");
+    }
+
+    [TestMethod]
+    public void Plan_SameStemInDifferentFolders_GetsDifferentIdentities()
+    {
+        // The collision this exists to prevent: same identity means the second run replaces the first's
+        // registration AND inherits its LocalState.
+        var a = SingleFileManifestPlanner.Plan(SingleFile("counter.cs", "app-a"), Props(), defaultPublisher: "CN=tester");
+        var b = SingleFileManifestPlanner.Plan(SingleFile("counter.cs", "app-b"), Props(), defaultPublisher: "CN=tester");
+
+        Assert.AreNotEqual(a.PackageName, b.PackageName);
+        Assert.AreEqual(a.DisplayName, b.DisplayName, "only the identity diverges; both still show as 'counter'");
+    }
+
+    [TestMethod]
+    public void Plan_SameFile_GetsAStableIdentityAcrossCalls()
+    {
+        // Identity has to survive edits and re-runs, or every run would strand the previous registration.
+        var first = SingleFileManifestPlanner.Plan(SingleFile(), Props(), defaultPublisher: "CN=tester");
+        var second = SingleFileManifestPlanner.Plan(SingleFile(), Props(), defaultPublisher: "CN=tester");
+
+        Assert.AreEqual(first.PackageName, second.PackageName);
+    }
+
+    [TestMethod]
+    public void Plan_DeclaredPackageName_IsUsedVerbatimWithNoHash()
+    {
+        // Naming the package is how a user opts into an identity they control, so it must not be altered.
+        var info = SingleFileManifestPlanner.Plan(
+            SingleFile(),
+            Props((SingleFileManifestPlanner.PackageNameProperty, "com.contoso.counter")),
+            defaultPublisher: "CN=tester");
+
+        Assert.AreEqual("com.contoso.counter", info.PackageName);
     }
 
     [TestMethod]
@@ -54,7 +93,7 @@ public class SingleFileManifestPlannerTests
 
         var info = SingleFileManifestPlanner.Plan(SingleFile(), props, defaultPublisher: "CN=tester");
 
-        Assert.AreEqual("counter", info.PackageName);
+        StringAssert.Matches(info.PackageName, PathHashedName("counter"));
         Assert.AreEqual("counter", info.DisplayName);
         Assert.AreEqual("CN=tester", info.PublisherDN);
         Assert.AreEqual("1.0.0.0", info.Version);
@@ -67,9 +106,12 @@ public class SingleFileManifestPlannerTests
         // the better default there.
         var info = SingleFileManifestPlanner.Plan(SingleFile("my tool.cs"), Props(), defaultPublisher: "CN=tester");
 
-        Assert.AreEqual("mytool", info.PackageName);
+        StringAssert.Matches(info.PackageName, PathHashedName("mytool"));
         Assert.AreEqual("my tool", info.DisplayName);
     }
+
+    /// <summary>Matches "&lt;stem&gt;-&lt;8 hex&gt;", the shape a default identity takes.</summary>
+    private static Regex PathHashedName(string stem) => new($"^{Regex.Escape(stem)}-[0-9a-f]{{8}}$");
 
     #endregion
 
@@ -446,7 +488,7 @@ public class SingleFileManifestPlannerTests
             var singleFile = new FileInfo(Path.Join(directory.FullName, "counter.cs"));
             var props = Props((SingleFileManifestPlanner.VersionProperty, "70000.0"));
 
-            Assert.AreEqual("counter", SingleFileManifestPlanner.ResolvePackageName(singleFile, props));
+            StringAssert.Matches(SingleFileManifestPlanner.ResolvePackageName(singleFile, props), PathHashedName("counter"));
             Assert.ThrowsExactly<ProjectRunException>(() => SingleFileManifestPlanner.Plan(singleFile, props),
                 "Generating a manifest with that version must still fail");
         }

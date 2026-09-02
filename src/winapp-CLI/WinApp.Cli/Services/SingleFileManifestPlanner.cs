@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml;
 using WinApp.Cli.Helpers;
@@ -345,9 +347,44 @@ internal static partial class SingleFileManifestPlanner
     /// producing an unpackable manifest.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// Resolves the package identity: the declared <c>WinAppPackageName</c>, or the file's own name with
+    /// a short hash of its full path appended.
+    /// </summary>
+    /// <remarks>
+    /// The path hash is what keeps two same-named files apart. Without it, every <c>counter.cs</c> on the
+    /// machine shares the identity <c>counter</c> under the default publisher, so running one replaces
+    /// another's registration AND hands it the first app's <c>LocalState</c> — an app silently reading and
+    /// overwriting an unrelated app's saved data. The execution alias is derived from this identity, so it
+    /// becomes unique here too.
+    /// <para>
+    /// Hashed from the full path, so it is stable across runs, configurations and machines with the same
+    /// layout, and changes only if the file moves. A declared <c>WinAppPackageName</c> is used verbatim:
+    /// naming the package is how a user opts into a stable identity they control.
+    /// </para>
+    /// </remarks>
     private static string InferPackageName(FileInfo singleFile, IReadOnlyDictionary<string, string> properties)
-        => ManifestService.CleanPackageName(
-            Read(properties, PackageNameProperty) ?? Path.GetFileNameWithoutExtension(singleFile.Name));
+    {
+        var declared = Read(properties, PackageNameProperty);
+        if (declared != null)
+        {
+            return ManifestService.CleanPackageName(declared);
+        }
+
+        var stem = ManifestService.CleanPackageName(Path.GetFileNameWithoutExtension(singleFile.Name));
+        return $"{stem}-{ComputePathSuffix(singleFile)}";
+    }
+
+    /// <summary>
+    /// Eight lowercase hex characters of the SHA-256 of the file's full path, case-insensitively
+    /// normalized because Windows paths are.
+    /// </summary>
+    private static string ComputePathSuffix(FileInfo singleFile)
+    {
+        var normalized = singleFile.FullName.ToLowerInvariant();
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
+        return Convert.ToHexStringLower(hash.AsSpan(0, 4));
+    }
 
     /// <summary>One to four dot-separated numeric components, and nothing else.</summary>
     [GeneratedRegex(@"^\d+(\.\d+){0,3}$")]

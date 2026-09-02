@@ -209,7 +209,7 @@ Describe the package with `#:property` directives in the file. All are optional:
 
 | Property | Sets | Default |
 |---|---|---|
-| `WinAppPackageName` | `Identity/@Name` | file name (sanitized) |
+| `WinAppPackageName` | `Identity/@Name` | file name (sanitized) + a short hash of its path |
 | `WinAppDisplayName` | Start/Settings name | file name |
 | `WinAppPublisher` | `Identity/@Publisher` | `CN=<current user>`; a bare name is wrapped as `CN=` |
 | `WinAppVersion` | `Identity/@Version` | `$(Version)`, normalized to four 0–65535 parts (`1.2.3-preview.4` ⇒ `1.2.3.0`) |
@@ -226,7 +226,7 @@ Describe the package with `#:property` directives in the file. All are optional:
 - **The package outlives the run.** winapp says so the first time it registers an app. Remove it with `winapp unregister counter.cs` (no manifest path needed — it resolves the same identity), or run with `--unregister-on-exit`.
 - Requires **.NET SDK 10.0.300+**.
 
-> Two `counter.cs` files in different folders share the default identity `counter`, so the second replaces the first (winapp warns). Set `WinAppPackageName` on one to keep both.
+> The default identity includes a short hash of the file's path (`counter.cs` → `counter-a1b2c3d4`), so two `counter.cs` files in different folders are separate apps with separate `LocalState`. It is stable across edits and re-runs, and changes only if the file moves. Set `WinAppPackageName` to pick a stable identity yourself. The Start menu shows `WinAppDisplayName`, not the identity.
 
 #### Choosing between `run` and `create-debug-identity`
 

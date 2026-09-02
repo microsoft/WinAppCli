@@ -836,7 +836,7 @@ ReactorApp.Run<MyApp>("Hello");
 
 | Property | Sets | Default |
 |----------|------|---------|
-| `WinAppPackageName` | `Identity/@Name` (the package identity) | the file name without its extension, sanitized to `[-.A-Za-z0-9]` |
+| `WinAppPackageName` | `Identity/@Name` (the package identity) | the file name, sanitized to `[-.A-Za-z0-9]`, plus a short hash of the file's path (`counter.cs` → `counter-a1b2c3d4`) |
 | `WinAppDisplayName` | The name shown in Start and Settings | the file name without its extension |
 | `WinAppPublisher` | `Identity/@Publisher` | `CN=<your Windows user name>`. A bare name is wrapped as `CN=<name>`. |
 | `WinAppVersion` | `Identity/@Version` | `$(Version)`, normalized (see below) |
@@ -1041,9 +1041,12 @@ winapp unregister counter.cs
 ```
 
 > [!NOTE]
-> Two `counter.cs` files in different folders both default to the package identity `counter`, so
-> running the second replaces the first (`winapp` warns when this happens). Give one of them its own
-> `#:property WinAppPackageName=<name>` to keep both registered. Identity is always scoped to your
+> The default identity includes a short hash of the file's path — `counter.cs` becomes something like
+> `counter-a1b2c3d4` — so two `counter.cs` files in different folders are different apps and keep their
+> own settings and `LocalState`. The hash is derived from the path, so it survives edits and re-runs and
+> only changes if you move the file. Set `#:property WinAppPackageName=<name>` to choose a stable
+> identity yourself; it is then used exactly as written. Either way the Start menu and Settings show
+> your `WinAppDisplayName` (default: the file name), not the identity. Identity is always scoped to your
 > user account, so it never collides with another user on the same machine.
 
 **MSBuild properties (NuGet package):**
