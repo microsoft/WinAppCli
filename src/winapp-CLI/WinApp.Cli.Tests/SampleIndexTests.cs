@@ -304,12 +304,16 @@ public class SampleIndexTests
         const string notANumber = """
         { "schemaVersion": "1", "controls": [ { "id": "button", "samples": [ { "code": "new Button();" } ] } ] }
         """;
+        const string decimalInteger = """
+        { "schemaVersion": 1.0, "controls": [ { "id": "button", "samples": [ { "code": "new Button();" } ] } ] }
+        """;
         const string absent = """
         { "controls": [ { "id": "button", "samples": [ { "code": "new Button();" } ] } ] }
         """;
 
         Assert.AreEqual(0, SampleIndexParser.Parse(future, "gallery").scenarios.Length, "a newer contract is refused");
         Assert.AreEqual(0, SampleIndexParser.Parse(notANumber, "gallery").scenarios.Length, "a non-numeric version is refused");
+        Assert.AreEqual(1, SampleIndexParser.Parse(decimalInteger, "gallery").scenarios.Length, "a decimal integer version is read as v1");
         Assert.AreEqual(1, SampleIndexParser.Parse(absent, "gallery").scenarios.Length, "an absent version is read as v1");
     }
 
@@ -389,7 +393,7 @@ public class SampleIndexTests
     [TestMethod]
     public void Schema_DeclaresExactlyTheFieldsTheReaderAndWriterUse()
     {
-        var schemaPath = Path.Combine(AppContext.BaseDirectory, "winui-sample-index.schema.json");
+        var schemaPath = Path.Join(AppContext.BaseDirectory, "winui-sample-index.schema.json");
         Assert.IsTrue(File.Exists(schemaPath), $"schema not found at {schemaPath}");
 
         using var schema = JsonDocument.Parse(File.ReadAllText(schemaPath));

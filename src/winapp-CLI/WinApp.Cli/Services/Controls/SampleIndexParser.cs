@@ -3,6 +3,7 @@
 
 namespace WinApp.Cli.Services.Controls;
 
+using System.Linq;
 using System.Text.Json;
 
 /// <summary>
@@ -66,10 +67,8 @@ internal static class SampleIndexParser
             return ([], tags, curatedKeywords);
         }
 
-        foreach (var control in controls.EnumerateArray())
+        foreach (var control in controls.EnumerateArray().Where(control => control.ValueKind == JsonValueKind.Object))
         {
-            if (control.ValueKind != JsonValueKind.Object) continue;
-
             var controlId = GetString(control, SampleIndexSchema.Id);
             if (string.IsNullOrEmpty(controlId)) continue;
 
@@ -109,10 +108,8 @@ internal static class SampleIndexParser
             }
 
             var index = 0;
-            foreach (var sample in samples.EnumerateArray())
+            foreach (var sample in samples.EnumerateArray().Where(sample => sample.ValueKind == JsonValueKind.Object))
             {
-                if (sample.ValueKind != JsonValueKind.Object) continue;
-
                 var header = GetString(sample, SampleIndexSchema.Header);
                 var xaml = GetString(sample, SampleIndexSchema.Xaml);
                 var code = GetString(sample, SampleIndexSchema.Code);
@@ -173,7 +170,7 @@ internal static class SampleIndexParser
     {
         if (!root.TryGetProperty(SampleIndexSchema.SchemaVersion, out var version)) return true;
         if (version.ValueKind != JsonValueKind.Number) return false;
-        return version.TryGetInt32(out var value) && value == SampleIndexSchema.Version;
+        return version.TryGetDecimal(out var value) && value == SampleIndexSchema.Version;
     }
 
     private static string? NullIfEmpty(string value) => string.IsNullOrEmpty(value) ? null : value;
@@ -187,10 +184,8 @@ internal static class SampleIndexParser
         }
 
         var list = new List<DocLink>();
-        foreach (var doc in docs.EnumerateArray())
+        foreach (var doc in docs.EnumerateArray().Where(doc => doc.ValueKind == JsonValueKind.Object))
         {
-            if (doc.ValueKind != JsonValueKind.Object) continue;
-
             var uri = GetString(doc, SampleIndexSchema.Uri);
             if (string.IsNullOrEmpty(uri)) continue;
 
@@ -213,9 +208,8 @@ internal static class SampleIndexParser
         if (!el.TryGetProperty(prop, out var v) || v.ValueKind != JsonValueKind.Array) return [];
 
         var list = new List<string>();
-        foreach (var item in v.EnumerateArray())
+        foreach (var item in v.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.String))
         {
-            if (item.ValueKind != JsonValueKind.String) continue;
             var s = item.GetString();
             if (!string.IsNullOrEmpty(s)) list.Add(s);
         }

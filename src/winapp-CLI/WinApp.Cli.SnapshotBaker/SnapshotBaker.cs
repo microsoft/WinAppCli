@@ -198,6 +198,8 @@ internal static class SnapshotBaker
         // as a fresh fetch, so providers load through a throwaway cache directory.
         var scratchCache = Path.Join(Path.GetTempPath(), $"winapp-index-{Guid.NewGuid():N}");
         var failures = new List<string>();
+        var staging = Path.Join(outputDirectory, $".index-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(staging);
 
         try
         {
@@ -233,7 +235,7 @@ internal static class SnapshotBaker
                 }
 
                 var index = SampleIndexWriter.Write(usable, data.Tags, data.Keywords, provider.Id);
-                var path = Path.Join(outputDirectory, IndexFileName(provider.Id));
+                var path = Path.Join(staging, IndexFileName(provider.Id));
 
                 await PathSafety.AtomicWriteAllTextAsync(path, index, Utf8NoBom, cancellationToken)
                     .ConfigureAwait(false);
@@ -244,11 +246,18 @@ internal static class SnapshotBaker
                 report($"  {provider.Id}: {controls} controls, {usable.Length} samples → {Path.GetFileName(path)}{note}");
             }
 
+            if (failures.Count > 0)
+            {
+                return failures;
+            }
+
+            Publish(staging, outputDirectory);
             return failures;
         }
         finally
         {
             TryDeleteDirectory(scratchCache);
+            TryDeleteDirectory(staging);
         }
     }
 
