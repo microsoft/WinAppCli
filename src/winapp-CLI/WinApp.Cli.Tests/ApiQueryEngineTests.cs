@@ -396,7 +396,7 @@ public sealed class ApiQueryEngineTests
     /// <summary>Rewrites a cached package's meta.json as if one of its files failed to parse.</summary>
     private static void MarkPackageIncomplete(string cacheDir, string packageId, string version)
     {
-        string metaPath = Path.Combine(cacheDir, "packages", packageId, version, "meta.json");
+        string metaPath = Path.Combine(cacheDir, "packages", packageId, version, TestSourceStamp, "meta.json");
         PackageMeta existing = JsonSerializer.Deserialize(File.ReadAllText(metaPath), ApiSearchJsonContext.Default.PackageMeta)!;
         var updated = new PackageMeta
         {
@@ -414,11 +414,18 @@ public sealed class ApiQueryEngineTests
         File.WriteAllText(metaPath, JsonSerializer.Serialize(updated, ApiSearchJsonContext.Default.PackageMeta));
     }
 
+    /// <summary>
+    /// Stand-in for the source fingerprint <c>ApiCacheBuilder</c> derives from a package's
+    /// metadata files. It is part of the cache directory name, so a fixture that writes a
+    /// cache by hand has to use the same value it puts in the manifest.
+    /// </summary>
+    private const string TestSourceStamp = "0a1b2c3d";
+
     private static ProjectManifest BuildSyntheticCache(string cacheDir)
     {
         const string packageId = "Test.Pkg";
         const string version = "1.0.0";
-        string packageDir = Path.Combine(cacheDir, "packages", packageId, version);
+        string packageDir = Path.Combine(cacheDir, "packages", packageId, version, TestSourceStamp);
         string typesDir = Path.Combine(packageDir, "types");
         Directory.CreateDirectory(typesDir);
 
@@ -504,7 +511,7 @@ public sealed class ApiQueryEngineTests
             ProjectName = "TestApp",
             ProjectDir = Path.Combine(cacheDir, "src"),
             ProjectFile = "TestApp.csproj",
-            Packages = [new ProjectPackageRef { Id = packageId, Version = version }],
+            Packages = [new ProjectPackageRef { Id = packageId, Version = version, SourceStamp = TestSourceStamp }],
             GeneratedAt = DateTime.UtcNow.ToString("o"),
         };
         string projectsDir = Path.Combine(cacheDir, "projects");
@@ -803,7 +810,7 @@ public sealed class ApiQueryEngineTests
         foreach (string packageId in DuplicatePackageIds)
         {
             WriteSyntheticPackage(cacheDir, packageId, namespaces);
-            packages.Add(new ProjectPackageRef { Id = packageId, Version = "1.0.0" });
+            packages.Add(new ProjectPackageRef { Id = packageId, Version = "1.0.0", SourceStamp = TestSourceStamp });
         }
 
         var manifest = new ProjectManifest
@@ -834,7 +841,7 @@ public sealed class ApiQueryEngineTests
 
     private static void WriteSyntheticPackage(string cacheDir, string packageId, Dictionary<string, List<WinMdTypeInfo>> namespaces)
     {
-        string packageDir = Path.Combine(cacheDir, "packages", packageId, "1.0.0");
+        string packageDir = Path.Combine(cacheDir, "packages", packageId, "1.0.0", TestSourceStamp);
         string typesDir = Path.Combine(packageDir, "types");
         Directory.CreateDirectory(typesDir);
         foreach ((string ns, List<WinMdTypeInfo> types) in namespaces)

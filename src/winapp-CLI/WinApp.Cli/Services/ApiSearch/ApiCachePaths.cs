@@ -22,7 +22,7 @@ internal static class ApiCachePaths
     /// version a cache was written with, and the builder refuses to reuse a
     /// package whose recorded version is not this one.
     /// </summary>
-    internal const int CacheFormatVersion = 2;
+    internal const int CacheFormatVersion = 3;
 
     /// <summary>
     /// File name of the machine-wide "SDK scope" manifest, written as a sibling of
@@ -36,6 +36,26 @@ internal static class ApiCachePaths
 
     /// <summary>Full path of the SDK-scope manifest under a find-api cache directory.</summary>
     internal static string SdkManifestPath(string cacheDir) => Path.Combine(cacheDir, SdkManifestFileName);
+
+    /// <summary>
+    /// Directory holding one package's exported metadata under a find-api cache
+    /// directory. The source fingerprint is part of the path rather than only recorded
+    /// inside it, because a package id and version do not identify what was cached: two
+    /// projects can resolve the same id and version to different files — a rebuilt
+    /// project reference, or a different target framework selecting different compile
+    /// assets — and with one shared directory whichever indexed last silently answers
+    /// for both. Returns <see langword="false"/> when the untrusted id, version, or
+    /// stamp would escape the cache directory.
+    /// </summary>
+    internal static bool TryPackageCacheDir(string cacheDir, string id, string version, string sourceStamp, out string dir) =>
+        TryCombineContained(Path.Combine(cacheDir, "packages"), new[] { id, version, sourceStamp }, out dir);
+
+    /// <summary>
+    /// The package cache directory a manifest entry points at.
+    /// See <see cref="TryPackageCacheDir(string, string, string, string, out string)"/>.
+    /// </summary>
+    internal static bool TryPackageCacheDir(string cacheDir, ProjectPackageRef package, out string dir) =>
+        TryPackageCacheDir(cacheDir, package.Id, package.Version, package.SourceStamp, out dir);
 
     /// <summary>
     /// First 8 hex characters of the SHA-256 of <paramref name="value"/>, used to

@@ -401,11 +401,14 @@ internal sealed class ApiMetadataService(
             {
                 return true;
             }
-            string packagesRoot = Path.Combine(cacheDir, "packages");
             foreach (ProjectPackageRef package in manifest.Packages)
             {
-                if (!ApiCachePaths.TryCombineContained(packagesRoot, new[] { package.Id, package.Version, "meta.json" }, out string metaPath)
-                    || !File.Exists(metaPath))
+                if (!ApiCachePaths.TryPackageCacheDir(cacheDir, package, out string packageDir))
+                {
+                    return true;
+                }
+                string metaPath = Path.Combine(packageDir, "meta.json");
+                if (!File.Exists(metaPath))
                 {
                     return true;
                 }

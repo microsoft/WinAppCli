@@ -129,7 +129,7 @@ internal static class ApiCacheBuilder
     /// every distinct package is parsed at most once per run. Returns the package
     /// references to record in the owning manifest.
     /// </summary>
-    private static List<ProjectPackageRef> ResolvePackageExports(
+    internal static List<ProjectPackageRef> ResolvePackageExports(
         List<PackageWithWinMd> packages,
         string cacheDir,
         bool force,
@@ -141,8 +141,8 @@ internal static class ApiCacheBuilder
         var packageRefs = new List<ProjectPackageRef>();
         foreach (PackageWithWinMd package in packages)
         {
-            string packagesRoot = Path.Combine(cacheDir, "packages");
-            if (!ApiCachePaths.TryCombineContained(packagesRoot, new[] { package.Id, package.Version }, out string packageCacheDir))
+            string sourceStamp = ComputeSourceStamp(package);
+            if (!ApiCachePaths.TryPackageCacheDir(cacheDir, package.Id, package.Version, sourceStamp, out string packageCacheDir))
             {
                 // Untrusted Id/Version would escape the cache dir — skip it.
                 report?.Invoke($"Skipping package with unsafe path: {package.Id} {package.Version}");
@@ -157,7 +157,7 @@ internal static class ApiCacheBuilder
                 // Already resolved for an earlier project in this run.
                 reused++;
             }
-            else if (!mustRebuild && IsReusableCache(packageCacheDir, ComputeSourceStamp(package)))
+            else if (!mustRebuild && IsReusableCache(packageCacheDir, sourceStamp))
             {
                 reused++;
             }
@@ -165,7 +165,12 @@ internal static class ApiCacheBuilder
             {
                 pendingExports[packageCacheDir] = package;
             }
-            packageRefs.Add(new ProjectPackageRef { Id = package.Id, Version = package.Version });
+            packageRefs.Add(new ProjectPackageRef
+            {
+                Id = package.Id,
+                Version = package.Version,
+                SourceStamp = sourceStamp,
+            });
         }
         return packageRefs;
     }

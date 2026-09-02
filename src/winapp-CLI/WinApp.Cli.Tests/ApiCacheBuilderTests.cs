@@ -1,0 +1,106 @@
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
+// Licensed under the MIT License.
+
+using WinApp.Cli.Services.ApiSearch;
+
+namespace WinApp.Cli.Tests;
+
+/// <summary>
+/// Covers how the cache builder maps a resolved package to the directory its metadata is
+/// exported to. A package id and version do not identify what was cached — two projects
+/// can resolve the same id and version to different files — so the mapping has to keep
+/// them apart or one project silently answers from the other's metadata.
+/// </summary>
+[TestClass]
+public sealed class ApiCacheBuilderTests
+{
+    private string _dir = null!;
+
+    [TestInitialize]
+    public void Setup()
+    {
+        _dir = Path.Combine(Path.GetTempPath(), $"ApiCacheBuilderTests_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_dir);
+    }
+
+    [TestCleanup]
+    public void Cleanup()
+    {
+        try
+        {
+            Directory.Delete(_dir, recursive: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Best-effort cleanup.
+        }
+    }
+
+    [TestMethod]
+    public void ResolvePackageExports_SameIdAndVersionFromDifferentFiles_GetSeparateCaches()
+    {
+        // Two projects reference "Contoso.Sdk 1.0.0" but resolve it to different .winmd
+        // files — a rebuilt project reference, or two target frameworks selecting
+        // different compile assets. Keyed on id and version alone, the second project
+        // finds the first project's directory already claimed, records it as reused, and
+        // its manifest then points at metadata built from the other project's files.
+        string cacheDir = Path.Combine(_dir, "cache");
+        PackageWithWinMd fromProjectA = WritePackage("a", "Contoso.Sdk", "1.0.0", "alpha");
+        PackageWithWinMd fromProjectB = WritePackage("b", "Contoso.Sdk", "1.0.0", "beta-different-bytes");
+
+        var pendingExports = new Dictionary<string, PackageWithWinMd>(StringComparer.OrdinalIgnoreCase);
+        var seenPackageDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        int reused = 0;
+
+        List<ProjectPackageRef> refsA = ApiCacheBuilder.ResolvePackageExports(
+            [fromProjectA], cacheDir, force: false, pendingExports, seenPackageDirs, ref reused, report: null);
+        List<ProjectPackageRef> refsB = ApiCacheBuilder.ResolvePackageExports(
+            [fromProjectB], cacheDir, force: false, pendingExports, seenPackageDirs, ref reused, report: null);
+
+        // Both projects must get their own export queued, and neither may be written off
+        // as a reuse of the other.
+        Assert.AreEqual(2, pendingExports.Count);
+        Assert.AreEqual(0, reused);
+        Assert.AreNotEqual(refsA.Single().SourceStamp, refsB.Single().SourceStamp);
+
+        // And the manifest each project records has to resolve to its own directory.
+        Assert.IsTrue(ApiCachePaths.TryPackageCacheDir(cacheDir, refsA.Single(), out string dirA));
+        Assert.IsTrue(ApiCachePaths.TryPackageCacheDir(cacheDir, refsB.Single(), out string dirB));
+        Assert.AreNotEqual(dirA, dirB);
+    }
+
+    [TestMethod]
+    public void ResolvePackageExports_SamePackageFromSameFiles_IsExportedOnce()
+    {
+        // The reuse that does matter still has to happen: the Windows SDK and WinAppSDK
+        // are shared by every project in a solution and must be parsed once per run.
+        string cacheDir = Path.Combine(_dir, "cache");
+        PackageWithWinMd shared = WritePackage("shared", "Contoso.Sdk", "1.0.0", "same");
+
+        var pendingExports = new Dictionary<string, PackageWithWinMd>(StringComparer.OrdinalIgnoreCase);
+        var seenPackageDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        int reused = 0;
+
+        List<ProjectPackageRef> first = ApiCacheBuilder.ResolvePackageExports(
+            [shared], cacheDir, force: false, pendingExports, seenPackageDirs, ref reused, report: null);
+        List<ProjectPackageRef> second = ApiCacheBuilder.ResolvePackageExports(
+            [shared], cacheDir, force: false, pendingExports, seenPackageDirs, ref reused, report: null);
+
+        Assert.AreEqual(1, pendingExports.Count);
+        Assert.AreEqual(1, reused);
+        Assert.AreEqual(first.Single().SourceStamp, second.Single().SourceStamp);
+    }
+
+    /// <summary>
+    /// Writes a .winmd whose bytes and path are unique to <paramref name="folder"/>, so
+    /// the fingerprint the builder derives from it is distinguishable.
+    /// </summary>
+    private PackageWithWinMd WritePackage(string folder, string id, string version, string content)
+    {
+        string dir = Path.Combine(_dir, folder);
+        Directory.CreateDirectory(dir);
+        string winmd = Path.Combine(dir, id + ".winmd");
+        File.WriteAllText(winmd, content);
+        return new PackageWithWinMd(id, version, [winmd], []);
+    }
+}

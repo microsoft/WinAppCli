@@ -72,7 +72,7 @@ public sealed class ApiCachePathsTests
         string cacheDir = Path.Combine(Path.GetTempPath(), $"ApiCachePathsTests_{Guid.NewGuid():N}");
         try
         {
-            string packageDir = Path.Combine(cacheDir, "packages", "Test.Pkg", "1.0.0");
+            string packageDir = Path.Combine(cacheDir, "packages", "Test.Pkg", "1.0.0", "0a1b2c3d");
             string typesDir = Path.Combine(packageDir, "types");
             Directory.CreateDirectory(typesDir);
 
@@ -87,7 +87,7 @@ public sealed class ApiCachePathsTests
                 ProjectName = "TestApp",
                 ProjectDir = cacheDir,
                 ProjectFile = "TestApp.csproj",
-                Packages = [new ProjectPackageRef { Id = "Test.Pkg", Version = "1.0.0" }],
+                Packages = [new ProjectPackageRef { Id = "Test.Pkg", Version = "1.0.0", SourceStamp = "0a1b2c3d" }],
                 GeneratedAt = DateTime.UtcNow.ToString("o"),
             };
 

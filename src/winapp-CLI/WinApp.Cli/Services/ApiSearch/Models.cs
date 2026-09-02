@@ -81,6 +81,14 @@ internal sealed class ProjectPackageRef
     public required string Id { get; init; }
 
     public required string Version { get; init; }
+
+    /// <summary>
+    /// Fingerprint of the metadata files this project resolved the package to, and part
+    /// of the package's cache directory name. Recording it here is what lets the query
+    /// side read the export built for <em>this</em> project rather than one another
+    /// project wrote for the same id and version from different files.
+    /// </summary>
+    public required string SourceStamp { get; init; }
 }
 
 /// <summary>The cached manifest describing a project's resolved metadata packages.</summary>

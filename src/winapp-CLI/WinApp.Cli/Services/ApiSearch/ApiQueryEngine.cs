@@ -419,7 +419,12 @@ internal static class ApiQueryEngine
         var summaries = new List<ApiPackageSummary>();
         foreach (ProjectPackageRef package in manifest.Packages)
         {
-            string metaPath = Path.Combine(cacheDir, "packages", package.Id, package.Version, "meta.json");
+            if (!ApiCachePaths.TryPackageCacheDir(cacheDir, package, out string packageDir))
+            {
+                summaries.Add(new ApiPackageSummary { Id = package.Id, Version = package.Version, Status = "cache-missing" });
+                continue;
+            }
+            string metaPath = Path.Combine(packageDir, "meta.json");
             if (!File.Exists(metaPath))
             {
                 summaries.Add(new ApiPackageSummary { Id = package.Id, Version = package.Version, Status = "cache-missing" });
@@ -458,7 +463,11 @@ internal static class ApiQueryEngine
         int types = 0, members = 0, namespaces = 0, winmds = 0;
         foreach (ProjectPackageRef package in manifest.Packages)
         {
-            string metaPath = Path.Combine(cacheDir, "packages", package.Id, package.Version, "meta.json");
+            if (!ApiCachePaths.TryPackageCacheDir(cacheDir, package, out string packageDir))
+            {
+                continue;
+            }
+            string metaPath = Path.Combine(packageDir, "meta.json");
             if (!File.Exists(metaPath))
             {
                 continue;
@@ -848,7 +857,11 @@ internal static class ApiQueryEngine
         var incomplete = new List<string>();
         foreach (ProjectPackageRef package in manifest.Packages)
         {
-            string metaPath = Path.Combine(cacheDir, "packages", package.Id, package.Version, "meta.json");
+            if (!ApiCachePaths.TryPackageCacheDir(cacheDir, package, out string packageDir))
+            {
+                continue;
+            }
+            string metaPath = Path.Combine(packageDir, "meta.json");
             if (!File.Exists(metaPath))
             {
                 continue;
@@ -879,8 +892,7 @@ internal static class ApiQueryEngine
         var dirs = new List<string>();
         foreach (ProjectPackageRef package in manifest.Packages)
         {
-            string dir = Path.Combine(cacheDir, "packages", package.Id, package.Version);
-            if (Directory.Exists(dir))
+            if (ApiCachePaths.TryPackageCacheDir(cacheDir, package, out string dir) && Directory.Exists(dir))
             {
                 dirs.Add(dir);
             }

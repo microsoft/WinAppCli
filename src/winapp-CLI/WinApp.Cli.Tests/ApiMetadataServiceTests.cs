@@ -71,7 +71,7 @@ public sealed class ApiMetadataServiceTests
             ProjectName = ApiCachePaths.SdkScopeName,
             ProjectDir = string.Empty,
             ProjectFile = string.Empty,
-            Packages = [new ProjectPackageRef { Id = "WindowsSDK", Version = "10.0.0.0" }],
+            Packages = [new ProjectPackageRef { Id = "WindowsSDK", Version = "10.0.0.0", SourceStamp = "0a1b2c3d" }],
             GeneratedAt = DateTime.UtcNow.ToString("o"),
         };
         File.WriteAllText(
@@ -94,7 +94,7 @@ public sealed class ApiMetadataServiceTests
             ProjectName = name,
             ProjectDir = projectDir ?? Path.Combine(_currentDir, name),
             ProjectFile = name + ".csproj",
-            Packages = [new ProjectPackageRef { Id = "Some.Pkg", Version = "1.0.0" }],
+            Packages = [new ProjectPackageRef { Id = "Some.Pkg", Version = "1.0.0", SourceStamp = "0a1b2c3d" }],
             GeneratedAt = DateTime.UtcNow.ToString("o"),
         };
         File.WriteAllText(Path.Combine(_projectsDir, (fileName ?? name) + ".json"), JsonSerializer.Serialize(manifest, ApiSearchJsonContext.Default.ProjectManifest));
