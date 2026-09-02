@@ -680,12 +680,37 @@ internal class NewCommand : Command, IShortDescription
             // Show a transient spinner while dotnet new runs (interactive terminals only); it clears
             // once scaffolding completes and WriteSuccess prints the "Created"/"Added" line in its place.
             var verb = entry.IsItem ? "Adding" : "Creating";
-            var (exitCode, stdout, stderr) = await WithSpinnerAsync(
-                $"{verb} {name} from {entry.ShortName}...",
-                "Setting up the project; missing NuGet packages are restoring…",
-                ScaffoldStatusDelay,
-                () => dotNetService.RunDotnetCommandAsync(workingDir, args, cancellationToken: cancellationToken));
-            LogDotnetOutput(args, exitCode, stdout, stderr);
+            var scaffoldStatus = $"{verb} {name} from {entry.ShortName}...";
+
+            int exitCode;
+            string stdout;
+            string stderr;
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                // Verbose: stream dotnet new's output live so its post-creation actions (restore,
+                // package add, etc.) are visible as they run. Buffering them behind the spinner hides
+                // the very output needed to diagnose a failing post action (#753). The lines are still
+                // captured into stdout/stderr so a non-zero exit can surface a concise failure detail
+                // below, and LogDotnetOutput is skipped to avoid echoing the same text twice. Streaming
+                // the real output also supersedes the spinner's delayed "restoring…" status message.
+                logger.LogDebug("dotnet {Args}", string.Join(' ', args));
+                (exitCode, stdout, stderr) = await dotNetService.RunDotnetCommandAsync(
+                    workingDir,
+                    args,
+                    onOutputLine: line => logger.LogDebug("{Output}", line),
+                    onErrorLine: line => logger.LogDebug("{Output}", line),
+                    cancellationToken: cancellationToken);
+                logger.LogDebug("dotnet new exited with code {ExitCode}", exitCode);
+            }
+            else
+            {
+                (exitCode, stdout, stderr) = await WithSpinnerAsync(
+                    scaffoldStatus,
+                    "Setting up the project; missing NuGet packages are restoring…",
+                    ScaffoldStatusDelay,
+                    () => dotNetService.RunDotnetCommandAsync(workingDir, args, cancellationToken: cancellationToken));
+                LogDotnetOutput(args, exitCode, stdout, stderr);
+            }
             if (exitCode != 0)
             {
                 var detail = !string.IsNullOrWhiteSpace(stderr) ? stderr.Trim() : stdout.Trim();
@@ -945,7 +970,7 @@ internal class NewCommand : Command, IShortDescription
         /// <summary>Returns the installed WinUI pack version, or <c>null</c> when the pack isn't installed.</summary>
         private async Task<string?> QueryInstalledPackVersionAsync(DirectoryInfo cwd, CancellationToken cancellationToken)
         {
-            var (exit, output, stderr) = await dotNetService.RunDotnetCommandAsync(cwd, ListTemplatePacksArgs, EnglishUiEnvironment, cancellationToken);
+            var (exit, output, stderr) = await dotNetService.RunDotnetCommandAsync(cwd, ListTemplatePacksArgs, EnglishUiEnvironment, cancellationToken: cancellationToken);
             LogDotnetOutput(ListTemplatePacksArgs, exit, output, stderr);
             return exit == 0 && TryGetInstalledPackVersion(output, out var version) ? version : null;
         }
@@ -963,7 +988,7 @@ internal class NewCommand : Command, IShortDescription
         /// </summary>
         private async Task<(bool Succeeded, string? Latest)> GetLatestAvailableVersionAsync(DirectoryInfo cwd, string installed, CancellationToken cancellationToken)
         {
-            var (exit, output, stderr) = await dotNetService.RunDotnetCommandAsync(cwd, UpdateCheckArgs, EnglishUiEnvironment, cancellationToken);
+            var (exit, output, stderr) = await dotNetService.RunDotnetCommandAsync(cwd, UpdateCheckArgs, EnglishUiEnvironment, cancellationToken: cancellationToken);
             LogDotnetOutput(UpdateCheckArgs, exit, output, stderr);
             if (exit != 0)
             {
@@ -1034,7 +1059,7 @@ internal class NewCommand : Command, IShortDescription
         /// </summary>
         private async Task<(IReadOnlyList<WinUiTemplateEntry> Templates, string? FailureDetail)> EnumerateTemplatesAsync(DirectoryInfo contextDir, CancellationToken cancellationToken)
         {
-            var (exit, output, stderr) = await dotNetService.RunDotnetCommandAsync(contextDir, ListTemplatesArgs, EnglishUiEnvironment, cancellationToken);
+            var (exit, output, stderr) = await dotNetService.RunDotnetCommandAsync(contextDir, ListTemplatesArgs, EnglishUiEnvironment, cancellationToken: cancellationToken);
             LogDotnetOutput(ListTemplatesArgs, exit, output, stderr);
             if (exit != 0)
             {
@@ -1056,7 +1081,7 @@ internal class NewCommand : Command, IShortDescription
             // taken from `dotnet new uninstall` (the authoritative per-package Templates block). If that
             // set can't be determined (unexpected output), fall back to the unfiltered list rather than
             // hiding every template.
-            var (packExit, packOutput, packStderr) = await dotNetService.RunDotnetCommandAsync(contextDir, ListTemplatePacksArgs, EnglishUiEnvironment, cancellationToken);
+            var (packExit, packOutput, packStderr) = await dotNetService.RunDotnetCommandAsync(contextDir, ListTemplatePacksArgs, EnglishUiEnvironment, cancellationToken: cancellationToken);
             LogDotnetOutput(ListTemplatePacksArgs, packExit, packOutput, packStderr);
             if (packExit == 0)
             {
