@@ -314,7 +314,6 @@ rebuild per symbol. A single subject keeps the original payload shape; a batch r
 ### `winapp ui` — UI automation commands
 **Purpose:** Inspect and interact with running Windows app UIs using Windows UI Automation (UIA).
 **When to use:** When an AI agent or developer needs to verify UI state, find controls, take screenshots, click buttons, or automate UI testing in a running Windows app. Works with any framework (WinUI 3, WPF, WinForms, Win32, Electron).
-**When to use:** When an AI agent or developer needs to verify UI state, find controls, take screenshots, click buttons, or automate UI testing in a running Windows app. Works with any framework (WinUI 3, WPF, WinForms, Win32, Electron).
 
 **Targeting apps:** Use `-a <name>` (fuzzy match by process name, window title, or PID) or `-w <hwnd>` for stable window targeting.
 
