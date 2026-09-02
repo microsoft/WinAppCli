@@ -607,4 +607,61 @@ public class SampleIndexTests
         Assert.AreEqual("var a = 1;", scenarios[0].CSharp);
         Assert.AreEqual("var b = 2;", scenarios[1].CSharp);
     }
+
+    [TestMethod]
+    public void Parse_DropsAnOversizedUsingsBlockRatherThanCopyingItOntoEverySample()
+    {
+        // One control-level using longer than the cap, on a control with several samples:
+        // the prefix is what gets multiplied, so it is dropped while the samples survive.
+        var huge = new string('x', 9 * 1024);
+        var json = $$"""
+        {
+          "schemaVersion": 1,
+          "source": "gallery",
+          "controls": [
+            {
+              "id": "button",
+              "name": "Button",
+              "usings": ["{{huge}}"],
+              "samples": [
+                { "header": "One", "code": "var a = 1;" },
+                { "header": "Two", "code": "var b = 2;" }
+              ]
+            }
+          ]
+        }
+        """;
+
+        var (scenarios, _, _) = SampleIndexParser.Parse(json, "gallery");
+
+        Assert.AreEqual(2, scenarios.Length);
+        Assert.AreEqual("var a = 1;", scenarios[0].CSharp);
+        Assert.AreEqual("var b = 2;", scenarios[1].CSharp);
+    }
+
+    [TestMethod]
+    public void Parse_KeepsANormalUsingsBlockOnEverySample()
+    {
+        const string Json = """
+        {
+          "schemaVersion": 1,
+          "source": "gallery",
+          "controls": [
+            {
+              "id": "button",
+              "name": "Button",
+              "usings": ["Microsoft.UI.Xaml.Controls"],
+              "samples": [
+                { "header": "One", "code": "var a = 1;" }
+              ]
+            }
+          ]
+        }
+        """;
+
+        var (scenarios, _, _) = SampleIndexParser.Parse(Json, "gallery");
+
+        Assert.AreEqual(1, scenarios.Length);
+        Assert.AreEqual("using Microsoft.UI.Xaml.Controls;\n\nvar a = 1;", scenarios[0].CSharp);
+    }
 }

@@ -207,14 +207,32 @@ internal static class SnapshotBaker
                     continue;
                 }
 
-                var index = SampleIndexWriter.Write(data.Scenarios, data.Tags, data.Keywords, provider.Id);
+                // provider.LoadAsync returns RAW scenarios; ScenarioSanitizer normally runs
+                // later, in ControlsSearchService. Without it the reference artifact would
+                // carry malformed XAML and unbalanced C# that every consumer then drops —
+                // exactly the breakage a published index exists to eliminate.
+                ScenarioSanitizer.SanitizeAll(data.Scenarios);
+                var usable = data.Scenarios
+                    .Where(s => s.Xaml is not null || s.CSharp is not null)
+                    .ToArray();
+
+                if (usable.Length == 0)
+                {
+                    report($"  FAILED: {provider.DisplayName} returned no usable samples.");
+                    failures.Add(provider.Id);
+                    continue;
+                }
+
+                var index = SampleIndexWriter.Write(usable, data.Tags, data.Keywords, provider.Id);
                 var path = Path.Join(outputDirectory, IndexFileName(provider.Id));
 
                 await PathSafety.AtomicWriteAllTextAsync(path, index, Utf8NoBom, cancellationToken)
                     .ConfigureAwait(false);
 
-                var controls = data.Scenarios.Select(s => s.ControlId).Distinct(StringComparer.Ordinal).Count();
-                report($"  {provider.Id}: {controls} controls, {data.Scenarios.Length} samples → {Path.GetFileName(path)}");
+                var controls = usable.Select(s => s.ControlId).Distinct(StringComparer.Ordinal).Count();
+                var dropped = data.Scenarios.Length - usable.Length;
+                var note = dropped > 0 ? $" ({dropped} unusable sample(s) dropped)" : "";
+                report($"  {provider.Id}: {controls} controls, {usable.Length} samples → {Path.GetFileName(path)}{note}");
             }
 
             return failures;
