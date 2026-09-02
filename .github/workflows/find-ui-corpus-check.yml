@@ -1,0 +1,94 @@
+name: find-ui Corpus Freshness Check
+
+# Fails a PR that changes how the find-ui corpus is produced without re-baking it.
+#
+# The baked corpus is a build artifact that happens to live in source control, so nothing
+# recomputes it when the code that produces it changes. Edit a fetcher's parsing, and the
+# committed blob silently keeps the old shape until the next stable release re-bakes it --
+# offline users get the stale corpus in the meantime, and the diff gives no hint of that.
+#
+# This deliberately keys off the PR's OWN diff rather than comparing against live upstream.
+# A check that re-baked from GitHub on every run would fail unrelated PRs whenever upstream
+# merged a sample -- an author touching identity or packaging would get a red X for
+# something they did not cause and cannot fix. Upstream drift is a scheduled concern and is
+# handled by find-ui-corpus-drift.yml; this job only asks whether *this* PR left the corpus
+# behind.
+
+on:
+  pull_request:
+    types: [opened, synchronize, labeled, unlabeled]
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  check-corpus:
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for a stale find-ui corpus
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const SKIP_LABEL = 'corpus-rebake-not-needed';
+
+            const labels = context.payload.pull_request.labels.map(l => l.name);
+            if (labels.includes(SKIP_LABEL)) {
+              console.log(`"${SKIP_LABEL}" label found — skipping corpus freshness check.`);
+              return;
+            }
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              per_page: 100,
+            });
+
+            const changedPaths = files.map(f => f.filename);
+
+            // Only files that change what a bake PRODUCES belong here. Query-time code
+            // (SearchEngine, BM25, StopWords, Synonyms) reads the corpus but never changes
+            // it, so listing it would fail PRs that need no re-bake and teach authors to
+            // reach for the skip label by reflex.
+            const CORPUS_SOURCE_PATTERNS = [
+              /^src\/winapp-CLI\/WinApp\.Cli\/Services\/Controls\/(Gallery|Toolkit|Reactor)(Fetcher|Provider)\.cs$/,
+              /^src\/winapp-CLI\/WinApp\.Cli\/Services\/Controls\/ScenarioSanitizer\.cs$/,
+              /^src\/winapp-CLI\/WinApp\.Cli\/Services\/Controls\/Models\.cs$/,
+              /^src\/winapp-CLI\/WinApp\.Cli\/Services\/Controls\/CacheVersion\.cs$/,
+              /^src\/winapp-CLI\/WinApp\.Cli\.SnapshotBaker\//,
+            ];
+
+            const CORPUS_DATA = /^src\/winapp-CLI\/WinApp\.Cli\/Services\/Controls\/Data\//;
+
+            const sourceChanges = changedPaths.filter(p =>
+              CORPUS_SOURCE_PATTERNS.some(pattern => pattern.test(p))
+            );
+
+            if (sourceChanges.length === 0) {
+              console.log('No corpus-producing code changed — freshness check not applicable.');
+              return;
+            }
+
+            const dataChanges = changedPaths.filter(p => CORPUS_DATA.test(p));
+
+            if (dataChanges.length > 0) {
+              console.log('Corpus-producing code changed and the corpus was re-baked:');
+              console.log('  Source changes:', sourceChanges.join(', '));
+              console.log('  Corpus changes:', dataChanges.join(', '));
+              return;
+            }
+
+            core.setFailed(
+              `This PR changes how the find-ui corpus is produced, but the baked corpus was not updated.\n\n` +
+              `Changed corpus-producing files:\n${sourceChanges.map(f => `  - ${f}`).join('\n')}\n\n` +
+              `The committed corpus is what find-ui falls back to offline and behind a proxy ` +
+              `(issue #704). Nothing re-bakes it automatically, so it will keep the old shape ` +
+              `until the next stable release.\n\n` +
+              `Re-bake it and commit the result:\n` +
+              `  dotnet run --project src/winapp-CLI/WinApp.Cli.SnapshotBaker -- src/winapp-CLI/WinApp.Cli/Services/Controls/Data\n\n` +
+              `Or add the \`${SKIP_LABEL}\` label if the change cannot affect the baked output ` +
+              `(e.g. a comment, a rename, or a change on a path the baker never takes).`
+            );
