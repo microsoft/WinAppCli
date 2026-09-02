@@ -710,6 +710,8 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--with-alias", "--without-alias"]);
 
         Assert.AreNotEqual(0, exitCode, "Asking for both launch mechanisms at once is a contradiction");
+        StringAssert.Contains(ConsoleStdErr.ToString(), "cannot be used together",
+            "The conflict must be reported, not silently resolved in favor of one of them");
     }
 
     #endregion

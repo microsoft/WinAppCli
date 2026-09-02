@@ -48,7 +48,6 @@ internal partial class RunCommand
         /// Decides how to launch, from the command line, the app's own preference, and its output type.
         /// </summary>
         /// <param name="outputType">Evaluated <c>OutputType</c>; <c>Exe</c> means a console app.</param>
-        /// <param name="packageName">Package identity, used to build a collision-free default alias.</param>
         /// <param name="preferAlias">
         /// The app's own <c>WinAppRunUseExecutionAlias</c> preference, when it declares one.
         /// </param>
@@ -56,6 +55,10 @@ internal partial class RunCommand
         /// <c>--no-launch</c>, <c>--detach</c> and <c>--json</c> each describe a launch the alias cannot
         /// express — nothing is started, nothing is waited on, or stdout must stay machine-readable — so
         /// they keep AUMID regardless of what the app prefers.
+        /// <para>
+        /// <paramref name="withAlias"/> and <paramref name="withoutAlias"/> are never both set here: the
+        /// combination is rejected during option validation, so this only has to honor one of them.
+        /// </para>
         /// </remarks>
         internal static AliasLaunchDecision ResolveAliasLaunch(
             bool withAlias,

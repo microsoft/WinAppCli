@@ -520,7 +520,9 @@ internal partial class RunCommand : Command, IShortDescription
                 FileInfo? candidate = null;
                 if (!string.IsNullOrWhiteSpace(executable))
                 {
-                    var named = new FileInfo(Path.Combine(inputFolder.FullName, executable));
+                    // Path.Join, not Combine: --executable is user input, and a rooted value would make
+                    // Combine silently discard inputFolder and probe a binary outside the layout.
+                    var named = new FileInfo(Path.Join(inputFolder.FullName, executable));
                     candidate = named.Exists ? named : null;
                 }
                 else

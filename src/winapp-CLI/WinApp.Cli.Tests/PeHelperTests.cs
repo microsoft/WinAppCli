@@ -81,7 +81,7 @@ public class PeHelperTests
     {
         // notepad.exe is a GUI binary shipped with Windows: IMAGE_SUBSYSTEM_WINDOWS_GUI, which is what
         // OutputType=WinExe produces.
-        var notepad = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "notepad.exe");
+        var notepad = Path.Join(Environment.GetFolderPath(Environment.SpecialFolder.System), "notepad.exe");
         if (!File.Exists(notepad))
         {
             Assert.Inconclusive("notepad.exe is not present on this machine.");
