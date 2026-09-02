@@ -116,8 +116,8 @@
       "description": "A single self-contained sample. At least one of 'xaml' or 'code' must be present and non-empty; consumers skip a sample that has neither.",
       "type": "object",
       "anyOf": [
-        { "required": ["xaml"] },
-        { "required": ["code"] }
+        { "required": ["xaml"], "properties": { "xaml": { "pattern": "\\S" } } },
+        { "required": ["code"], "properties": { "code": { "pattern": "\\S" } } }
       ],
       "properties": {
         "header": {
@@ -125,7 +125,7 @@
           "type": "string"
         },
         "xaml": {
-          "description": "The sample's XAML, exactly as it should be pasted into a project. Must be a well-formed XML fragment: consumers validate it and drop samples that fail to parse, so malformed markup silently removes the sample rather than shipping something that will not compile. Namespace prefixes used here should be declared in the control's 'xmlnsImports'.",
+          "description": "The sample's XAML, exactly as it should be pasted into a project. Must be a well-formed XML fragment: consumers validate it and drop samples that fail to parse, so malformed markup silently removes the sample rather than shipping something that will not compile. Namespace prefixes used here should be declared in this sample's 'xmlnsImports', or in the control's when every sample shares the same imports.",
           "type": "string"
         },
         "code": {
@@ -133,8 +133,9 @@
           "type": "string"
         },
         "language": {
-          "description": "Language of 'code'. Informational; consumers assume C#.",
-          "type": "string"
+          "description": "Language of 'code'. Optional, and 'csharp' is the only value schema version 1 accepts: consumers paste 'code' into a C# file, so they ignore code tagged as anything else. A later schema version may widen this.",
+          "type": "string",
+          "enum": ["csharp"]
         },
         "details": {
           "description": "Longer prose describing this specific sample, when it differs from the control's 'details'. Omit it when the control-level value applies — consumers fall back to that. Sources whose samples each carry their own documentation (for example a per-sample markdown file) will normally set it here rather than on the control.",

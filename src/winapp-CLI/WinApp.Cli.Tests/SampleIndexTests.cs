@@ -546,4 +546,65 @@ public class SampleIndexTests
             CollectionAssert.AreEqual(ContosoXmlns, scenario.XmlnsImports);
         }
     }
+
+    [TestMethod]
+    public void Parse_DropsCodeTaggedAsALanguageOtherThanCSharp()
+    {
+        const string Json = """
+        {
+          "schemaVersion": 1,
+          "source": "gallery",
+          "controls": [
+            {
+              "id": "button",
+              "name": "Button",
+              "samples": [
+                { "header": "Markup kept", "xaml": "<Button />", "code": "auto x = 1;", "language": "cpp" },
+                { "header": "Nothing usable", "code": "auto y = 2;", "language": "cpp" },
+                { "header": "Real C#", "code": "var b = 2;", "language": "csharp" }
+              ]
+            }
+          ]
+        }
+        """;
+
+        var (scenarios, _, _) = SampleIndexParser.Parse(Json, "gallery");
+
+        // The C++ markup sample keeps its XAML but loses its code; the code-only C++
+        // sample has nothing left and drops out, so ids stay contiguous from 1.
+        Assert.AreEqual(2, scenarios.Length);
+        Assert.AreEqual("button-1", scenarios[0].Id);
+        Assert.AreEqual("<Button />", scenarios[0].Xaml);
+        Assert.IsNull(scenarios[0].CSharp);
+        Assert.AreEqual("button-2", scenarios[1].Id);
+        Assert.AreEqual("Real C#", scenarios[1].HeaderText);
+        Assert.AreEqual("var b = 2;", scenarios[1].CSharp);
+    }
+
+    [TestMethod]
+    public void Parse_TreatsAnAbsentLanguageTagAsCSharp()
+    {
+        const string Json = """
+        {
+          "schemaVersion": 1,
+          "source": "gallery",
+          "controls": [
+            {
+              "id": "button",
+              "name": "Button",
+              "samples": [
+                { "header": "Untagged", "code": "var a = 1;" },
+                { "header": "Tagged", "code": "var b = 2;", "language": "CSharp" }
+              ]
+            }
+          ]
+        }
+        """;
+
+        var (scenarios, _, _) = SampleIndexParser.Parse(Json, "gallery");
+
+        Assert.AreEqual(2, scenarios.Length);
+        Assert.AreEqual("var a = 1;", scenarios[0].CSharp);
+        Assert.AreEqual("var b = 2;", scenarios[1].CSharp);
+    }
 }

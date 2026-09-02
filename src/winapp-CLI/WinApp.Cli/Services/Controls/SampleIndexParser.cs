@@ -102,6 +102,7 @@ internal static class SampleIndexParser
                 var header = GetString(sample, SampleIndexSchema.Header);
                 var xaml = GetString(sample, SampleIndexSchema.Xaml);
                 var code = GetString(sample, SampleIndexSchema.Code);
+                var language = GetString(sample, SampleIndexSchema.Language);
 
                 // details/xmlnsImports are control-level defaults a sample may override:
                 // sibling samples of one control legitimately differ (Toolkit gives each
@@ -116,8 +117,10 @@ internal static class SampleIndexParser
                 // A sample with neither XAML nor code has no usable content. Guard on the
                 // raw code (before the usings prefix) so a control that declares only
                 // control-level usings can't slip a using-only stub through.
+                // Code is pasted into a C# file, so drop it when tagged as another
+                // language rather than emitting, say, C++ as if it were C#.
                 var hasXaml = !string.IsNullOrWhiteSpace(xaml);
-                var hasCode = !string.IsNullOrWhiteSpace(code);
+                var hasCode = !string.IsNullOrWhiteSpace(code) && IsCSharp(language);
                 if (!hasXaml && !hasCode) continue;
 
                 // Ids are positional over KEPT samples, so they stay contiguous from 1.
@@ -181,6 +184,10 @@ internal static class SampleIndexParser
         }
         return [.. list];
     }
+
+    // v1 carries C# only. An absent tag means C#; anything else is not usable as C#.
+    private static bool IsCSharp(string language)
+        => language.Length == 0 || language.Equals("csharp", StringComparison.OrdinalIgnoreCase);
 
     private static string GetString(JsonElement el, string prop)
         => el.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.String
