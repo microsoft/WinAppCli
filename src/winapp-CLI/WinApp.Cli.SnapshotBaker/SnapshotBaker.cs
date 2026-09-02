@@ -175,6 +175,15 @@ internal static class SnapshotBaker
     /// of it. The bake runs on every release and its failure mode is a release-blocking
     /// error; generating an artifact for someone else's repository is occasional, manual
     /// work that must not be able to fail a release.</para>
+    ///
+    /// <para>This is a <em>usable-only</em> export, not a verbatim dump of what was fetched.
+    /// Scenarios are sanitized and any left with neither XAML nor C# are omitted, so the
+    /// counts it reports can be lower than the counts <see cref="BakeAsync"/> shows for the
+    /// same sources. That is deliberate: those samples are already dropped before search, so
+    /// writing them here would hand an upstream maintainer known-broken content to publish.
+    /// Losslessness is a property of the <em>schema</em> — a scenario that survives is
+    /// carried field for field, which is what the round-trip tests assert — not a promise
+    /// that every fetched scenario appears.</para>
     /// </remarks>
     /// <returns>The ids of providers that could not be fetched. Empty means every source
     /// was written.</returns>
