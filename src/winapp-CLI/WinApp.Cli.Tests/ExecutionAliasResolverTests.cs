@@ -206,7 +206,7 @@ public class ExecutionAliasResolverTests
     [TestMethod]
     public void TryGetAliasPackageFamilyName_MissingFile_ReturnsFalse()
     {
-        var missing = Path.Combine(Path.GetTempPath(), $"winapp-no-such-alias-{Guid.NewGuid():N}.exe");
+        var missing = Path.Join(Path.GetTempPath(), $"winapp-no-such-alias-{Guid.NewGuid():N}.exe");
 
         Assert.IsFalse(ExecutionAliasResolver.TryGetAliasPackageFamilyName(missing, out var family),
             "A path with no alias proxy must not report an owner");
@@ -218,7 +218,7 @@ public class ExecutionAliasResolverTests
     {
         // A real file that is not a reparse point must not be mistaken for an alias — reporting a bogus
         // owner here would block a legitimate launch.
-        var file = Path.Combine(Path.GetTempPath(), $"winapp-plain-{Guid.NewGuid():N}.exe");
+        var file = Path.Join(Path.GetTempPath(), $"winapp-plain-{Guid.NewGuid():N}.exe");
         File.WriteAllText(file, "not a reparse point");
 
         try

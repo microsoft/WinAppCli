@@ -106,7 +106,8 @@ $extraProps  </PropertyGroup>
                 [switch]$WinAppRunUnregisterOnExit,
                 [switch]$WinAppRunClean,
                 [switch]$WinAppRunSymbols,
-                [string]$WinAppRunExecutable = ""
+                [string]$WinAppRunExecutable = "",
+                [string]$WinAppRunUseExecutionAlias = ""
             )
             $dir = Join-Path $script:tempRoot $CaseName
             New-Item -ItemType Directory -Path $dir -Force | Out-Null
@@ -127,6 +128,7 @@ $extraProps  </PropertyGroup>
             if ($WinAppRunClean) { $extraProps += "    <WinAppRunClean>true</WinAppRunClean>`n" }
             if ($WinAppRunSymbols) { $extraProps += "    <WinAppRunSymbols>true</WinAppRunSymbols>`n" }
             if ($WinAppRunExecutable) { $extraProps += "    <WinAppRunExecutable>$WinAppRunExecutable</WinAppRunExecutable>`n" }
+            if ($WinAppRunUseExecutionAlias) { $extraProps += "    <WinAppRunUseExecutionAlias>$WinAppRunUseExecutionAlias</WinAppRunUseExecutionAlias>`n" }
 
             $csproj = @"
 <Project Sdk="Microsoft.NET.Sdk">
@@ -289,6 +291,32 @@ $extraProps  </PropertyGroup>
             $args = Get-ComputedRunArgs -CaseName 'run-raw-empty'
 
             $args | Should -Match ' --caller nuget-package$'
+        }
+
+        It "Forwards neither alias switch when WinAppRunUseExecutionAlias is unset" {
+            # The property is deliberately not defaulted in the props file: winapp picks the launch
+            # mechanism from OutputType itself, and forwarding a switch here would make every console
+            # app an EXPLICIT alias request, which fails instead of falling back when the alias is taken.
+            $args = Get-ComputedRunArgs -CaseName 'run-alias-unset'
+
+            $args | Should -Not -Match ' --with-alias'
+            $args | Should -Not -Match ' --without-alias'
+        }
+
+        It "Maps WinAppRunUseExecutionAlias=true to --with-alias" {
+            $args = Get-ComputedRunArgs -CaseName 'run-alias-true' -WinAppRunUseExecutionAlias 'true'
+
+            $args | Should -Match ' --with-alias'
+            $args | Should -Not -Match ' --without-alias'
+        }
+
+        It "Maps WinAppRunUseExecutionAlias=false to --without-alias" {
+            # Opting out has to be forwarded explicitly, because the CLI would otherwise apply its own
+            # OutputType default and launch a console app through its alias anyway.
+            $args = Get-ComputedRunArgs -CaseName 'run-alias-false' -WinAppRunUseExecutionAlias 'false'
+
+            $args | Should -Match ' --without-alias'
+            $args | Should -Not -Match ' --with-alias '
         }
     }
 

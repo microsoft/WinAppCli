@@ -41,11 +41,12 @@
 
       Deliberately left EMPTY by default rather than defaulted here: winapp already launches a console
       app (OutputType=Exe) through an alias on its own, and it distinguishes that default from an
-      explicit request — a default falls back to AUMID if the alias is unavailable, while an explicit
-      one reports an error. Defaulting the property here would forward --with-alias for every console
-      app and lose that distinction. Set it to true or false to override winapp's choice.
+      explicit request. A default falls back to AUMID when the alias is unavailable, while an explicit
+      request reports an error. Defaulting the property here would forward an explicit alias switch for
+      every console app and lose that distinction.
+
+      Set it to true or false to override winapp's choice.
     -->
-    <!-- <WinAppRunUseExecutionAlias></WinAppRunUseExecutionAlias> -->
 
     <!--
       When true, only register the package identity without launching the application.
