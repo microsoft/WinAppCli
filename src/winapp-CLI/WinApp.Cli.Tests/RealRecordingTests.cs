@@ -28,8 +28,6 @@ public partial class RealRecordingTests
     [TestCleanup]
     public void ResetRecordingSeams()
     {
-        Mp4SinkWriterEncoder.s_create = (path, width, height, fps, bitrate)
-            => new Mp4SinkWriterEncoder(path, width, height, fps, bitrate);
         Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, fps, bitrate)
             => new Mp4SinkWriterEncoder(path, width, height, fps, bitrate, overwriteExisting: false);
         RecordFrameBundleWriter.ResetTestSeams();
@@ -67,6 +65,35 @@ public partial class RealRecordingTests
     }
 
     [TestMethod]
+    public async Task RecordAsync_ExistingOutput_IsNotOverwritten()
+    {
+        // Video-only recording used to take the clobbering encoder, so running the readme sample
+        // twice at the same OutputPath destroyed the first take. The CLI refuses up front, but that
+        // guard does not travel with the package.
+        using var fx = new UiaTestFixture();
+        var capture = new FakeWindowCapture();
+        var recording = NewRecordingService(NewAutomation(), capture);
+        var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var output = Path.Join(root, "already-there.mp4");
+        File.WriteAllText(output, "the first recording");
+
+        capture.Supported = true;
+        capture.StartGrabberCallback = (_, _) => new FakeFrameGrabber(new byte[64 * 64 * 4], 64, 64);
+
+        await Assert.ThrowsExactlyAsync<IOException>(
+            () => recording.RecordAsync(SessionFor(fx), null, new RecordOptions
+            {
+                OutputPath = output,
+                DurationSec = 1,
+                Fps = 1,
+                MaxEdge = 64,
+            }, CancellationToken.None));
+
+        Assert.AreEqual("the first recording", File.ReadAllText(output), "the existing recording must survive");
+    }
+
+    [TestMethod]
     public async Task RecordAsync_WgcSeams_EncodesTimedFramesAndReportsResult()
     {
         using var fx = new UiaTestFixture();
@@ -90,7 +117,7 @@ public partial class RealRecordingTests
             Assert.AreEqual(2, fps);
             return grabber;
         };
-        Mp4SinkWriterEncoder.s_create = (path, width, height, fps, bitrate) =>
+        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, fps, bitrate) =>
         {
             encoder = new FakeVideoEncoder(path, width, height);
             return encoder;
@@ -136,7 +163,7 @@ public partial class RealRecordingTests
 
         capture.Supported = true;
         capture.StartGrabberCallback = (_, _) => grabber;
-        Mp4SinkWriterEncoder.s_create = (path, width, height, _, _) => new FakeVideoEncoder(path, width, height);
+        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) => new FakeVideoEncoder(path, width, height);
 
         var result = await recording.RecordAsync(uiTarget, null, new RecordOptions
         {
@@ -170,7 +197,7 @@ public partial class RealRecordingTests
             screenCalls++;
             return Enumerable.Repeat((byte)0x66, tw * th * 4).ToArray();
         };
-        Mp4SinkWriterEncoder.s_create = (path, width, height, _, _) => new FakeVideoEncoder(path, width, height);
+        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) => new FakeVideoEncoder(path, width, height);
 
         var result = await recording.RecordAsync(uiTarget, null, new RecordOptions
         {
@@ -205,7 +232,7 @@ public partial class RealRecordingTests
             windowCalls++;
             return Enumerable.Repeat((byte)0x77, width * height * 4).ToArray();
         };
-        Mp4SinkWriterEncoder.s_create = (path, width, height, _, _) => new FakeVideoEncoder(path, width, height);
+        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) => new FakeVideoEncoder(path, width, height);
 
         var result = await recording.RecordAsync(uiTarget, null, new RecordOptions
         {

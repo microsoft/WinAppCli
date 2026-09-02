@@ -272,10 +272,14 @@ internal sealed partial class UiRecordingService(
 
             var (encoderW, encoderH, displayW, displayH) = ComputeTargetSize(cropW, cropH, options.MaxEdge);
             var bitrate = (uint)Math.Clamp((long)encoderW * encoderH * options.Fps / 8, 1_000_000, 24_000_000);
-            var encoderFactory = options.FramesDirectory is null
-                ? Mp4SinkWriterEncoder.s_create
-                : Mp4SinkWriterEncoder.s_createNoClobber;
-            using var encoder = encoderFactory(options.OutputPath, encoderW, encoderH, options.Fps, bitrate);
+
+            // Never replace an existing recording. The CLI refuses up front ("recording never
+            // replaces existing artifacts"), but that guard does not travel with the package, and
+            // the previous video-only path silently overwrote OutputPath - running the readme
+            // sample twice destroyed the first take. This also covers a file that appears while
+            // recording is already in progress.
+            using var encoder = Mp4SinkWriterEncoder.s_createNoClobber(
+                options.OutputPath, encoderW, encoderH, options.Fps, bitrate);
 
             var frameDurationHns = 10_000_000L / options.Fps;
             var totalFrames = options.DurationSec > 0 ? (long)options.DurationSec * options.Fps : (long?)null;

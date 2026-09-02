@@ -179,9 +179,7 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IVideoEncoder
 
     internal static volatile Action<string, string>? s_testPublishAtomic;
 
-    internal static Func<string, int, int, int, uint, IVideoEncoder> s_create =
-        (path, width, height, fps, bitrate) => new Mp4SinkWriterEncoder(path, width, height, fps, bitrate);
-
+    // Recording never replaces an existing file, so there is only one creation seam.
     internal static Func<string, int, int, int, uint, IVideoEncoder> s_createNoClobber =
         (path, width, height, fps, bitrate) => new Mp4SinkWriterEncoder(
             path, width, height, fps, bitrate, overwriteExisting: false);

@@ -44,7 +44,7 @@ public interface IUiAutomation
     /// <param name="uiTarget">The app or window that owns the element.</param>
     /// <param name="elementId">Selector of the element to walk up from.</param>
     /// <param name="ct">Cancels the walk.</param>
-    /// <returns>The ancestors, ordered from the root down to the element's parent.</returns>
+    /// <returns>The chain from the window root down to and including the element itself, which is the last entry.</returns>
     Task<UiElement[]> InspectAncestorsAsync(UiTarget uiTarget, string elementId, CancellationToken ct);
 
     /// <summary>Finds every element matching <paramref name="selector"/>, up to <paramref name="maxResults"/>.</summary>
@@ -110,7 +110,7 @@ public interface IUiAutomation
     /// <param name="uiTarget">The app or window that owns the element.</param>
     /// <param name="element">The container to scroll.</param>
     /// <param name="direction">"up", "down", "left", or "right".</param>
-    /// <param name="destination">"start" or "end" to jump to either extreme instead of stepping.</param>
+    /// <param name="destination">"top" or "bottom" to jump to either extreme instead of stepping.</param>
     /// <param name="ct">Cancels the call.</param>
     Task ScrollContainerAsync(UiTarget uiTarget, UiElement element, string? direction, string? destination, CancellationToken ct);
 
