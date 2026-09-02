@@ -28,7 +28,7 @@ agent loops.
 
 ## When to use
 - Discovering which Windows/WinRT type or member does what you need ("what's the acrylic brush type?", "which control is a NavigationView?")
-- Listing a type's properties, events, and methods (with XML-doc descriptions and inherited members) before writing XAML or code against it
+- Listing a type's properties, events, and methods (declared and inherited) before writing XAML or code against it
 - Validating that a property exists on a type — catching typos and wrong-type mistakes before they become CS0117/XAML binding errors
 - Enumerating an enum's values (e.g. `Symbol`, `Visibility`)
 - Exploring the namespaces and packages a project can call into
@@ -161,8 +161,9 @@ winapp find-api members InfoBar TeachingTip ContentDialog
 # Narrow a large type instead of dumping ~370 members and searching the output
 winapp find-api members NavigationView --filter selected
 
-# Unfiltered listings omit dependency-property statics and descriptions.
-# --all restores them (works with --json; --verbose does not).
+# Unfiltered listings show declared members with signatures and summarize
+# inherited members by name; they also omit dependency-property statics and
+# descriptions. --all restores everything (works with --json; --verbose does not).
 winapp find-api members NavigationView --all
 ```
 
@@ -255,8 +256,10 @@ winapp find-api check-property InfoBar Severity Backgruond --json
 - **Ambiguity detection.** When a short type name resolves to multiple namespaces (a CS0104 risk), search surfaces every candidate with its fully-qualified name so you can pick the right one. Candidates are de-duplicated, so each fully-qualified name appears once even when several packages ship the same type, and every listed candidate is a genuinely different name you can choose between. Only *exact*-name collisions are listed when the query names a real type, and the list obeys `--max` (default `5`), so an ambiguous short name costs a few lines rather than pages.
 - **Short names in `members` / `enums` / `check-property`.** A short name shared by a modern `Microsoft.*` type and its legacy `Windows.*` UWP twin resolves to the `Microsoft.*` one — that is the projection a Windows App SDK app uses, and the resolved fully-qualified name is always printed so you can see which type answered. Any other collision is an error listing the candidates; re-run with the fully-qualified name.
 - **Search results exclude `ABI.*` projection types.** These compiler-generated interop structs mirror real types and are never what you want to write in source, so search omits them. They remain reachable by exact name — `members ABI.Some.Type` still works if you are debugging interop.
-- **Inherited members.** `members` includes inherited properties/events/methods and marks their declaring type, so you see the full usable surface of a control. Overloads that differ only in their parameters are all listed — a name is never collapsed to a single signature.
-- **Unfiltered listings are trimmed.** An unfiltered `members` call omits dependency-property identifier statics (`BackgroundProperty`, ~28% of a WinUI control's properties) and per-member descriptions, which roughly halves the payload. Inherited members are kept — they are most of what you actually write. What was left out is always reported (`hiddenDependencyProperties`, `descriptionsOmitted`, `hint`), and both `--filter` and `--all` see the complete surface, so `members Button --filter BackgroundProperty` still finds it. Use `--all` for the exhaustive listing; `--verbose` does the same but cannot be combined with `--json`.
+- **Negative answers are qualified when the index is incomplete.** If a package's metadata failed to parse, "no such type/property" is indistinguishable from "that package was never read" — the false negative you must not generate code from. So a miss (including a `search` with zero results) carries a note saying the index is partial and to run `winapp find-api refresh`. A positive answer never needs it.
+- **Generic types resolve however you write them.** Metadata stores generics with an arity suffix (`` IAsyncOperation`1 ``), but nobody writes that. `members IAsyncOperation`, `members IAsyncOperation<StorageFile>`, and ``members TypedEventHandler`2`` all resolve. Bare names match any arity; a stated arity (either form) must match, so `Holder<A, B>` will not resolve to a one-parameter `Holder<T>`.
+- **Inherited members.** `members` covers inherited properties/events/methods and marks their declaring type, so you see the full usable surface of a control. Overloads that differ only in their parameters are all listed — a name is never collapsed to a single signature.
+- **Unfiltered listings are trimmed.** An unfiltered `members` call is an *orientation* query, so it answers that shape and leaves out the rest. Declared members keep full signatures inline; inherited members are grouped by declaring type and listed **by name only** (Button: 8 declared, 280 inherited across 6 base types). It also omits dependency-property identifier statics (`BackgroundProperty`, ~28% of a WinUI control's properties), per-member descriptions, and JSON fields implied by their surroundings (`kind`, `returnType`, `inherited` when false). Measured: `members Button --json` went from 91,954 to 10,567 characters. What was left out is always reported (`hiddenDependencyProperties`, `descriptionsOmitted`, `hint`), and both `--filter` and `--all` see the complete surface with full signatures, so `members Button --filter BackgroundProperty` still finds it and `--filter Click` still returns the inherited `Click` signature. Use `--all` for the exhaustive listing; `--verbose` does the same but cannot be combined with `--json`.
 - **`--json` omits diagnostics.** Cache file paths appear only under `--verbose`, and empty suggestion arrays are omitted rather than sent as `[]`.
 
 ## Troubleshooting
@@ -274,7 +277,7 @@ winapp find-api check-property InfoBar Severity Backgruond --json
 
 ## CLI reference
 - `winapp find-api "<query>" [<query>...] [--max N]` — lexical search across types and members (bare form). Exits non-zero on no hits.
-- `winapp find-api members <type> [<type>...] [--filter <text>] [--all]` — properties, events, and methods (incl. inherited) of a type. An unfiltered listing omits dependency-property statics and descriptions; `--filter` and `--all` see everything.
+- `winapp find-api members <type> [<type>...] [--filter <text>] [--all]` — properties, events, and methods of a type. An unfiltered listing shows declared members with signatures, summarizes inherited members by declaring type (names only), and omits dependency-property statics and descriptions; `--filter` and `--all` see everything with full signatures.
 - `winapp find-api check-property <type> <property> [<property>...]` — validate properties exist; exits non-zero if any is missing. Read-only properties are flagged (`writable: false`) but still exit `0`.
 - `winapp find-api enums <type> [<type>...] [--filter <text>]` — enum values; exits non-zero when the type is not an enum.
 - `winapp find-api packages` — indexed NuGet/SDK packages with per-package counts.

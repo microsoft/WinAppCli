@@ -1273,7 +1273,7 @@ A query from a directory with no project and no solution is *always* answered by
 
 **Commands:**
 - *(bare)* `find-api "<query>" ["<query>"...]` - Lexically search type and member names, grouped by namespace
-- `members <type> [<type>...] [--filter <text>]` - List a type's properties, events, and methods (with descriptions and inherited members)
+- `members <type> [<type>...] [--filter <text>]` - List a type's properties, events, and methods (declared members with signatures, inherited members summarized by declaring type)
 - `check-property <type> <property> [<property>...]` - Validate properties exist on a type (exits non-zero if any is missing). A **read-only** property is reported with ⚠️ and "read-only, cannot be assigned" rather than a plain ✅, so a property such as `ActualWidth` is not mistaken for something you can set.
 - `enums <type> [<type>...] [--filter <text>]` - List an enum's values (exits non-zero when the type is not an enum)
 - `packages` - List the indexed metadata packages, with per-package type/member counts
@@ -1294,7 +1294,7 @@ A query from a directory with no project and no solution is *always* answered by
 **Options:**
 - `--max <n>` - Maximum number of namespace-grouped search results (default `5`; search only). Also caps the ambiguity list, so a short query that collides across many namespaces stays readable.
 - `--filter <text>` - Narrow a listing on `members` and `enums`: a **case-insensitive substring** match on the member/value name. Best used on types with hundreds of members. Most enums are small enough to dump whole (even `Symbol`, the largest in WinUI at 197 values), so filtering them usually costs more than it saves once you factor in a second guess. Never re-run the same command with different filter text — dump once and read it.
-- `--all` - On `members`, list the complete surface: include dependency-property identifier statics and per-member descriptions, both of which an unfiltered listing omits (see **Listing size** below). `--verbose` implies it; use `--all` when you also want `--json`, which cannot be combined with `--verbose`.
+- `--all` - On `members`, list the complete surface: full signatures for inherited members, plus dependency-property identifier statics and per-member descriptions, all of which an unfiltered listing omits (see **Listing size** below). `--verbose` implies it; use `--all` when you also want `--json`, which cannot be combined with `--verbose`.
 - `--scan` - Recursively discover and index every project under the directory (`refresh` only)
 - `--project <name>` - Project to query (matches the `.csproj`/`.vcxproj` name), or `sdk` to query the machine-wide Windows SDK scope
 - `--project-dir <path>` - Project directory to query (defaults to the current directory). A path that does not exist is an error — it is never silently answered from the `sdk` scope.
@@ -1320,7 +1320,7 @@ winapp find-api "acrylic brush" "teaching tip" --max 5
 # Narrow a large type instead of dumping it and grepping
 winapp find-api members Button --filter background
 
-# Full member surface, including dependency-property statics and descriptions
+# Full member surface: inherited signatures, dependency-property statics, descriptions
 winapp find-api members Button --all
 
 # Manage the index
@@ -1333,12 +1333,18 @@ winapp find-api members Button --project sdk
 
 When `--filter` is applied, the output still reports the unfiltered total (`totalValues`, or `totalProperties`/`totalEvents`/`totalMethods` in `--json`), so a narrow view is never mistaken for a small API. A filter that matches nothing still exits `0` and says so explicitly — that is "nothing matched your filter", not "no such type".
 
-**Listing size.** An unfiltered `members` listing is the one expensive shape — `members Button` covers 400 members. Two parts of it are omitted by default because nothing is written from them:
+**Listing size.** An unfiltered `members` listing is the one expensive shape — `members Button` covers 288 members, of which 280 are inherited from 6 base types. An unfiltered call is an *orientation* query ("what is this type, roughly what can it do?"), so it answers that and omits the parts nothing is written from:
 
+- **Inherited member signatures** — inherited members are grouped by declaring type and listed **by name only**, so the shape of the inherited surface is still visible without 280 full signatures.
 - **Dependency-property identifier statics** (`BackgroundProperty`) — 28% of a typical WinUI control's properties. They exist to be passed to `GetValue`/`SetValue`, not assigned.
 - **Per-member descriptions** — the XML-doc prose, roughly 16% of the payload.
+- **Fields implied by their surroundings** in `--json`: `kind` (implied by the containing `properties`/`events`/`methods` array), `returnType` (the leading token of `signature`), and `inherited` when false (implied by `declaringType`).
 
-Inherited members are **not** trimmed: `Background`, `Width`, and `Click` all come from base types, so dropping them would just force a second lookup. What was omitted is always reported (`hiddenDependencyProperties`, `descriptionsOmitted`, and a `hint` in `--json`; an "Omitted:" line in text), and totals still describe the whole type. Both `--filter` and `--all` see the complete surface, so `members Button --filter BackgroundProperty` still finds the identifier. In practice this halves an unfiltered listing.
+What was omitted is always reported (`hiddenDependencyProperties`, `descriptionsOmitted`, and a `hint` in `--json`; an "Omitted:" line in text), and totals still describe the whole type. Both `--filter` and `--all` see the complete surface with full signatures and descriptions, so `members Button --filter BackgroundProperty` still finds the identifier and `members Button --filter Click` still returns `Click`'s inherited signature. Measured on `samples/winui-app`, this takes `members Button --json` from 91,954 to 10,567 characters (−88.5%) while leaving `--filter` and `--all` byte-identical.
+
+**Negative answers are qualified when the index is incomplete.** If a package's metadata could not be read, "no such type" and "that package was never indexed" look identical — and acting on the first when it is really the second generates code against an API you were told does not exist. So every negative answer, including a `search` that returns zero results, carries a note that the index is partial and points at `winapp find-api refresh`. Positive answers are unaffected.
+
+**Generic type names.** Metadata stores generic types with an arity suffix (`` IAsyncOperation`1 ``), which is not how anyone writes them. `members`, `enums`, and `check-property` accept every form: `IAsyncOperation`, `IAsyncOperation<StorageFile>`, and `` IAsyncOperation`1 `` all resolve to the same type. A bare name matches any arity; a stated arity (in either notation) must match, so `Holder<A, B>` will not resolve to a single-parameter `Holder<T>`.
 
 **`--json` payloads omit diagnostics.** Cache file paths appear only under `--verbose` (matching text output, where they were already verbose-only), and empty suggestion arrays are omitted rather than serialized as `[]`.
 
