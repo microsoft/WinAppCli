@@ -464,7 +464,7 @@ public class FindUiCommandTests : BaseCommandTests
         _fakeService = FakeControlsSearchService.WithEngine(BuildEngine());
         var exit = await ParseAndInvokeWithCaptureAsync(Command(), ["flex layout", "--source", "reactor", "--json"]);
         Assert.AreEqual(1, exit);
-        StringAssert.Contains(TestAnsiConsole.Output, "control data is available locally",
+        StringAssert.Contains(TestAnsiConsole.Output, "control data could be loaded",
             "a --source whose corpus never loaded must surface the friendly error, not a false 'no match'");
         StringAssert.Contains(TestAnsiConsole.Output, "reactor", "the error must name the unavailable source");
     }
@@ -475,7 +475,7 @@ public class FindUiCommandTests : BaseCommandTests
         _fakeService = FakeControlsSearchService.WithEngine(BuildEngine());
         var exit = await ParseAndInvokeWithCaptureAsync(Command(), ["--id", "reactor-flex-1", "--json"]);
         Assert.AreEqual(1, exit);
-        StringAssert.Contains(TestAnsiConsole.Output, "control data is available locally",
+        StringAssert.Contains(TestAnsiConsole.Output, "control data could be loaded",
             "a --id whose source never loaded must surface the friendly error, not 'Pattern not found'");
         StringAssert.Contains(TestAnsiConsole.Output, "reactor", "the error must name the unavailable source");
     }

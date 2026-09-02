@@ -7,10 +7,10 @@ using System.Reflection;
 using System.Text.Json;
 
 /// <summary>
-/// Loads the small, hand-curated data baked into the binary. Per the find-ui
-/// design the large Gallery/Toolkit scenario corpora are NOT embedded — they are
-/// fetched from GitHub on first use and cached per-user. Only lightweight,
-/// endpoint-less enrichment ships in the exe:
+/// Loads the small, hand-curated data baked into the binary. This is distinct from the
+/// baked scenario corpus (see <see cref="EmbeddedSnapshot"/>, which serves the large
+/// Gallery/Toolkit/Reactor snapshots); here live only the endpoint-less, hand-authored
+/// pieces:
 ///   • core-patterns.json — curated foundational WinUI patterns (no upstream).
 ///   • gallery-tags.json  — curated tag enrichment merged into fetched Gallery
 ///     scenarios for BM25 scoring. Gallery needs this because it can only derive

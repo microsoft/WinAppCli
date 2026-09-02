@@ -277,7 +277,7 @@ Building a WinUI 3 UI and need to find the right control or a working sample?
 - `--refresh` — re-fetch the corpus from GitHub
 - `--json` — structured, agent-friendly output
 
-**Note:** The corpus is fetched from GitHub on first use and cached per-user, so the **first run requires network access**.
+**Note:** The corpus ships inside the CLI, so `find-ui` works with **no network access**. When GitHub is reachable the CLI refreshes from it and caches per-user; when it isn't, results come from the built-in corpus and `--json` reports `"corpus": "embedded"`.
 
 ### `winapp ui` — UI automation commands
 **Purpose:** Inspect and interact with running Windows app UIs using Windows UI Automation (UIA).
