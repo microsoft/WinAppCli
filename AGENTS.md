@@ -99,10 +99,15 @@ node cli.js help
 Failed to install Microsoft.Windows.SDK.BuildTools: The SSL connection could not be established
 ```
 
-**This is a known limitation, not a flaky test and not a transient outage.** Do not dismiss a
-failure on these grounds and do not re-run hoping it passes. `NugetService` falls back to
-`api.nuget.org` only when the feed environment variables are unset; point them at the internal
-feed instead — the same values `.pipelines/templates/build.yaml` uses in CI:
+**These failures are configuration, not a limitation.** With the setup below the full unit suite
+passes locally on a corp machine: **4621 tests, 0 failures**. Do not accept a NuGet-related
+failure as environmental — none of them are.
+
+Two separate mechanisms are involved, and you need both:
+
+**1. `NugetService` downloads** (`Microsoft.Windows.SDK.BuildTools` and friends) read the
+`WINAPP_NUGET_*` variables and fall back to `api.nuget.org` only when they are unset. These are
+the same values `.pipelines/templates/build.yaml` uses in CI:
 
 ```powershell
 $env:WINAPP_NUGET_FLAT_CONTAINER = 'https://pkgs.dev.azure.com/microsoft/pde-oss/_packaging/pde-oss_Internal/nuget/v3/flat2'
@@ -123,6 +128,39 @@ $cred = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("VssSessionToke
 Invoke-RestMethod "$env:WINAPP_NUGET_FLAT_CONTAINER/microsoft.windows.sdk.buildtools/index.json" `
     -Headers @{ Authorization = "Basic $cred" }
 ```
+
+**2. End-to-end tests that shell out to `dotnet add package Microsoft.WindowsAppSDK`** go through
+the NuGet client instead, which reads `nuget.config` and ignores `WINAPP_NUGET_*` entirely. If
+`nuget.org` is disabled and no internal feed is a registered source, they fail with
+`[ERROR] - Failed to add Microsoft.WindowsAppSDK package reference`.
+
+Do **not** fix this by adding a global package source — these tests run in `%TEMP%`, outside the
+repo, so a repo-local `nuget.config` never applies to them, and a machine-wide registration is a
+persistent change to a shared dev box. Instead point `APPDATA` at a throwaway directory holding
+the repo's own feed config, which scopes the whole thing to the session:
+
+```powershell
+$feed = 'https://pkgs.dev.azure.com/microsoft/pde-oss/_packaging/pde-oss_Internal/nuget/v3/index.json'
+
+# NuGet resolves its user-level config from %APPDATA%\NuGet\NuGet.Config, so redirecting APPDATA
+# swaps in the repo's feed list without touching the real one.
+$cfg = Join-Path $env:TEMP "winapp-nuget-$PID"
+New-Item -ItemType Directory -Path "$cfg\NuGet" -Force | Out-Null
+Copy-Item .pipelines\release-nuget.config "$cfg\NuGet\NuGet.Config"
+$env:APPDATA = $cfg
+
+# The Azure Artifacts credential provider needs the endpoint spelled out.
+# VSS_NUGET_ACCESSTOKEN alone is NOT enough here - the service index returns 401 without this.
+$env:VSS_NUGET_EXTERNAL_FEED_ENDPOINTS = @{
+    endpointCredentials = @(@{ endpoint = $feed; username = 'docker'; password = $env:VSS_NUGET_ACCESSTOKEN })
+} | ConvertTo-Json -Compress -Depth 5
+```
+
+`.pipelines/release-nuget.config` is the single source of truth for the feed URL — do not hardcode
+it somewhere else. CI does the same thing less surgically, by copying that file over
+`%APPDATA%\NuGet\NuGet.Config` on a throwaway agent.
+
+Because `APPDATA` is redirected, run this in a dedicated shell and let it end with the run.
 
 More generally: if something fails locally but passes in CI, the difference is configuration,
 not luck. Check `.pipelines/templates/build.yaml` for the environment CI provides before
@@ -202,6 +240,25 @@ Sample & guide tests run via `.github/workflows/test-samples.yml` using a GitHub
 | Copilot-specific plugin components | `plugins/winapp/com.github.copilot/` |
 | Plugin marketplaces | `.github/plugin/marketplace.json`, `.claude-plugin/marketplace.json` |
 | Samples | `samples/` (electron, cpp-app, dotnet-app, etc.) |
+| ADO pipelines | `.pipelines/` — see [`.pipelines/README.md`](.pipelines/README.md) |
+
+### Editing the ADO pipelines
+
+Agent setup (.NET, Node, internal feeds and their auth) is shared via
+`.pipelines/templates/build-env.yaml`. Change it there, not in each pipeline.
+
+1ES **release jobs cannot check out the repo**, so any step inside a `templateContext.type:
+releaseJob` job cannot call a `.ps1` from the working tree. It *can* still share logic via a
+YAML `- template:` reference, because templates are expanded at compile time — that is how
+`release.yml`'s Build-stage preflight and its `Release_GitHub` job share
+`templates/release-assets.yaml`. Prefer that over
+duplicating inline script between the two.
+
+`.pipelines/release.yml` both ships releases (from `rel/v*`) and rehearses one weekly (from
+`main`). Every publishing action is gated on `startsWith(variables['Build.SourceBranch'],
+'refs/heads/rel/v')` — derived from the branch, not a parameter, because Azure DevOps compiles
+scheduled and triggered runs with parameter *defaults*. If you add a publishing step, gate it the
+same way, and write the condition as a positive test for `rel/v*` so it fails closed.
 
 ## CLI command semantics
 

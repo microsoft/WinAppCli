@@ -69,7 +69,7 @@ internal sealed class FindUiCommand : Command, IShortDescription
     }
 
     public FindUiCommand()
-        : base("find-ui", "Agent-first: built primarily for AI coding agents to pull a real WinUI sample into the editor instead of inventing markup (pair it with --json); it works just as well typed by hand. Search WinUI controls and samples for a working code example. WinUI-only: covers the WinUI 3 Gallery and the Windows Community Toolkit by default (plus the microsoft-ui-reactor ReactorGallery as an opt-in source via --source reactor); not WPF/WinForms. The Gallery/Toolkit/Reactor corpus is fetched from GitHub on first use and cached per-user, so the first such run needs network access; --source core searches the built-in patterns and works fully offline.")
+        : base("find-ui", "Agent-first: built primarily for AI coding agents to pull a real WinUI sample into the editor instead of inventing markup (pair it with --json); it works just as well typed by hand. Search WinUI controls and samples for a working code example. WinUI-only: covers the WinUI 3 Gallery and the Windows Community Toolkit by default (plus the microsoft-ui-reactor ReactorGallery as an opt-in source via --source reactor); not WPF/WinForms. A corpus is baked into the CLI, so this works offline and behind proxies; when GitHub is reachable it refreshes to the latest samples and caches them per-user.")
     {
         Arguments.Add(QueryArgument);
         Options.Add(IdOption);
@@ -172,6 +172,8 @@ internal sealed class FindUiCommand : Command, IShortDescription
                 return Fail(json, $"Failed to load the WinUI corpus: {ex.Message}");
             }
 
+            NoteEmbeddedCorpus(json);
+
             if (list)
             {
                 return EmitList(engine, json);
@@ -183,6 +185,54 @@ internal sealed class FindUiCommand : Command, IShortDescription
             }
 
             return EmitSearch(engine, query!, max, source, includeReactor, json);
+        }
+
+        /// <summary>
+        /// The <c>corpus</c> value for JSON output, or null when nothing upstream-derived
+        /// was loaded (a core-patterns-only result).
+        /// </summary>
+        private string? CorpusLabel() => searchService.LoadedOrigin switch
+        {
+            CorpusOrigin.Network => "network",
+            CorpusOrigin.Cache => "cache",
+            CorpusOrigin.Embedded => "embedded",
+            _ => null
+        };
+
+        /// <summary>
+        /// Tell the user when results came from the corpus baked into the CLI. Without this
+        /// the offline path is silent and indistinguishable from a live fetch — and the
+        /// "Fetching WinUI controls from GitHub..." notice has usually already been shown by
+        /// the attempt that failed, which would otherwise imply the data is current.
+        /// <para>
+        /// The notice states <i>what</i> was served, never <i>why</i>. A failed fetch is only
+        /// one of the ways the embedded corpus wins: a still-fresh cache that predates the
+        /// bake is served from the snapshot too (see <c>CachedProviderBase.PreferNewerOf</c>),
+        /// with no network attempt at all, so claiming GitHub was unreachable would be a lie
+        /// on that path.
+        /// </para>
+        /// Written to <b>stderr</b> on the same terms as <see cref="BuildFetchNotice"/>: a
+        /// user redirecting stdout to a file keeps the results clean and still sees the
+        /// staleness warning on the terminal. Under <c>--json</c> the provenance is carried
+        /// by the <c>corpus</c> field instead.
+        /// </summary>
+        private void NoteEmbeddedCorpus(bool json)
+        {
+            if (searchService.LoadedOrigin != CorpusOrigin.Embedded)
+            {
+                return;
+            }
+
+            // --json/--quiet drop info-level output; skip the notice entirely.
+            if (json || !logger.IsEnabled(LogLevel.Information))
+            {
+                return;
+            }
+
+            AnsiConsole.Create(new AnsiConsoleSettings { Out = new AnsiConsoleOutput(Console.Error) })
+                .MarkupLine(
+                    "[grey]Using the WinUI corpus built into the CLI. "
+                    + "These samples may lag upstream; run with --refresh to fetch the latest.[/]");
         }
 
         private int EmitSearch(SearchEngine engine, string query, int max, string? source, bool includeReactor, bool json)
@@ -208,6 +258,7 @@ internal sealed class FindUiCommand : Command, IShortDescription
                 {
                     Query = query,
                     MatchCount = groups.Count,
+                    Corpus = CorpusLabel(),
                     Matches = groups.Select(g => new FindUiMatchJson
                     {
                         Source = g.Source,
@@ -284,7 +335,7 @@ internal sealed class FindUiCommand : Command, IShortDescription
 
             if (json)
             {
-                var result = new FindUiCodeJsonOutput { Results = entries };
+                var result = new FindUiCodeJsonOutput { Corpus = CorpusLabel(), Results = entries };
                 console.Profile.Out.Writer.WriteLine(JsonSerializer.Serialize(result, WinAppJsonContext.Default.FindUiCodeJsonOutput));
                 return entries.All(e => e.Found) ? 0 : 1;
             }
@@ -424,7 +475,7 @@ internal sealed class FindUiCommand : Command, IShortDescription
 
             if (json)
             {
-                var result = new FindUiListJsonOutput { Count = items.Count, Items = items };
+                var result = new FindUiListJsonOutput { Count = items.Count, Corpus = CorpusLabel(), Items = items };
                 console.Profile.Out.Writer.WriteLine(JsonSerializer.Serialize(result, WinAppJsonContext.Default.FindUiListJsonOutput));
                 return items.Count > 0 ? 0 : 1;
             }
@@ -449,13 +500,14 @@ internal sealed class FindUiCommand : Command, IShortDescription
 
         /// <summary>
         /// Message for a filtered request (<c>--source X</c> or an <c>X-*</c> <c>--id</c>) whose
-        /// source loaded no scenarios. find-ui ships no embedded snapshot, so a source that
-        /// never fetched (offline, proxy-blocked, or an upstream path rename) is simply absent —
-        /// naming it keeps the "run online once" guidance actionable instead of a false "no match".
+        /// source loaded no scenarios. With a corpus baked into the binary this should now only
+        /// happen if that snapshot is missing or was produced by a different
+        /// <see cref="CacheVersion"/> — so the guidance is still to refresh, but the message no
+        /// longer claims the data was never fetched.
         /// </summary>
         private static string SourceUnavailableMessage(string source) =>
-            $"No '{source}' control data is available locally. find-ui fetches each source from " +
-            "GitHub on first use — connect to the internet and run the command once (or add --refresh) " +
-            $"to populate the '{source}' cache.";
+            $"No '{source}' control data could be loaded. find-ui normally serves this source from " +
+            "the corpus baked into the CLI or a per-user cache; if both are unavailable, run the " +
+            $"command with --refresh while online to repopulate the '{source}' data.";
     }
 }

@@ -290,6 +290,7 @@ function findApiMembers(options?: FindApiMembersOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `type` | `string \| string[] \| undefined` | No | One or more types to inspect. Accepts short names (NavigationView) or fully-qualified names (Microsoft.UI.Xaml.Controls.NavigationView). Pass several to resolve them in a single call. |
+| `all` | `boolean \| undefined` | No | List the complete member surface: include dependency-property identifier statics (BackgroundProperty) and per-member descriptions, both of which an unfiltered listing omits to save context. Implied by --verbose, and usable together with --json (--verbose is not). |
 | `filter` | `string \| undefined` | No | Only list members whose name contains this text (case-insensitive), e.g. --filter background. Totals for the unfiltered type are still reported. Applies to every type in the call. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `project` | `string \| undefined` | No | Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. |
@@ -1636,6 +1637,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `type` | `string \| string[] \| undefined` | No | One or more types to inspect. Accepts short names (NavigationView) or fully-qualified names (Microsoft.UI.Xaml.Controls.NavigationView). Pass several to resolve them in a single call. |
+| `all` | `boolean \| undefined` | No | List the complete member surface: include dependency-property identifier statics (BackgroundProperty) and per-member descriptions, both of which an unfiltered listing omits to save context. Implied by --verbose, and usable together with --json (--verbose is not). |
 | `filter` | `string \| undefined` | No | Only list members whose name contains this text (case-insensitive), e.g. --filter background. Totals for the unfiltered type are still reported. Applies to every type in the call. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `project` | `string \| undefined` | No | Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. |
