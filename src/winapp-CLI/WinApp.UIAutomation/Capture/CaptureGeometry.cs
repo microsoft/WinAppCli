@@ -16,9 +16,27 @@ public static class CaptureGeometry
     /// then centers it within an <paramref name="encoderWidth"/>×<paramref name="encoderHeight"/>
     /// surface. Returns the centered offset and the fitted size.
     /// </summary>
+    /// <param name="cropW">Width of the captured region. Must be positive.</param>
+    /// <param name="cropH">Height of the captured region. Must be positive.</param>
+    /// <param name="encoderWidth">Width of the surface the content is centered in. Must be positive.</param>
+    /// <param name="encoderHeight">Height of the surface the content is centered in. Must be positive.</param>
+    /// <param name="displayWidth">Width the content is scaled to fit. Must be positive.</param>
+    /// <param name="displayHeight">Height the content is scaled to fit. Must be positive.</param>
+    /// <returns>Where to place the content within the surface, and how big it ends up.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">Any dimension is zero or negative.</exception>
     public static (int OffsetX, int OffsetY, int FitW, int FitH) ComputeFittedContentRect(
         int cropW, int cropH, int encoderWidth, int encoderHeight, int displayWidth, int displayHeight)
     {
+        // Every argument is a pixel dimension, so none of them can be zero or negative. Without this
+        // a zero crop divides in floating point rather than throwing, and the caller silently gets a
+        // one-pixel rect instead of an error.
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(cropW);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(cropH);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(encoderWidth);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(encoderHeight);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(displayWidth);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(displayHeight);
+
         var scale = Math.Min(displayWidth / (double)cropW, displayHeight / (double)cropH);
         var fitW = Math.Clamp((int)Math.Round(cropW * scale), 1, displayWidth);
         var fitH = Math.Clamp((int)Math.Round(cropH * scale), 1, displayHeight);

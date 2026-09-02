@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
-using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
 

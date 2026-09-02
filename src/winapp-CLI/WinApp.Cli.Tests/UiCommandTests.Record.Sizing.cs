@@ -12,6 +12,26 @@ namespace WinApp.Cli.Tests;
 public partial class UiCommandTests
 {
     [TestMethod]
+    [DataRow(0, 100, 640, 480, 640, 480, "cropW")]
+    [DataRow(100, 0, 640, 480, 640, 480, "cropH")]
+    [DataRow(-5, 100, 640, 480, 640, 480, "cropW")]
+    [DataRow(100, 100, 0, 480, 640, 480, "encoderWidth")]
+    [DataRow(100, 100, 640, 0, 640, 480, "encoderHeight")]
+    [DataRow(100, 100, 640, 480, 0, 480, "displayWidth")]
+    [DataRow(100, 100, 640, 480, 640, 0, "displayHeight")]
+    public void ComputeFittedContentRect_NonPositiveDimension_Throws(
+        int cropW, int cropH, int encW, int encH, int dispW, int dispH, string expectedParameter)
+    {
+        // These are pixel dimensions, so none can be zero. The crop values are divisors, and because
+        // the division is floating point a zero used to yield Infinity rather than an exception --
+        // the caller silently got a one-pixel rect back instead of an error.
+        var exception = Assert.ThrowsExactly<ArgumentOutOfRangeException>(
+            () => CaptureGeometry.ComputeFittedContentRect(cropW, cropH, encW, encH, dispW, dispH));
+
+        Assert.AreEqual(expectedParameter, exception.ParamName);
+    }
+
+    [TestMethod]
     public void ComputeTargetSize_TinyInput_PadsToEncoderMinimum()
     {
         // A 32×24 element region is below the MF H.264 encoder minimum (64×64).
