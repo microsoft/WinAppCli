@@ -280,10 +280,10 @@ public class InteractiveDesktopRealAppTests : IDisposable
     /// mutation is held back.
     /// </summary>
     /// <remarks>
-    /// The menu is opened directly on the fixture rather than through UIA so the test asserts the
-    /// coordination property (the drop-down survives) rather than re-testing menu invocation, which
-    /// <c>RealUiAutomationTests</c> already covers. Agent B is a genuine separate process, so the
-    /// foreground steal it would perform is real.
+    /// The menu is opened by agent A's own coordinated command rather than directly on the fixture, so
+    /// the turn and the transient UI are established by the same action and there is no window in
+    /// which the premise could lapse. Agent B is a genuine separate process, so the foreground steal it
+    /// would perform is real.
     /// </remarks>
     [TestMethod]
     public async Task ATightBurstKeepsTransientMenuOpenWhileAnotherOwnerWaits()
@@ -333,6 +333,13 @@ public class InteractiveDesktopRealAppTests : IDisposable
     /// §18.3(b): a reasoning gap longer than the idle grace hands the turn to a waiting owner, and the
     /// transient UI the first owner left behind does not survive — so its next step must replay.
     /// </summary>
+    /// <remarks>
+    /// The replay is itself a coordinated mutation, because that is the only thing a returning agent
+    /// can actually do: by then the other owner holds the turn and its own grace, so the returning
+    /// agent has to queue, wait, and reacquire before it can put its UI back. An observation cannot
+    /// stand in for that step — a non-owner's Observe is detached by design, so it neither waits nor
+    /// pins, and would leave the assertion below racing the other owner's grace.
+    /// </remarks>
     [TestMethod]
     public async Task AReasoningGapHandsOverTheTurnAndForcesReplay()
     {
@@ -367,12 +374,24 @@ public class InteractiveDesktopRealAppTests : IDisposable
             _fixture.IsFileMenuOpen,
             "the transient UI must NOT survive the handover: this is exactly why an agent has to replay after a gap");
 
-        // Agent A resumes and finds a different world. Its recovery step succeeds only because it
-        // reopens rather than assuming the menu it left behind is still there.
-        _fixture.OpenFileMenu();
+        // Agent A resumes and finds a different world. Its recovery must go through coordination the
+        // same way its first step did: reopening the drop-down straight on the fixture would prove
+        // nothing here, because it bypasses the arbitration this test exists to exercise. The command
+        // below queues behind whatever agent B still holds, waits, reacquires the turn, and reopens the
+        // menu — and OpenMenuAsOwnerAsync asserts both halves of that (menu back on screen, turn owned
+        // by A again).
+        await OpenMenuAsOwnerAsync(OwnerA);
+
+        // Now that A owns the turn again its Observe pins rather than detaches, so the UI it just
+        // restored is still standing afterwards. Running the same inspect while A was a non-owner
+        // would have been detached — no ticket, no lease, nothing holding the desktop — which is why
+        // the menu could not be expected to survive it before this point.
         var (replayExit, replayOutput) = await RunAgentAsync(OwnerA, WithTarget("ui", "inspect"));
         Assert.AreEqual(0, replayExit, $"agent A must be able to replay after the handover. Output: {replayOutput}");
-        Assert.IsTrue(_fixture.IsFileMenuOpen, "agent A's replay must restore its transient UI");
+        Assert.IsTrue(_fixture.IsFileMenuOpen, "agent A's restored transient UI must survive its own observation");
+        Assert.AreEqual(
+            KeyOf(OwnerA), ReadState().Owner?.Key,
+            "agent A must still hold the turn it reacquired");
     }
 
     // ------------------------------------------------------------------------------ §18.3 (c)
