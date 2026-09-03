@@ -371,9 +371,21 @@ internal static partial class SingleFileManifestPlanner
             return ManifestService.CleanPackageName(declared);
         }
 
-        var stem = ManifestService.CleanPackageName(Path.GetFileNameWithoutExtension(singleFile.Name));
-        return $"{stem}-{ComputePathSuffix(singleFile)}";
+        // Reserve room for the suffix BEFORE sanitizing. CleanPackageName caps at the schema's 50-char
+        // limit, so appending afterwards would push a long stem past it and fail registration with an
+        // opaque 0xC00CE169. Trimming the stem is safe: the hash is what makes the identity unique.
+        var suffix = $"-{ComputePathSuffix(singleFile)}";
+        var stem = Path.GetFileNameWithoutExtension(singleFile.Name);
+        if (stem.Length > MaxPackageNameLength - suffix.Length)
+        {
+            stem = stem[..(MaxPackageNameLength - suffix.Length)];
+        }
+
+        return ManifestService.CleanPackageName(stem) + suffix;
     }
+
+    /// <summary>The <c>Identity/@Name</c> maximum the AppX schema enforces.</summary>
+    private const int MaxPackageNameLength = 50;
 
     /// <summary>
     /// Eight lowercase hex characters of the SHA-256 of the file's full path, case-insensitively

@@ -110,6 +110,35 @@ public class SingleFileManifestPlannerTests
         Assert.AreEqual("my tool", info.DisplayName);
     }
 
+    [TestMethod]
+    [DataRow(42, DisplayName = "42-char stem: the first length that would overflow")]
+    [DataRow(50, DisplayName = "50-char stem: already at the cap")]
+    [DataRow(120, DisplayName = "120-char stem: far past the cap")]
+    public void Plan_LongFileName_StaysWithinTheIdentityLengthLimit(int stemLength)
+    {
+        // Identity/@Name maxes out at 50 characters. Appending the hash after sanitizing pushed a long
+        // stem past that, and Windows rejects the manifest with an opaque 0xC00CE169 at registration
+        // rather than anything naming the length.
+        var info = SingleFileManifestPlanner.Plan(
+            SingleFile($"{new string('a', stemLength)}.cs"), Props(), defaultPublisher: "CN=tester");
+
+        Assert.IsLessThanOrEqualTo(50, info.PackageName.Length,
+            $"A {stemLength}-character stem produced '{info.PackageName}' ({info.PackageName.Length} chars)");
+        StringAssert.Matches(info.PackageName, new Regex("-[0-9a-f]{8}$"),
+            "The path hash must survive truncation — it is what makes the identity unique");
+    }
+
+    [TestMethod]
+    public void Plan_LongFileNamesDifferingOnlyByFolder_StillGetDifferentIdentities()
+    {
+        // Truncation must not collapse two long-named files back into one identity.
+        var name = $"{new string('a', 80)}.cs";
+        var a = SingleFileManifestPlanner.Plan(SingleFile(name, "app-a"), Props(), defaultPublisher: "CN=tester");
+        var b = SingleFileManifestPlanner.Plan(SingleFile(name, "app-b"), Props(), defaultPublisher: "CN=tester");
+
+        Assert.AreNotEqual(a.PackageName, b.PackageName);
+    }
+
     /// <summary>Matches "&lt;stem&gt;-&lt;8 hex&gt;", the shape a default identity takes.</summary>
     private static Regex PathHashedName(string stem) => new($"^{Regex.Escape(stem)}-[0-9a-f]{{8}}$");
 
