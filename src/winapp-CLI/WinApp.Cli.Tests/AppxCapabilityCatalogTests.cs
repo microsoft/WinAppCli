@@ -297,6 +297,27 @@ public class AppxCapabilityCatalogTests
     }
 
     [TestMethod]
+    [DataRow("{A5DCBF10-6530-11D2-901F-00C04FB951ED}", DisplayName = "canonical device-interface GUID")]
+    [DataRow("{a5dcbf10-6530-11d2-901f-00c04fb951ed}", DisplayName = "lower case")]
+    public void Parse_DeviceCapabilityGuid_IsAccepted(string interfaceClass)
+    {
+        Assert.IsTrue(AppxCapabilityCatalog.TryParse($"device:{interfaceClass}", out var caps, out var error), error);
+        Assert.AreEqual("DeviceCapability", caps[0].ElementName);
+    }
+
+    [TestMethod]
+    [DataRow("{A5DCBF10-65306-11D2-901F-00C04FB951E}", DisplayName = "hyphens in the wrong places")]
+    [DataRow("{A5DCBF10653011D2901F00C04FB951ED--}", DisplayName = "no hyphens, padded to 36")]
+    [DataRow("{A5DCBF10-6530-11D2-901F-00C04FB951EG}", DisplayName = "non-hex character")]
+    [DataRow("{A5DCBF10-6530-11D2-901F-00C04FB951E}", DisplayName = "too short")]
+    public void Parse_MalformedDeviceCapabilityGuid_IsRejected(string interfaceClass)
+    {
+        // A character-class regex accepts any 36 hex-or-hyphen characters, so these used to pass here and
+        // fail only at registration — which reports an opaque schema error naming no capability.
+        Assert.IsFalse(AppxCapabilityCatalog.TryParse($"device:{interfaceClass}", out _, out _), interfaceClass);
+    }
+
+    [TestMethod]
     public void Parse_KnownFoundationCapabilityUnderAppPrefix_IsAccepted()
     {
         Assert.IsTrue(AppxCapabilityCatalog.TryParse("app:internetClient", out var caps, out _));

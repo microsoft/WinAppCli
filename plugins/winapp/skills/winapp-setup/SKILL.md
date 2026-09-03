@@ -279,7 +279,3 @@ For full debugging scenarios and IDE setup, see the [Debugging Guide](https://gi
 ## CLI reference
 
 Run `winapp <command> --help` for current command options, or `winapp --cli-schema` for the complete machine-readable command schema.
-
-
-
-

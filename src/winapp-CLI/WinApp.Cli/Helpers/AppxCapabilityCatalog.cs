@@ -358,11 +358,20 @@ internal static partial class AppxCapabilityCatalog
     }
 
     /// <summary>
-    /// Capability names are letters and digits; a DeviceCapability may also be a GUID in braces. The
-    /// value lands in XML, so anything else is rejected rather than escaped.
+    /// Capability names are letters and digits; a DeviceCapability may also be a device-interface class
+    /// GUID in braces. The value lands in XML, so anything else is rejected rather than escaped.
     /// </summary>
-    private static bool IsSafeName(string name) => SafeNameRegex().IsMatch(name);
+    /// <remarks>
+    /// The GUID is checked with <see cref="Guid.TryParseExact(string, string, out Guid)"/> in <c>B</c>
+    /// format rather than by regex: a character-class pattern accepts any 36 hex-or-hyphen characters, so a
+    /// misplaced hyphen passes here and only fails later, when registration reports an opaque schema error
+    /// naming no capability.
+    /// </remarks>
+    private static bool IsSafeName(string name) =>
+        name.StartsWith('{')
+            ? Guid.TryParseExact(name, "B", out _)
+            : SafeNameRegex().IsMatch(name);
 
-    [GeneratedRegex(@"^([A-Za-z][A-Za-z0-9]*|\{[0-9A-Fa-f-]{36}\})$")]
+    [GeneratedRegex(@"^[A-Za-z][A-Za-z0-9]*$")]
     private static partial Regex SafeNameRegex();
 }

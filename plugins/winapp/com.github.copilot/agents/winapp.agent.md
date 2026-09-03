@@ -428,7 +428,3 @@ When the user encounters an error, check these common causes:
 - **Sparse package** — A lightweight package registration that gives a desktop app package identity without full MSIX deployment. The exe stays in its original location; Windows associates identity with it via `Add-AppxPackage -ExternalLocation`. Used by `create-debug-identity`. Best for scenarios where the exe is separate from the app code (e.g., Electron).
 - **Loose layout package** — A folder-based package registered with Windows via `Add-AppxPackage`, simulating a full MSIX install without creating an `.msix` file. Used by `winapp run`. The preferred approach for most frameworks during development.
 - **Package identity** — A Windows concept that enables certain APIs (notifications, background tasks, share target). Obtained via full MSIX packaging, loose layout registration (`winapp run`), or sparse package registration (`create-debug-identity`).
-
-
-
-
