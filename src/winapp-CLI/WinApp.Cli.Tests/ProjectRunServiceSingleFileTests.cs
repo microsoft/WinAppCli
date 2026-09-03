@@ -171,6 +171,85 @@ public class ProjectRunServiceSingleFileTests : IDisposable
 
     #endregion
 
+    #region --no-build output discovery
+
+    /// <summary>
+    /// Drives the build+evaluate path with canned evaluate output, so the <c>--no-build</c> fallback can
+    /// be observed without running MSBuild. The first evaluate reports a RID-qualified directory that
+    /// does not exist; the second (no-RID) reports one that does.
+    /// </summary>
+    private async Task<string?> ResolveNoBuildOutputAsync(bool architectureIsExplicit)
+    {
+        var singleFile = WriteSingleFile();
+        var plainOutput = _tempDir.CreateSubdirectory("bin").CreateSubdirectory("debug");
+        var ridOutput = Path.Join(_tempDir.FullName, "bin", "debug_win-x64");
+
+        // A packaged app resolves a concrete Executable from the output, so the plain directory has to
+        // look like a real build: the fallback is only useful if what it finds is actually runnable.
+        File.WriteAllText(Path.Join(plainOutput.FullName, "counter.exe"), "exe");
+
+        string Respond(string args)
+        {
+            // The pre-evaluate probe asks what RuntimeIdentifier the file declares; answering empty makes
+            // winapp inject one, which is the situation this fallback exists for. The evaluate that
+            // carries the RID then reports the missing RID-qualified path, and the no-RID fallback
+            // reports the plain directory a normal `dotnet build app.cs` produced.
+            var dir = args.Contains("win-x64", StringComparison.OrdinalIgnoreCase) ? ridOutput : plainOutput.FullName;
+            return "{\"Properties\": {\"TargetDir\": \"" + dir.Replace("\\", "\\\\") + "\", \"AssemblyName\": \"counter\", \"RuntimeIdentifier\": \"\", \"WindowsPackageType\": \"MSIX\", \"OutputType\": \"Exe\"}}";
+        }
+
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args => (0, Respond(args), string.Empty),
+            RunDotnetArgumentListHandler = args => (0, Respond(string.Join(' ', args)), string.Empty),
+        };
+        var service = new ProjectRunService(
+            dotnet,
+            new ProjectDetectionService(NullLogger<ProjectDetectionService>.Instance, dotnet),
+            new FakeCsWinRTMetadataShimService(),
+            _testConsole,
+            NullLogger<ProjectRunService>.Instance);
+
+        var options = new SingleFileRunOptions("Debug", "x64", architectureIsExplicit, NoBuild: true, NoRestore: false, []);
+
+        try
+        {
+            var outcome = await service.BuildAndResolveSingleFileAsync(singleFile, options, TestContext.CancellationToken);
+            return outcome.Resolution?.OutputDirectory;
+        }
+        catch (ProjectRunException)
+        {
+            // The explicit-architecture case reports the missing RID-qualified output rather than
+            // substituting one, which is the behavior under test.
+            return null;
+        }
+    }
+
+    [TestMethod]
+    public async Task NoBuild_InferredArchitecture_FallsBackToAPlainBuildOutput()
+    {
+        // winapp injects -r win-<arch>, which adds a path segment, so `dotnet build app.cs` followed by
+        // `winapp run app.cs --no-build` would otherwise fail with "debug_win-x64 does not exist" while
+        // bin\debug sat right there.
+        var output = await ResolveNoBuildOutputAsync(architectureIsExplicit: false);
+
+        Assert.IsNotNull(output, "--no-build should find the plain build output");
+        StringAssert.EndsWith(output.TrimEnd(Path.DirectorySeparatorChar), "debug");
+    }
+
+    [TestMethod]
+    public async Task NoBuild_ExplicitArchitecture_DoesNotSubstituteAnUnqualifiedOutput()
+    {
+        // An unqualified output carries no architecture in its path. Accepting it under an explicit
+        // --arch/--runtime would launch whatever happened to be built while provisioning runtime
+        // packages for the REQUESTED target — a silent mismatch. Report the miss instead.
+        var output = await ResolveNoBuildOutputAsync(architectureIsExplicit: true);
+
+        Assert.IsNull(output, "An explicitly requested architecture must not fall back to an unqualified build");
+    }
+
+    #endregion
+
     #region Argument construction
 
     private static SingleFileRunOptions Options(

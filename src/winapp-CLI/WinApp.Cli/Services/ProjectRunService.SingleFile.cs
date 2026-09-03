@@ -250,7 +250,12 @@ internal sealed partial class ProjectRunService
         // `dotnet build app.cs` produces. Re-evaluate without the RID and take that instead when the
         // primary path is absent, so --no-build finds a normal build's output. A winapp build writes the
         // RID-qualified path, so it matches first and never gets here.
-        if (options.NoBuild)
+        //
+        // Gated on the architecture being INFERRED. An unqualified output carries no architecture in its
+        // path, so accepting it under an explicit --arch/--runtime would launch whatever was built and
+        // provision runtime packages for the requested target instead — a silent architecture mismatch.
+        // When the user named an architecture, a missing output is reported rather than substituted.
+        if (options.NoBuild && !options.ArchitectureIsExplicit)
         {
             var primaryOutput = GetProp(props, "TargetDir");
             if (string.IsNullOrEmpty(primaryOutput))
@@ -435,8 +440,15 @@ internal sealed partial class ProjectRunService
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (
+            ex is InvalidOperationException      // process start / MSBuild property parse
+                or IOException                   // reading the evaluate output, probing the directory
+                or UnauthorizedAccessException   // an unreadable candidate directory
+                or ArgumentException             // a malformed path from the evaluated properties
+                or NotSupportedException)        // a path shape GetFullPath refuses
         {
+            // This is a best-effort compatibility probe: the caller falls back to the primary path and
+            // reports it, so anything unexpected here must not fail a run that would otherwise work.
             logger.LogDebug("--no-build fallback evaluation failed: {Message}", ex.Message);
             return null;
         }
