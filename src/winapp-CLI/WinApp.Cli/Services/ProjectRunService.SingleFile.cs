@@ -245,6 +245,29 @@ internal sealed partial class ProjectRunService
 
         var props = MsBuildPropertyReader.Parse(stdout, SingleFileRequestedProperties);
 
+        // `--no-build` means "run what's already built", but winapp's evaluate injects `-r win-<arch>`,
+        // which adds a segment to the output path: bin\debug_win-x64\ versus the bin\debug\ a plain
+        // `dotnet build app.cs` produces. Re-evaluate without the RID and take that instead when the
+        // primary path is absent, so --no-build finds a normal build's output. A winapp build writes the
+        // RID-qualified path, so it matches first and never gets here.
+        if (options.NoBuild)
+        {
+            var primaryOutput = GetProp(props, "TargetDir");
+            if (string.IsNullOrEmpty(primaryOutput))
+            {
+                primaryOutput = GetProp(props, "OutputPath");
+            }
+
+            if (!string.IsNullOrEmpty(primaryOutput) && !Directory.Exists(Path.GetFullPath(primaryOutput)))
+            {
+                var withoutRid = await TryEvaluateWithoutRuntimeIdentifierAsync(singleFile, options, workingDir, cancellationToken);
+                if (withoutRid != null)
+                {
+                    props = withoutRid;
+                }
+            }
+        }
+
         var outputType = GetProp(props, "OutputType");
         if (!string.IsNullOrEmpty(outputType) && !ProjectDetectionService.IsExecutableOutputType(outputType))
         {
@@ -369,6 +392,54 @@ internal sealed partial class ProjectRunService
             SingleFileManifestPlanner.ResolvePackageName(singleFile, props),
             packaging,
             ResolveSingleFileBuildRoot(props));
+    }
+
+    /// <summary>
+    /// Re-evaluates a file-based app WITHOUT the injected RuntimeIdentifier, so <c>--no-build</c> can find
+    /// the <c>bin\&lt;config&gt;</c> output a plain <c>dotnet build app.cs</c> produced rather than the
+    /// <c>bin\&lt;config&gt;_&lt;rid&gt;</c> winapp's own build would have written.
+    /// </summary>
+    /// <remarks>
+    /// Returns <see langword="null"/> when the re-evaluation fails or still points nowhere, and the caller
+    /// then keeps the original properties so the error names the path the user most likely expected.
+    /// </remarks>
+    private async Task<IReadOnlyDictionary<string, string>?> TryEvaluateWithoutRuntimeIdentifierAsync(
+        FileInfo singleFile,
+        SingleFileRunOptions options,
+        DirectoryInfo workingDir,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var args = BuildSingleFileEvaluateArguments(singleFile, options, includeRuntimeIdentifier: false);
+            logger.LogDebug("{UISymbol} --no-build fallback: dotnet {Arguments}", UiSymbols.Note, RedactSecretsForDisplay(args));
+
+            var (exitCode, stdout, _) = await dotNetService.RunDotnetCommandAsync(workingDir, args, cancellationToken);
+            if (exitCode != 0)
+            {
+                return null;
+            }
+
+            var props = MsBuildPropertyReader.Parse(stdout, SingleFileRequestedProperties);
+            var candidate = GetProp(props, "TargetDir");
+            if (string.IsNullOrEmpty(candidate))
+            {
+                candidate = GetProp(props, "OutputPath");
+            }
+
+            return !string.IsNullOrEmpty(candidate) && Directory.Exists(Path.GetFullPath(candidate))
+                ? props
+                : null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug("--no-build fallback evaluation failed: {Message}", ex.Message);
+            return null;
+        }
     }
 
     /// <summary>

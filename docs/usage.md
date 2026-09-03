@@ -941,11 +941,14 @@ assets, and refreshed on every run.
 > #:property WinAppRunUseExecutionAlias=false
 > ```
 
-The alias winapp declares is named after the **package identity**, with a `winapp-` prefix — so
-`com.contoso.counter` gets `winapp-com.contoso.counter.exe`. Two different apps can never contend for
-one name, and the prefix keeps it clear of real commands: an app in `python.cs` gets
-`winapp-python.exe`, never `python.exe`. If you author your own manifest, the alias you declare there is
-used as-is and winapp adds nothing.
+The alias winapp declares is named after the **package family name**, with a `winapp-` prefix — so
+`com.contoso.counter` published by `CN=You` gets `winapp-com.contoso.counter_gspb8g6x97k2t.exe`. That
+trailing part is the publisher hash Windows derives, so two apps sharing a name under different
+publishers still get different aliases. The prefix keeps the name clear of real commands: an app in
+`python.cs` gets a `winapp-…` alias, never `python.exe`. If you author your own manifest, the alias you
+declare there is used as-is and winapp adds nothing.
+
+`winapp run` prints the alias it registered, so you don't have to compute the hash to find it.
 
 The alias is a command on your PATH that lasts as long as the package stays registered. If some other
 package already owns the name, winapp says so and launches via AUMID instead rather than starting the
@@ -1135,7 +1138,7 @@ winapp unregister [input] [options]
 - Determines the package name — from the `.cs` file's resolved identity, or by reading the manifest
 - Searches for both `{name}` and `{name}.debug` packages (the debug variant is created by `create-debug-identity`)
 - Verifies each package was registered in development mode (`IsDevelopmentMode == true`)
-- Verifies the package belongs to the app you named (unless `--force`) — its install location must sit under a directory you identified: the `.cs` file's own build output, the manifest's directory, the current directory, or an explicit `--output-appx-directory`. A package whose install location cannot be resolved (its files were deleted) is **skipped**, because identity alone is not proof of ownership: two `counter.cs` files in different folders both register `counter`. Use `--prune` to clear registrations whose files are gone.
+- Verifies the package belongs to the app you named (unless `--force`) — its install location must sit under a directory you identified: the `.cs` file's own build output, the manifest's directory, the current directory, or an explicit `--output-appx-directory`. A package whose install location cannot be resolved (its files were deleted) is **skipped**, because identity alone is not proof of ownership: two apps that both set `#:property WinAppPackageName=counter` register the same identity from different folders. Use `--prune` to clear registrations whose files are gone.
 - Unregisters matching packages
 
 **Cleaning up dead registrations (`--prune`):**

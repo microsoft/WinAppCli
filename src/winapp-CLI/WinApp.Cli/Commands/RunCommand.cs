@@ -527,9 +527,13 @@ internal partial class RunCommand : Command, IShortDescription
                 }
                 else
                 {
+                    // Same deny-list the other executable scans use: a Windows App SDK self-contained
+                    // output drops RestartAgent.exe and DeploymentAgent.exe beside the app, and a .NET
+                    // self-contained publish adds createdump.exe and apphost.exe. Filtering only one of
+                    // them leaves two candidates, and detection would silently give up (issue #790).
                     var executables = inputFolder
                         .EnumerateFiles("*.exe", SearchOption.TopDirectoryOnly)
-                        .Where(f => !string.Equals(f.Name, "RestartAgent.exe", StringComparison.OrdinalIgnoreCase))
+                        .Where(f => !MsixService.IsRuntimeToolExecutable(f.Name))
                         .Take(2)
                         .ToList();
                     candidate = executables.Count == 1 ? executables[0] : null;

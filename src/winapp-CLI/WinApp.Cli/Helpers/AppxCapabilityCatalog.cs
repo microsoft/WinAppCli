@@ -128,7 +128,7 @@ internal static partial class AppxCapabilityCatalog
         foreach (var name in new[]
         {
             "location", "microphone", "webcam", "proximity", "bluetooth", "radios", "activity", "optical",
-            "humaninterfacedevice", "pointOfService", "serialcommunication", "usb", "wiFiControl",
+            "pointOfService", "wiFiControl",
         })
         {
             known[name] = new AppxCapability(name, DeviceElementName, null, FoundationNs);
@@ -137,8 +137,39 @@ internal static partial class AppxCapabilityCatalog
         return known;
     }
 
+    /// <summary>
+    /// Device capabilities whose declaration is incomplete without nested <c>Device</c>/<c>Function</c>
+    /// children naming the specific hardware.
+    /// </summary>
+    /// <remarks>
+    /// A bare <c>&lt;DeviceCapability Name="usb" /&gt;</c> grants nothing — the device class and function
+    /// live in child elements that a flat, comma-separated property cannot carry. Emitting it anyway
+    /// produces a manifest that either fails schema validation or registers and silently grants no
+    /// access, so these are rejected here and pointed at an authored manifest instead.
+    /// </remarks>
+    private static readonly string[] CapabilitiesRequiringChildElements =
+        ["usb", "humaninterfacedevice", "serialcommunication"];
+
     private static AppxCapability Prefixed(string name, string prefix) =>
         new(name, CapabilityElementName, prefix, Namespaces[prefix]);
+
+    /// <summary>
+    /// Reports whether a capability needs nested child elements this property cannot carry, and if so
+    /// produces a message pointing at the authored-manifest escape hatch.
+    /// </summary>
+    private static bool RequiresChildElements(string name, out string? error)
+    {
+        if (!CapabilitiesRequiringChildElements.Contains(name, StringComparer.OrdinalIgnoreCase))
+        {
+            error = null;
+            return false;
+        }
+
+        error = $"The '{name}' capability needs nested <Device> and <Function> elements naming the specific " +
+                "hardware, which a comma-separated property cannot express — declaring it alone would grant " +
+                "no access. Author a manifest and point at it with '#:property WinAppManifestPath=<path>'.";
+        return true;
+    }
 
     /// <summary>
     /// Parses a separated capability list into resolved declarations, preserving order and dropping
@@ -191,6 +222,11 @@ internal static partial class AppxCapabilityCatalog
         var separator = entry.IndexOf(':');
         if (separator < 0)
         {
+            if (RequiresChildElements(entry, out error))
+            {
+                return false;
+            }
+
             if (Known.TryGetValue(entry, out var known))
             {
                 // Re-key to the catalog's casing so the manifest matches the schema exactly.
@@ -224,6 +260,13 @@ internal static partial class AppxCapabilityCatalog
         // default foundation namespace so a general capability can be forced explicitly.
         if (string.Equals(prefix, "device", StringComparison.OrdinalIgnoreCase))
         {
+            // Checked here too: the prefix is an escape hatch for uncatalogued names, not a way to
+            // bypass a declaration this property genuinely cannot express.
+            if (RequiresChildElements(name, out error))
+            {
+                return false;
+            }
+
             capability = new AppxCapability(name, DeviceElementName, null, FoundationNs);
             return true;
         }

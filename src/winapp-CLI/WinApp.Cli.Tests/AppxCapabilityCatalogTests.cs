@@ -265,5 +265,28 @@ public class AppxCapabilityCatalogTests
         Assert.IsNull(caps[0].Prefix, "A foundation capability is emitted unprefixed");
     }
 
+    [TestMethod]
+    [DataRow("usb", DisplayName = "usb needs Device/Function children")]
+    [DataRow("humaninterfacedevice", DisplayName = "HID needs Device/Function children")]
+    [DataRow("serialcommunication", DisplayName = "serial needs Device/Function children")]
+    [DataRow("device:usb", DisplayName = "the device: prefix is not a bypass")]
+    public void Parse_CapabilityNeedingChildElements_IsRejected(string value)
+    {
+        // A bare <DeviceCapability Name="usb" /> grants nothing: the device class and function live in
+        // child elements a flat property cannot carry. Emitting it would produce a manifest that either
+        // fails schema validation or registers and silently grants no access.
+        Assert.IsFalse(AppxCapabilityCatalog.TryParse(value, out _, out var error));
+        StringAssert.Contains(error, "WinAppManifestPath", "The error should point at the authored-manifest escape hatch");
+    }
+
+    [TestMethod]
+    public void Parse_DeviceCapabilityWithoutChildElements_IsStillAccepted()
+    {
+        // Only the ones that genuinely need children are rejected; the rest are complete on their own.
+        Assert.IsTrue(AppxCapabilityCatalog.TryParse("microphone;webcam;location", out var caps, out _));
+        Assert.AreEqual(3, caps.Count);
+        Assert.IsTrue(caps.All(c => c.IsDeviceCapability));
+    }
+
     #endregion
 }

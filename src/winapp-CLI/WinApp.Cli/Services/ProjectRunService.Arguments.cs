@@ -270,7 +270,7 @@ internal sealed partial class ProjectRunService
     /// Fed the SAME Configuration, injected RID, and user <c>-p</c> as the build pass so the properties it
     /// reads describe the output that was actually written.
     /// </summary>
-    internal static string BuildSingleFileEvaluateArguments(FileInfo singleFile, SingleFileRunOptions options)
+    internal static string BuildSingleFileEvaluateArguments(FileInfo singleFile, SingleFileRunOptions options, bool includeRuntimeIdentifier = true)
     {
         var tokens = new List<string>
         {
@@ -280,10 +280,13 @@ internal sealed partial class ProjectRunService
             options.Configuration,
         };
 
-        AppendSingleFileRuntimeIdentifier(tokens, options);
+        if (includeRuntimeIdentifier)
+        {
+            AppendSingleFileRuntimeIdentifier(tokens, options);
+        }
 
         // Same reservation as the build pass, so both passes agree on the RID.
-        foreach (var property in SingleFileForwardableProperties(options.Properties, options.InjectedRuntimeIdentifier is not null))
+        foreach (var property in SingleFileForwardableProperties(options.Properties, includeRuntimeIdentifier && options.InjectedRuntimeIdentifier is not null))
         {
             tokens.Add($"-p:{property}");
         }
