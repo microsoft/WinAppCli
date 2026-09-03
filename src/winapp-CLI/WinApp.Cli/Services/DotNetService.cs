@@ -680,9 +680,9 @@ internal partial class DotNetService : IDotNetService
     /// <c>EnsureWindowsAppRuntimeInstalledAsync</c> is the backstop: a genuinely missing runtime fails the
     /// launch with an actionable error rather than silently under-provisioning.
     /// </remarks>
-    public async Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo csprojFile, bool includeTransitive = true, bool noRestore = false, CancellationToken cancellationToken = default)
+    public async Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo projectOrFile, bool includeTransitive = true, bool noRestore = false, CancellationToken cancellationToken = default)
     {
-        if (!csprojFile.Exists)
+        if (!projectOrFile.Exists)
         {
             return null;
         }
@@ -693,10 +693,18 @@ internal partial class DotNetService : IDotNetService
         // so there's nothing to opt out of. Only forward it on SDK 10+; otherwise omit it so package
         // discovery keeps working on the SDK 8.0.100+ range project mode supports.
         var applyNoRestore = noRestore
-            && await GetSdkMajorVersionAsync(csprojFile.Directory!, cancellationToken) is int major
+            && await GetSdkMajorVersionAsync(projectOrFile.Directory!, cancellationToken) is int major
             && major >= 10;
-        var args = $"list \"{csprojFile.FullName}\" package{(includeTransitive ? " --include-transitive" : "")}{(applyNoRestore ? " --no-restore" : "")} --format json";
-        var (exitCode, output, _) = await RunDotnetCommandAsync(csprojFile.Directory!, args, cancellationToken);
+
+        // A .NET file-based app (a single .cs) has no project file for `dotnet list <project> package` to
+        // read, so it uses the SDK 10 `dotnet package list --file <app>.cs` form instead. Without this a
+        // caller would have to pass null and fall back to globbing the current directory for ANY .csproj,
+        // which for a file-based app can only ever find an unrelated project.
+        var isSingleFileApp = string.Equals(projectOrFile.Extension, ".cs", StringComparison.OrdinalIgnoreCase);
+        var args = isSingleFileApp
+            ? $"package list --file \"{projectOrFile.FullName}\"{(includeTransitive ? " --include-transitive" : "")}{(applyNoRestore ? " --no-restore" : "")} --format json"
+            : $"list \"{projectOrFile.FullName}\" package{(includeTransitive ? " --include-transitive" : "")}{(applyNoRestore ? " --no-restore" : "")} --format json";
+        var (exitCode, output, _) = await RunDotnetCommandAsync(projectOrFile.Directory!, args, cancellationToken);
 
         if (exitCode != 0 || string.IsNullOrWhiteSpace(output))
         {

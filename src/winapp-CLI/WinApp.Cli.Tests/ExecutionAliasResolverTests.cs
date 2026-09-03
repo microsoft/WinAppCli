@@ -192,6 +192,46 @@ public class ExecutionAliasResolverTests
         Assert.AreEqual(expected, ExecutionAliasResolver.GetDefaultWindowsAppsDirectory());
     }
 
+    // ---- TryGetAliasPackageFamilyName: only answers for a real app-exec-link ---
+
+    [TestMethod]
+    [DataRow("", DisplayName = "empty path")]
+    [DataRow("   ", DisplayName = "whitespace path")]
+    public void TryGetAliasPackageFamilyName_EmptyPath_ReturnsFalse(string path)
+    {
+        Assert.IsFalse(ExecutionAliasResolver.TryGetAliasPackageFamilyName(path, out var family));
+        Assert.IsNull(family);
+    }
+
+    [TestMethod]
+    public void TryGetAliasPackageFamilyName_MissingFile_ReturnsFalse()
+    {
+        var missing = Path.Join(Path.GetTempPath(), $"winapp-no-such-alias-{Guid.NewGuid():N}.exe");
+
+        Assert.IsFalse(ExecutionAliasResolver.TryGetAliasPackageFamilyName(missing, out var family),
+            "A path with no alias proxy must not report an owner");
+        Assert.IsNull(family);
+    }
+
+    [TestMethod]
+    public void TryGetAliasPackageFamilyName_OrdinaryFile_ReturnsFalse()
+    {
+        // A real file that is not a reparse point must not be mistaken for an alias — reporting a bogus
+        // owner here would block a legitimate launch.
+        var file = Path.Join(Path.GetTempPath(), $"winapp-plain-{Guid.NewGuid():N}.exe");
+        File.WriteAllText(file, "not a reparse point");
+
+        try
+        {
+            Assert.IsFalse(ExecutionAliasResolver.TryGetAliasPackageFamilyName(file, out var family));
+            Assert.IsNull(family);
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
     // ---- ResolveAliasPath: refuse hostile inputs ------------------------------
 
     [TestMethod]

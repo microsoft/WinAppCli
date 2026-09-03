@@ -18,7 +18,7 @@ namespace WinApp.Cli.Commands;
 
 internal partial class RunCommand : Command, IShortDescription
 {
-    public string ShortDescription => "Run a Windows app: build and launch from a .csproj/.sln, or launch an existing build-output folder.";
+    public string ShortDescription => "Run a Windows app: build and launch from a .cs file-based app, a .csproj/.sln, or launch an existing build-output folder.";
 
     public static Argument<FileSystemInfo> InputArgument { get; }
     public static Option<FileInfo> ManifestOption { get; }
@@ -26,6 +26,7 @@ internal partial class RunCommand : Command, IShortDescription
     public static Option<string> ArgsOption { get; }
     public static Option<bool> NoLaunchOption { get; }
     public static Option<bool> WithAliasOption { get; }
+    public static Option<bool> WithoutAliasOption { get; }
     public static Option<bool> DebugOutputOption { get; }
     public static Option<bool> UnregisterOnExitOption { get; }
     public static Option<bool> DetachOption { get; }
@@ -54,7 +55,7 @@ internal partial class RunCommand : Command, IShortDescription
     {
         InputArgument = new Argument<FileSystemInfo>("input")
         {
-            Description = "Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one of those at its top level (default: current directory).",
+            Description = "Path to the app to run: a build-output folder, a .cs .NET file-based app, a .csproj project, a .sln/.slnx solution, or a directory containing one of those at its top level (default: current directory).",
             Arity = ArgumentArity.ZeroOrOne
         };
 
@@ -91,7 +92,12 @@ internal partial class RunCommand : Command, IShortDescription
 
         WithAliasOption = new Option<bool>("--with-alias")
         {
-            Description = "Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use \"winapp manifest add-alias\" to add an execution alias to the manifest."
+            Description = "Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Console apps (OutputType=Exe) already do this by default; pass this to force it for a windowed app. winapp adds a uap5:ExecutionAlias to the manifest it stages for you, so no manifest edit is needed."
+        };
+
+        WithoutAliasOption = new Option<bool>("--without-alias")
+        {
+            Description = "Launch via AUMID activation even for a console app, instead of the default execution alias. The app then runs without a console, so it prints nothing to this terminal."
         };
 
         DebugOutputOption = new Option<bool>("--debug-output")
@@ -127,41 +133,41 @@ internal partial class RunCommand : Command, IShortDescription
 
         ConfigurationOption = new Option<string>("--configuration")
         {
-            Description = "Project mode: build configuration (e.g., Debug, Release). Ignored in folder mode. Default: Debug.",
+            Description = "Project and single-file mode: build configuration (e.g., Debug, Release). Ignored in folder mode. Default: Debug.",
             DefaultValueFactory = _ => "Debug",
         };
         ConfigurationOption.Aliases.Add("-c");
 
         ArchOption = new Option<string?>("--arch")
         {
-            Description = "Project mode: target architecture (x64, arm64, or x86). Ignored in folder mode. Default: the current process architecture."
+            Description = "Project mode: target architecture (x64, arm64, or x86). Ignored in folder mode. Honored for a .cs file-based app too; when omitted, winapp builds for the current process architecture. Default: the current process architecture."
         };
 
         RuntimeOption = new Option<string?>("--runtime")
         {
-            Description = "Project mode: target .NET runtime identifier (RID), e.g. win-x64. Project mode uses only the RID's architecture, always builds the canonical win-<arch>, and rejects non-Windows RIDs (e.g. linux-x64); it overrides --arch. Ignored in folder mode."
+            Description = "Project mode: target .NET runtime identifier (RID), e.g. win-x64. Project mode uses only the RID's architecture, always builds the canonical win-<arch>, and rejects non-Windows RIDs (e.g. linux-x64); it overrides --arch. Ignored in folder mode. Honored for a .cs file-based app too."
         };
         RuntimeOption.Aliases.Add("-r");
 
         FrameworkOption = new Option<string?>("--framework")
         {
-            Description = "Project mode: target framework moniker for multi-targeted projects (e.g. net10.0-windows10.0.26100.0). Ignored in folder mode."
+            Description = "Project mode: target framework moniker for multi-targeted projects (e.g. net10.0-windows10.0.26100.0). Ignored in folder mode. Rejected for a .cs file-based app, which declares its own with '#:property TargetFramework=...'."
         };
         FrameworkOption.Aliases.Add("-f");
 
         NoBuildOption = new Option<bool>("--no-build")
         {
-            Description = "Project mode: skip building and run the existing build output (still evaluates output properties). Ignored in folder mode."
+            Description = "Project and single-file mode: skip building and run the existing build output (still evaluates output properties). Ignored in folder mode."
         };
 
         NoRestoreOption = new Option<bool>("--no-restore")
         {
-            Description = "Project mode: skip restoring the project before building. Ignored in folder mode."
+            Description = "Project and single-file mode: skip restoring before building. Ignored in folder mode."
         };
 
         PropertyOption = new Option<string[]>("--property")
         {
-            Description = "Project mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode.",
+            Description = "Project and single-file mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p EnableMyFeature=true). Ignored in folder mode.",
             // ZeroOrMore (not OneOrMore) so a valueless '-p' reaches the handler, which emits a
             // --json-aware error; OneOrMore would raise a plain-text parser error, bypassing --json.
             Arity = ArgumentArity.ZeroOrMore,
@@ -171,11 +177,11 @@ internal partial class RunCommand : Command, IShortDescription
 
         ProjectOption = new Option<string?>("--project")
         {
-            Description = "Project mode: when the input is a solution (.sln/.slnx) or a directory with multiple runnable app projects, selects which project to launch (by name or path). Ignored in folder mode."
+            Description = "Project mode: when the input is a solution (.sln/.slnx) or a directory with multiple runnable app projects, selects which project to launch (by name or path). Ignored in folder mode. Rejected for a .cs file-based app, which is itself the project."
         };
     }
 
-    public RunCommand() : base("run", "Builds and runs a Windows app from a .csproj/.sln or a build-output folder. In project mode, invokes dotnet build then launches the app (packaged or unpackaged); in folder mode, creates a debug-signed layout, registers the package, and launches it.")
+    public RunCommand() : base("run", "Builds and runs a Windows app from a .cs file-based app, a .csproj/.sln, or a build-output folder. In project mode, invokes dotnet build then launches the app (packaged or unpackaged); in single-file mode, builds the .cs and launches it, generating a manifest from its #:property directives when the app is packaged; in folder mode, creates a debug-signed layout, registers the package, and launches it.")
     {
         Arguments.Add(InputArgument);
         Arguments.Add(PassthroughArgument);
@@ -184,6 +190,7 @@ internal partial class RunCommand : Command, IShortDescription
         Options.Add(ArgsOption);
         Options.Add(NoLaunchOption);
         Options.Add(WithAliasOption);
+        Options.Add(WithoutAliasOption);
         Options.Add(DebugOutputOption);
         Options.Add(UnregisterOnExitOption);
         Options.Add(DetachOption);
@@ -210,6 +217,8 @@ internal partial class RunCommand : Command, IShortDescription
         IAnsiConsole ansiConsole,
         IStatusService statusService,
         IProjectRunService projectRunService,
+        IManifestTemplateService manifestTemplateService,
+        IManifestService manifestService,
         ILogger<RunCommand> logger) : AsynchronousCommandLineAction
     {
         // Test seams for the execution-alias launch path. They isolate the two operating-system
@@ -220,6 +229,14 @@ internal partial class RunCommand : Command, IShortDescription
         // the production behavior, so runtime behavior is unchanged.
         internal Func<string, FileInfo?> ResolveAliasProxy { get; set; } = alias => ExecutionAliasResolver.ResolveAliasPath(alias);
         internal Func<ProcessStartInfo, Process?> ProcessStarter { get; set; } = Process.Start;
+
+        /// <summary>
+        /// Reads which package family owns an alias proxy, or null when that cannot be established.
+        /// A third OS boundary: the proxy is an <c>IO_REPARSE_TAG_APPEXECLINK</c> reparse point, which a
+        /// test cannot create, so tests substitute the answer rather than the file.
+        /// </summary>
+        internal Func<string, string?> ReadAliasOwner { get; set; } =
+            path => ExecutionAliasResolver.TryGetAliasPackageFamilyName(path, out var owner) ? owner : null;
 
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
@@ -234,6 +251,7 @@ internal partial class RunCommand : Command, IShortDescription
             var appArgs = parseResult.GetValue(ArgsOption);
             var noLaunch = parseResult.GetValue(NoLaunchOption);
             var withAlias = parseResult.GetValue(WithAliasOption);
+            var withoutAlias = parseResult.GetValue(WithoutAliasOption);
             var debugOutput = parseResult.GetValue(DebugOutputOption);
             var unregisterOnExit = parseResult.GetValue(UnregisterOnExitOption);
             var detach = parseResult.GetValue(DetachOption);
@@ -321,6 +339,11 @@ internal partial class RunCommand : Command, IShortDescription
             if (withAlias && noLaunch)
             {
                 return Fail("--with-alias and --no-launch cannot be used together.", isJson);
+            }
+
+            if (withAlias && withoutAlias)
+            {
+                return Fail("--with-alias and --without-alias cannot be used together.", isJson);
             }
 
             if (debugOutput && noLaunch)
@@ -432,6 +455,11 @@ internal partial class RunCommand : Command, IShortDescription
                 return Fail(ex.Message, isJson);
             }
 
+            if (inputResolution.Mode == WinAppRunMode.SingleFile)
+            {
+                return await RunSingleFileModeAsync(parseResult, inputResolution.SingleFile!, appArgs, isJson, cancellationToken);
+            }
+
             if (inputResolution.Mode == WinAppRunMode.Project)
             {
                 return await RunProjectModeAsync(parseResult, inputResolution.Csproj!, inputResolution.Solution, inputResolution.SelectionReason, appArgs, isJson, cancellationToken);
@@ -455,10 +483,75 @@ internal partial class RunCommand : Command, IShortDescription
                     $"{UiSymbols.Search} No .csproj/.sln/.slnx with a runnable app found in '{inputFolder.FullName}' — running it as a build-output folder.");
             }
 
+            // Folder mode has no project to evaluate, so console-ness is read from the built binary's PE
+            // subsystem — which is exactly what OutputType compiles to. That keeps the default INFERRED,
+            // so an unavailable alias degrades to AUMID instead of failing the run, and it means a plain
+            // `winapp run <folder>` on a console app reaches this terminal like every other mode.
+            var folderAliasDecision = ResolveAliasLaunch(
+                withAlias, withoutAlias, noLaunch, detach, isJson,
+                outputType: DetectFolderOutputType(inputFolder, executable));
+
             return await ExecuteRunPipelineAsync(
                 inputFolder, manifest, outputAppXDirectory, appArgs,
                 noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, isJson,
-                runtimeArch: null, projectFile: null, framework: null, noRestore: false, cancellationToken);
+                runtimeArch: null, projectFile: null, framework: null, noRestore: false, selfContained: false,
+                folderAliasDecision, cancellationToken);
+        }
+
+        /// <summary>
+        /// Reports the <c>OutputType</c> a build-output folder's executable corresponds to, read from its
+        /// PE subsystem. Returns null when no single candidate can be identified, and the caller then
+        /// keeps AUMID activation.
+        /// </summary>
+        /// <remarks>
+        /// Only used to choose a launch mechanism, so an ambiguous folder is not worth resolving
+        /// precisely: every WinAppSDK self-contained output ships a <c>RestartAgent.exe</c> beside the
+        /// app, and guessing wrong here would put an alias on a helper binary.
+        /// </remarks>
+        private static string? DetectFolderOutputType(DirectoryInfo inputFolder, string? executable)
+        {
+            try
+            {
+                if (!inputFolder.Exists)
+                {
+                    return null;
+                }
+
+                FileInfo? candidate = null;
+                if (!string.IsNullOrWhiteSpace(executable))
+                {
+                    // Path.Join, not Combine: --executable is user input, and a rooted value would make
+                    // Combine silently discard inputFolder and probe a binary outside the layout.
+                    var named = new FileInfo(Path.Join(inputFolder.FullName, executable));
+                    candidate = named.Exists ? named : null;
+                }
+                else
+                {
+                    // Same deny-list the other executable scans use: a Windows App SDK self-contained
+                    // output drops RestartAgent.exe and DeploymentAgent.exe beside the app, and a .NET
+                    // self-contained publish adds createdump.exe and apphost.exe. Filtering only one of
+                    // them leaves two candidates, and detection would silently give up (issue #790).
+                    var executables = inputFolder
+                        .EnumerateFiles("*.exe", SearchOption.TopDirectoryOnly)
+                        .Where(f => !MsixService.IsRuntimeToolExecutable(f.Name))
+                        .Take(2)
+                        .ToList();
+                    candidate = executables.Count == 1 ? executables[0] : null;
+                }
+
+                return candidate is null
+                    ? null
+                    : PeHelper.IsConsoleSubsystem(candidate.FullName) switch
+                    {
+                        true => "Exe",
+                        false => "WinExe",
+                        null => null,
+                    };
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                return null;
+            }
         }
 
         /// <summary>
@@ -486,9 +579,13 @@ internal partial class RunCommand : Command, IShortDescription
             FileInfo? projectFile,
             string? framework,
             bool noRestore,
-            CancellationToken cancellationToken)
+            bool selfContained,
+            AliasLaunchDecision aliasDecision,
+            CancellationToken cancellationToken,
+            Action? onRegistered = null)
         {
             uint processId = 0;
+            var resolvedUseAlias = aliasDecision.UseAlias;
             string? packageFamilyName = null;
             string? packageFullName = null;
             string? packageName = null;
@@ -547,6 +644,32 @@ internal partial class RunCommand : Command, IShortDescription
                     LongPathHelper.ValidatePathLength(resolvedManifest.FullName);
                     LongPathHelper.ValidatePathLength(outputAppXDirectory.FullName);
 
+                    // Confirm the alias is free BEFORE registering. Windows silently ignores a claim on an
+                    // alias another package owns, so registering first would produce an app whose alias
+                    // launches something else — checking here means the run never reaches that state.
+                    var effectiveAlias = aliasDecision;
+                    if (effectiveAlias.UseAlias)
+                    {
+                        var probe = AppxManifestDocument.Load(resolvedManifest.FullName);
+                        var probeFamily = string.IsNullOrEmpty(probe.IdentityName) || string.IsNullOrEmpty(probe.IdentityPublisher)
+                            ? null
+                            : appLauncherService.ComputePackageFamilyName(probe.IdentityName, probe.IdentityPublisher);
+                        var declaredAliases = probe.GetExecutionAliases();
+                        var probeAlias = declaredAliases.Count > 0
+                            ? declaredAliases[0]
+                            : ExecutionAliasResolver.BuildDefaultAliasName(probeFamily);
+
+                        if (!TryConfirmAliasIsAvailable(effectiveAlias with { AliasName = probeAlias }, probeFamily, isJson))
+                        {
+                            if (effectiveAlias.Explicit)
+                            {
+                                return (1, $"{UiSymbols.Error} Execution alias '{probeAlias}' is already owned by another package.");
+                            }
+
+                            effectiveAlias = AliasLaunchDecision.Aumid;
+                        }
+                    }
+
                     // Step 2: Create and register the debug identity
                     taskContext.AddDebugMessage($"{UiSymbols.Package} Creating debug identity...");
                     var identityResult = await msixService.AddLooseLayoutIdentityAsync(
@@ -560,7 +683,11 @@ internal partial class RunCommand : Command, IShortDescription
                         projectFile,
                         framework,
                         noRestore,
+                        selfContained,
+                        effectiveAlias.UseAlias,
                         cancellationToken);
+
+                    resolvedUseAlias = effectiveAlias.UseAlias;
 
                     packageFamilyName = appLauncherService.ComputePackageFamilyName(
                         identityResult.PackageName,
@@ -576,14 +703,21 @@ internal partial class RunCommand : Command, IShortDescription
                     taskContext.AddDebugMessage($"{UiSymbols.Id} App ID: {applicationId}");
                     taskContext.AddDebugMessage($"{UiSymbols.Link} AUMID: {aumid}");
 
+                    // The package now genuinely exists, so guidance about what it leaves behind is
+                    // accurate. Reporting it earlier told users to clean up a registration that a failed
+                    // AddLooseLayoutIdentityAsync never created. Launch failures still leave it behind,
+                    // which is why this runs before the launch rather than after.
+                    onRegistered?.Invoke();
+
                     if (noLaunch)
                     {
                         return (0, $"{packageFamilyName} registered (AUMID: {aumid})");
                     }
 
-                    if (withAlias)
+                    if (effectiveAlias.UseAlias)
                     {
-                        // --with-alias: skip AUMID launch, will launch via execution alias after status completes
+                        // Alias launch happens after the status display completes, so its inherited stdio
+                        // is not interleaved with the spinner.
                         taskContext.AddDebugMessage($"{UiSymbols.Rocket} Will launch via execution alias...");
                         return (0, $"{packageFamilyName} registered (AUMID: {aumid})");
                     }
@@ -635,15 +769,25 @@ internal partial class RunCommand : Command, IShortDescription
                 return 0;
             }
 
-            // --with-alias: launch via execution alias with inherited stdio
-            if (withAlias)
+            // Alias launch: run in this terminal with inherited stdio. When the alias was a default rather
+            // than an explicit request and the app turns out not to have one, fall through to AUMID
+            // instead of failing — a default must never turn a run that works into an error.
+            if (resolvedUseAlias)
             {
-                var aliasExitCode = await LaunchViaExecutionAliasAsync(resolvedOutputDir!, inputFolder, appArgs, debugOutput, useSymbols, packageFullName, cancellationToken);
-                if (unregisterOnExit && packageName != null)
+                var aliasExitCode = await LaunchViaExecutionAliasAsync(resolvedOutputDir!, inputFolder, appArgs, debugOutput, useSymbols, packageFullName, packageFamilyName, aliasDecision.Explicit, cancellationToken);
+                if (aliasExitCode is int code)
                 {
-                    await UnregisterDevPackageAsync(packageName, cancellationToken);
+                    if (unregisterOnExit && packageName != null)
+                    {
+                        await UnregisterDevPackageAsync(packageName, cancellationToken);
+                    }
+                    return code;
                 }
-                return aliasExitCode;
+
+                if (aumid != null)
+                {
+                    processId = appLauncherService.LaunchByAumid(aumid, appArgs);
+                }
             }
 
             if (isJson)
@@ -765,6 +909,7 @@ internal partial class RunCommand : Command, IShortDescription
             ["--no-launch"] = "WinAppRunNoLaunch=true",
             ["--debug-output"] = "WinAppRunDebugOutput=true",
             ["--with-alias"] = "WinAppRunUseExecutionAlias=true",
+            ["--without-alias"] = "WinAppRunUseExecutionAlias=false",
             ["--unregister-on-exit"] = "WinAppRunUnregisterOnExit=true",
             ["--clean"] = "WinAppRunClean=true",
             ["--symbols"] = "WinAppRunSymbols=true",
@@ -860,21 +1005,60 @@ internal partial class RunCommand : Command, IShortDescription
         /// Launches the app using its execution alias (from the processed manifest in the AppX directory).
         /// The alias process inherits stdin/stdout/stderr so console apps run inline.
         /// </summary>
-        private async Task<int> LaunchViaExecutionAliasAsync(
+        /// <summary>
+        /// Resolves an alias problem according to how the alias was chosen: an explicit
+        /// <c>--with-alias</c> reports <paramref name="reportError"/> and fails the run, while a default
+        /// falls back to AUMID activation.
+        /// </summary>
+        private int? FailOrFallBack(bool aliasWasRequested, Action reportError, string reason)
+        {
+            if (aliasWasRequested)
+            {
+                reportError();
+                return 1;
+            }
+
+            logger.LogDebug("Falling back to AUMID activation: {Reason}.", reason);
+            return null;
+        }
+
+        /// <summary>
+        /// Launches the app through its execution alias, so it runs in this terminal with inherited
+        /// stdin/stdout/stderr. Returns null when the alias cannot be used and the caller should fall
+        /// back to AUMID activation.
+        /// </summary>
+        /// <param name="aliasWasRequested">
+        /// Whether the user asked for alias launch by name. An explicit request that cannot be honored is
+        /// reported as an error; a default one falls back quietly, because a console app that prints
+        /// nothing is a better outcome than a run that refuses to start.
+        /// </param>
+        private async Task<int?> LaunchViaExecutionAliasAsync(
             DirectoryInfo outputAppXDirectory,
             DirectoryInfo inputFolder,
             string? appArgs,
             bool debugOutput,
             bool useSymbols,
             string? packageFullName,
+            string? packageFamilyName,
+            bool aliasWasRequested,
             CancellationToken cancellationToken)
         {
-            // Read the processed manifest from the AppX output directory (placeholders already resolved)
-            var processedManifest = ManifestHelper.FindManifest(outputAppXDirectory.FullName);
+            // Read the manifest that was actually REGISTERED, not whatever the directory probe prefers.
+            // Windows registers appxmanifest.xml, but ManifestHelper.FindManifest checks
+            // Package.appxmanifest first — so a leftover copy of that name in the layout (for example one
+            // the staging cleanup could not delete) would make this read a different manifest than the one
+            // whose alias Windows knows about, and report "No execution alias found" for an alias that is
+            // in fact registered. Fall back to the probe only when the canonical file is absent.
+            var registeredManifest = new FileInfo(Path.Join(outputAppXDirectory.FullName, "appxmanifest.xml"));
+            var processedManifest = registeredManifest.Exists
+                ? registeredManifest
+                : ManifestHelper.FindManifest(outputAppXDirectory.FullName);
             if (!processedManifest.Exists)
             {
-                logger.LogError("{UISymbol} Processed manifest not found at {Path}. Cannot determine execution alias.", UiSymbols.Error, processedManifest.FullName);
-                return 1;
+                return FailOrFallBack(
+                    aliasWasRequested,
+                    () => logger.LogError("{UISymbol} Processed manifest not found at {Path}. Cannot determine execution alias.", UiSymbols.Error, processedManifest.FullName),
+                    "no processed manifest");
             }
 
             var content = await File.ReadAllTextAsync(processedManifest.FullName, Encoding.UTF8, cancellationToken);
@@ -882,8 +1066,10 @@ internal partial class RunCommand : Command, IShortDescription
 
             if (aliases.Count == 0)
             {
-                logger.LogError("{UISymbol} No execution alias found in the manifest. Add one with 'winapp manifest add-alias' or use AUMID launch (without --with-alias).", UiSymbols.Error);
-                return 1;
+                return FailOrFallBack(
+                    aliasWasRequested,
+                    () => logger.LogError("{UISymbol} No execution alias found in the manifest. Add one with 'winapp manifest add-alias', or launch via AUMID with --without-alias.", UiSymbols.Error),
+                    "manifest declares no execution alias");
             }
 
             // The alias value is attacker-controlled (it comes verbatim from the manifest,
@@ -907,12 +1093,53 @@ internal partial class RunCommand : Command, IShortDescription
             var aliasFile = ResolveAliasProxy(alias);
             if (aliasFile is null || !aliasFile.Exists)
             {
-                logger.LogError(
-                    "{UISymbol} Execution alias proxy for '{Alias}' was not found at the expected location ('{ExpectedPath}'). Windows may not have registered the alias yet, or it has been removed. Try re-running 'winapp run' without --with-alias to launch via AUMID instead.",
-                    UiSymbols.Error,
-                    alias,
-                    aliasFile?.FullName ?? ExecutionAliasResolver.GetDefaultWindowsAppsDirectory());
-                return 1;
+                return FailOrFallBack(
+                    aliasWasRequested,
+                    () => logger.LogError(
+                        "{UISymbol} Execution alias proxy for '{Alias}' was not found at the expected location ('{ExpectedPath}'). Windows may not have registered the alias yet, or it has been removed. Re-run with --without-alias to launch via AUMID instead.",
+                        UiSymbols.Error,
+                        alias,
+                        aliasFile?.FullName ?? ExecutionAliasResolver.GetDefaultWindowsAppsDirectory()),
+                    "alias proxy is missing");
+            }
+
+            // An execution alias is a global name, so the proxy that exists may belong to a DIFFERENT
+            // package — a second app declaring the same alias does not take it over. Launching it anyway
+            // would run someone else's app while reporting that this one was registered, so verify
+            // ownership first. This is the same hijack the absolute-path resolution above guards against,
+            // one layer up: there the risk is a stray a.exe on disk, here it is a stray a.exe alias.
+            // An execution alias is a global name, so the proxy that exists may belong to a DIFFERENT
+            // package — a second app declaring the same alias does not take it over. Launching it anyway
+            // would run someone else's app while reporting that this one was registered, so ownership is
+            // verified first, and an unreadable owner is treated as NOT ours: a file at that path which
+            // is not a readable app-exec-link is exactly the hijack this guards against.
+            if (packageFamilyName != null)
+            {
+                var aliasOwner = ReadAliasOwner(aliasFile.FullName);
+                if (aliasOwner is null)
+                {
+                    return FailOrFallBack(
+                        aliasWasRequested,
+                        () => logger.LogError(
+                            "{UISymbol} Could not read which package owns the execution alias '{Alias}' at '{Path}'. Refusing to launch it, since it may belong to another app. Re-run with --without-alias to launch via AUMID.",
+                            UiSymbols.Error,
+                            alias,
+                            aliasFile.FullName),
+                        "alias owner could not be read");
+                }
+
+                if (!string.Equals(aliasOwner, packageFamilyName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return FailOrFallBack(
+                        aliasWasRequested,
+                        () => logger.LogError(
+                            "{UISymbol} Execution alias '{Alias}' already belongs to package '{Owner}', not '{Expected}'. Windows gives an alias to the first package that claims it, so launching it would run that app instead. Choose a different package name, unregister the owning package, or run with --without-alias to launch via AUMID.",
+                            UiSymbols.Error,
+                            alias,
+                            aliasOwner,
+                            packageFamilyName),
+                        "alias belongs to another package");
+                }
             }
 
             // Build the ProcessStartInfo via a static helper so the argument-forwarding

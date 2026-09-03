@@ -103,10 +103,13 @@ $extraProps  </PropertyGroup>
                 [string]$WinAppLaunchArgs = "",
                 [string]$WinAppRunArgs = "",
                 [switch]$WinAppRunDetach,
+                [switch]$WinAppRunNoLaunch,
                 [switch]$WinAppRunUnregisterOnExit,
                 [switch]$WinAppRunClean,
                 [switch]$WinAppRunSymbols,
-                [string]$WinAppRunExecutable = ""
+                [string]$WinAppRunExecutable = "",
+                [string]$WinAppRunUseExecutionAlias = "",
+                [string]$OutputType = "WinExe"
             )
             $dir = Join-Path $script:tempRoot $CaseName
             New-Item -ItemType Directory -Path $dir -Force | Out-Null
@@ -123,16 +126,18 @@ $extraProps  </PropertyGroup>
             if ($WinAppLaunchArgs) { $extraProps += "    <WinAppLaunchArgs>$WinAppLaunchArgs</WinAppLaunchArgs>`n" }
             if ($WinAppRunArgs) { $extraProps += "    <WinAppRunArgs>$WinAppRunArgs</WinAppRunArgs>`n" }
             if ($WinAppRunDetach) { $extraProps += "    <WinAppRunDetach>true</WinAppRunDetach>`n" }
+            if ($WinAppRunNoLaunch) { $extraProps += "    <WinAppRunNoLaunch>true</WinAppRunNoLaunch>`n" }
             if ($WinAppRunUnregisterOnExit) { $extraProps += "    <WinAppRunUnregisterOnExit>true</WinAppRunUnregisterOnExit>`n" }
             if ($WinAppRunClean) { $extraProps += "    <WinAppRunClean>true</WinAppRunClean>`n" }
             if ($WinAppRunSymbols) { $extraProps += "    <WinAppRunSymbols>true</WinAppRunSymbols>`n" }
             if ($WinAppRunExecutable) { $extraProps += "    <WinAppRunExecutable>$WinAppRunExecutable</WinAppRunExecutable>`n" }
+            if ($WinAppRunUseExecutionAlias) { $extraProps += "    <WinAppRunUseExecutionAlias>$WinAppRunUseExecutionAlias</WinAppRunUseExecutionAlias>`n" }
 
             $csproj = @"
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
-    <OutputType>WinExe</OutputType>
+    <OutputType>$OutputType</OutputType>
 $extraProps  </PropertyGroup>
   <Import Project="$($script:propsPath)" />
   <Import Project="$($script:targetsPath)" />
@@ -154,6 +159,15 @@ $extraProps  </PropertyGroup>
     }
 
     Context "Active scenarios - packaged Windows apps" {
+        It "Ships props and targets that are well-formed XML" {
+            # XML forbids '--' inside a comment, and MSBuild reports that as MSB4024 "could not be
+            # loaded" on EVERY consuming project — so a comment mentioning a CLI switch by name breaks
+            # every build, not just this file. Parsing here catches it before it reaches a consumer.
+            foreach ($file in @($script:propsPath, $script:targetsPath)) {
+                { [xml](Get-Content $file -Raw) } | Should -Not -Throw -Because "$file must be well-formed XML"
+            }
+        }
+
         It "Activates for WinUI app (OutputType=WinExe, manifest in project dir)" {
             Get-GateValue -CaseName 'winui' -TargetFramework 'net10.0-windows10.0.19041.0' -OutputType 'WinExe' -ProjectDirManifest $true | Should -Be 'true'
         }
@@ -289,6 +303,53 @@ $extraProps  </PropertyGroup>
             $args = Get-ComputedRunArgs -CaseName 'run-raw-empty'
 
             $args | Should -Match ' --caller nuget-package$'
+        }
+
+        It "Forwards neither alias switch when the property is unset" {
+            # The console default is winapp's to make: it reads the built binary's subsystem and treats
+            # its own inference as a DEFAULT, which degrades to AUMID when the alias is unavailable.
+            # Forwarding a switch here would spell that as an explicit request and turn it into an error.
+            $args = Get-ComputedRunArgs -CaseName 'run-alias-unset'
+
+            $args | Should -Not -Match ' --with-alias'
+            $args | Should -Not -Match ' --without-alias'
+        }
+
+        It "Forwards neither alias switch for a console app either - winapp infers it" {
+            $args = Get-ComputedRunArgs -CaseName 'run-alias-console' -OutputType 'Exe'
+
+            $args | Should -Not -Match ' --with-alias'
+            $args | Should -Not -Match ' --without-alias'
+        }
+
+        It "Maps WinAppRunUseExecutionAlias=true to --with-alias" {
+            $args = Get-ComputedRunArgs -CaseName 'run-alias-true' -WinAppRunUseExecutionAlias 'true'
+
+            $args | Should -Match ' --with-alias'
+            $args | Should -Not -Match ' --without-alias'
+        }
+
+        It "Maps WinAppRunUseExecutionAlias=false to --without-alias, even for a console app" {
+            $args = Get-ComputedRunArgs -CaseName 'run-alias-false' -WinAppRunUseExecutionAlias 'false' -OutputType 'Exe'
+
+            $args | Should -Match ' --without-alias'
+            $args | Should -Not -Match ' --with-alias '
+        }
+
+        It "Does not add an alias switch alongside detach - the CLI rejects that pair" {
+            # Neither detach nor no-launch waits on a process this terminal owns, so an alias cannot
+            # express them. Since nothing is inferred here, these combinations stay usable.
+            $args = Get-ComputedRunArgs -CaseName 'run-alias-detach' -OutputType 'Exe' -WinAppRunDetach
+
+            $args | Should -Match ' --detach'
+            $args | Should -Not -Match ' --with-alias'
+        }
+
+        It "Does not add an alias switch alongside no-launch" {
+            $args = Get-ComputedRunArgs -CaseName 'run-alias-nolaunch' -OutputType 'Exe' -WinAppRunNoLaunch
+
+            $args | Should -Match ' --no-launch'
+            $args | Should -Not -Match ' --with-alias'
         }
     }
 

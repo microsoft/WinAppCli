@@ -220,7 +220,14 @@
       <_WinAppRunArgs Condition="'$(_WinAppManifestPathArg)' != ''">$(_WinAppRunArgs) --manifest "$(_WinAppManifestPathArg)"</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(_WinAppLooseLayoutPathArg)' != ''">$(_WinAppRunArgs) --output-appx-directory "$(_WinAppLooseLayoutPathArg)"</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(WinAppLaunchArgs)' != ''">$(_WinAppRunArgs) --args "$(WinAppLaunchArgs)"</_WinAppRunArgs>
+      <!--
+        Only an EXPLICIT preference is forwarded. The console default is left to winapp, which reads the
+        built binary's PE subsystem and treats its own inference as a default: an alias that turns out to
+        be unavailable degrades to AUMID instead of failing the run. Forwarding the inferred case here
+        would spell it as an explicit request and make that same situation an error.
+      -->
       <_WinAppRunArgs Condition="'$(WinAppRunUseExecutionAlias)' == 'true'">$(_WinAppRunArgs) --with-alias</_WinAppRunArgs>
+      <_WinAppRunArgs Condition="'$(WinAppRunUseExecutionAlias)' == 'false'">$(_WinAppRunArgs) --without-alias</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(WinAppRunNoLaunch)' == 'true'">$(_WinAppRunArgs) --no-launch</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(WinAppRunDebugOutput)' == 'true'">$(_WinAppRunArgs) --debug-output</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(WinAppRunDetach)' == 'true'">$(_WinAppRunArgs) --detach</_WinAppRunArgs>

@@ -516,6 +516,8 @@ public class RunCommandTests : BaseCommandTests
             GetRequiredService<IAnsiConsole>(),
             GetRequiredService<IStatusService>(),
             GetRequiredService<IProjectRunService>(),
+            GetRequiredService<IManifestTemplateService>(),
+            GetRequiredService<IManifestService>(),
             GetRequiredService<ILogger<RunCommand>>());
 
         // Act
@@ -1833,6 +1835,53 @@ public class RunCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task RunCommand_WithAlias_OwnerUnreadable_RefusesToLaunch()
+    {
+        // Fail CLOSED. A file exists at the alias path but is not a readable app-exec-link, so its
+        // identity cannot be established. Launching it would start an unknown binary while reporting
+        // that this package was launched — the exact hijack the ownership check exists to prevent.
+        await CreateTestManifestAsync();
+        var outputDir = await CreateProcessedManifestAsync("appx-unknownowner", alias: "winapp-run-test.exe");
+        var aliasProxy = CreateExistingFile("winapp-run-test.exe");
+        var handler = GetRequiredService<RunCommand.Handler>();
+        handler.ResolveAliasProxy = _ => aliasProxy;
+        handler.ReadAliasOwner = _ => null;
+        var started = false;
+        handler.ProcessStarter = _ => { started = true; return null; };
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--with-alias", "--output-appx-directory", outputDir.FullName]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.IsFalse(started, "An alias whose owner cannot be read must never be launched");
+        StringAssert.Contains(ConsoleStdErr.ToString(), "Could not read which package owns");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_WithAlias_OwnedByAnotherPackage_RefusesToLaunch()
+    {
+        // Windows gives an alias to the first package that claims it and silently ignores later claims,
+        // so a proxy that exists may belong to someone else entirely.
+        await CreateTestManifestAsync();
+        var outputDir = await CreateProcessedManifestAsync("appx-otherowner", alias: "winapp-run-test.exe");
+        var aliasProxy = CreateExistingFile("winapp-run-test.exe");
+        var handler = GetRequiredService<RunCommand.Handler>();
+        handler.ResolveAliasProxy = _ => aliasProxy;
+        handler.ReadAliasOwner = _ => "com.contoso.someoneelse_8wekyb3d8bbwe";
+        var started = false;
+        handler.ProcessStarter = _ => { started = true; return null; };
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--with-alias", "--output-appx-directory", outputDir.FullName]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.IsFalse(started, "Launching would have started the other package's app");
+        StringAssert.Contains(ConsoleStdErr.ToString(), "already belongs to package");
+    }
+
+    [TestMethod]
     public async Task RunCommand_WithAlias_UnregisterOnExit_UnregistersAfterAliasPath()
     {
         // --with-alias combined with --unregister-on-exit unregisters dev packages after the
@@ -1864,6 +1913,7 @@ public class RunCommandTests : BaseCommandTests
         var aliasProxy = CreateExistingFile("winapp-run-test.exe");
         var handler = GetRequiredService<RunCommand.Handler>();
         handler.ResolveAliasProxy = _ => aliasProxy;
+        handler.ReadAliasOwner = _ => "TestPackage_fakefamily";
         Process? started = null;
         handler.ProcessStarter = _ => started = StartHelperProcess("/c exit 7");
         var command = GetRequiredService<RunCommand>();
@@ -1884,6 +1934,7 @@ public class RunCommandTests : BaseCommandTests
         var aliasProxy = CreateExistingFile("winapp-run-test.exe");
         var handler = GetRequiredService<RunCommand.Handler>();
         handler.ResolveAliasProxy = _ => aliasProxy;
+        handler.ReadAliasOwner = _ => "TestPackage_fakefamily";
         handler.ProcessStarter = _ => null;
         var command = GetRequiredService<RunCommand>();
 
@@ -1905,6 +1956,7 @@ public class RunCommandTests : BaseCommandTests
         _fakeDebugOutputService.FakeExitCode = 42;
         var handler = GetRequiredService<RunCommand.Handler>();
         handler.ResolveAliasProxy = _ => aliasProxy;
+        handler.ReadAliasOwner = _ => "TestPackage_fakefamily";
         handler.ProcessStarter = _ => StartHelperProcess("/c exit 0");
         var command = GetRequiredService<RunCommand>();
 
@@ -1927,6 +1979,7 @@ public class RunCommandTests : BaseCommandTests
         _fakeDebugOutputService.FakeExitCode = 7;
         var handler = GetRequiredService<RunCommand.Handler>();
         handler.ResolveAliasProxy = _ => aliasProxy;
+        handler.ReadAliasOwner = _ => "TestPackage_fakefamily";
         handler.ProcessStarter = _ => StartHelperProcess("/c exit 0");
         var command = GetRequiredService<RunCommand>();
         var parseResult = command.Parse([_tempDirectory.FullName, "--with-alias", "--debug-output", "--output-appx-directory", outputDir.FullName]);
@@ -1950,6 +2003,7 @@ public class RunCommandTests : BaseCommandTests
         var aliasProxy = CreateExistingFile("winapp-run-test.exe");
         var handler = GetRequiredService<RunCommand.Handler>();
         handler.ResolveAliasProxy = _ => aliasProxy;
+        handler.ReadAliasOwner = _ => "TestPackage_fakefamily";
         handler.ProcessStarter = _ => throw new InvalidOperationException("boom");
         var command = GetRequiredService<RunCommand>();
 
@@ -1972,6 +2026,7 @@ public class RunCommandTests : BaseCommandTests
         var helperPid = 0;
         var handler = GetRequiredService<RunCommand.Handler>();
         handler.ResolveAliasProxy = _ => aliasProxy;
+        handler.ReadAliasOwner = _ => "TestPackage_fakefamily";
         handler.ProcessStarter = _ =>
         {
             var p = StartHelperProcess("/c ping -n 6 127.0.0.1");
@@ -1987,6 +2042,26 @@ public class RunCommandTests : BaseCommandTests
         Assert.AreEqual(-1, exitCode, "Cancellation during the alias wait returns -1");
         Assert.AreEqual(1, _fakeAppLauncherService.TerminateCalls.Count, "The package's processes should be terminated on cancel");
         TryKillByPid(helperPid);
+    }
+
+    [TestMethod]
+    [DataRow(false, true, "WinExe", true, DisplayName = "declared true on a windowed app")]
+    [DataRow(false, true, "Exe", true, DisplayName = "declared true on a console app")]
+    [DataRow(true, null, "WinExe", true, DisplayName = "--with-alias")]
+    [DataRow(false, null, "Exe", false, DisplayName = "inferred from OutputType=Exe")]
+    public void ResolveAliasLaunch_MarksADeclaredPreferenceExplicit(
+        bool withAlias, bool? preferAlias, string outputType, bool expectExplicit)
+    {
+        // An explicit request fails when the alias is owned by another package; an inferred default
+        // degrades to AUMID. The NuGet targets forward WinAppRunUseExecutionAlias=true as --with-alias, so
+        // a declared preference has to be explicit here too — otherwise the same property means different
+        // things through `dotnet run` and through a direct `winapp run`.
+        var decision = RunCommand.Handler.ResolveAliasLaunch(
+            withAlias, withoutAlias: false, noLaunch: false, detach: false, isJson: false,
+            outputType, preferAlias);
+
+        Assert.IsTrue(decision.UseAlias);
+        Assert.AreEqual(expectExplicit, decision.Explicit);
     }
 
     #endregion

@@ -453,6 +453,31 @@ public class RunCommandProjectModeTests : BaseCommandTests
     }
 
     [TestMethod]
+    [DataRow("Exe", null, true, DisplayName = "console app defaults to alias launch")]
+    [DataRow("Exe", false, false, DisplayName = "console app can opt out via the property")]
+    [DataRow("WinExe", null, false, DisplayName = "windowed app defaults to AUMID")]
+    [DataRow("WinExe", true, true, DisplayName = "windowed app can opt in via the property")]
+    public async Task ProjectMode_Packaged_HonorsTheProjectsExecutionAliasPreference(
+        string outputType, bool? preferAlias, bool expectAlias)
+    {
+        // WinAppRunUseExecutionAlias must mean the same thing however the project is launched. Running
+        // the .csproj directly previously ignored it, so the same property behaved differently than it
+        // does through `dotnet run` or in a .cs file.
+        var csproj = CreateCsproj();
+        var targetDir = CreateTargetDir(withManifest: true);
+        _fakeProjectRunService.BuildOutcome = new ProjectBuildOutcome(
+            new ProjectRunResolution(csproj, targetDir.FullName, null, ProjectPackaging.Packaged, false, "x64",
+                null, false, null, outputType, preferAlias), 0);
+        var command = GetRequiredService<RunCommand>();
+
+        await ParseAndInvokeWithCaptureAsync(command, [csproj.FullName]);
+
+        Assert.AreEqual(1, _fakeMsixService.AddLooseLayoutEnsureAliasCalls.Count);
+        Assert.AreEqual(expectAlias, _fakeMsixService.AddLooseLayoutEnsureAliasCalls[0],
+            $"OutputType={outputType} with WinAppRunUseExecutionAlias={preferAlias?.ToString() ?? "unset"}");
+    }
+
+    [TestMethod]
     public async Task ProjectMode_Packaged_NoManifestInOutput_Errors()
     {
         var csproj = CreateCsproj();
