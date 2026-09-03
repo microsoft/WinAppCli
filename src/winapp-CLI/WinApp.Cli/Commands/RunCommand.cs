@@ -581,7 +581,8 @@ internal partial class RunCommand : Command, IShortDescription
             bool noRestore,
             bool selfContained,
             AliasLaunchDecision aliasDecision,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            Action? onRegistered = null)
         {
             uint processId = 0;
             var resolvedUseAlias = aliasDecision.UseAlias;
@@ -701,6 +702,12 @@ internal partial class RunCommand : Command, IShortDescription
                     taskContext.AddDebugMessage($"{UiSymbols.User} Publisher: {publisher}");
                     taskContext.AddDebugMessage($"{UiSymbols.Id} App ID: {applicationId}");
                     taskContext.AddDebugMessage($"{UiSymbols.Link} AUMID: {aumid}");
+
+                    // The package now genuinely exists, so guidance about what it leaves behind is
+                    // accurate. Reporting it earlier told users to clean up a registration that a failed
+                    // AddLooseLayoutIdentityAsync never created. Launch failures still leave it behind,
+                    // which is why this runs before the launch rather than after.
+                    onRegistered?.Invoke();
 
                     if (noLaunch)
                     {

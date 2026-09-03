@@ -291,7 +291,8 @@ internal static partial class AppxCapabilityCatalog
         // would recreate the failure this catalog exists to prevent: 'rescap:systemAIModels' registers
         // successfully and grants nothing, and 'rescap:microphone' emits a Capability where the schema
         // wants a DeviceCapability. Checked before every prefix branch, including 'device:'.
-        if (Known.TryGetValue(name, out var catalogued) && !MatchesCataloguedDeclaration(catalogued, prefix))
+        AppxCapability? catalogued = Known.TryGetValue(name, out var found) ? found : null;
+        if (catalogued is not null && !MatchesCataloguedDeclaration(catalogued, prefix))
         {
             error = $"'{entry}' declares the wrong namespace for '{catalogued.Name}', which belongs in " +
                     $"{DescribeDeclaration(catalogued)}. Windows would register the app and silently not grant it, " +

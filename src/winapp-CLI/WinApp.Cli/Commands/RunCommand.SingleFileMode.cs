@@ -186,13 +186,6 @@ internal partial class RunCommand
                 return Fail(ex.Message, isJson);
             }
 
-            ReportSingleFileRegistrationImpact(
-                resolution.SingleFile,
-                resolvedManifest,
-                outputAppXDirectory ?? new DirectoryInfo(Path.Join(outputFolder.FullName, "AppX")),
-                unregisterOnExit,
-                isJson);
-
             HintNoConsoleOutput(resolution, withoutAlias, noLaunch, detach, isJson);
 
             // A tier-3 manifest can be named <stem>.appxmanifest, which ManifestHelper.FindManifest does not
@@ -218,7 +211,22 @@ internal partial class RunCommand
                 noRestore: noRestore,
                 selfContained: resolution.SelfContained,
                 aliasDecision,
-                cancellationToken);
+                cancellationToken,
+                // Reported only once the package actually exists — see ReportSingleFileRegistrationImpact.
+                onRegistered: () => ReportSingleFileRegistrationImpact(
+                    resolution.SingleFile,
+                    resolvedManifest,
+                    outputAppXDirectory ?? new DirectoryInfo(Path.Join(outputFolder.FullName, "AppX")),
+                    unregisterOnExit,
+                    isJson,
+                    BuildUnregisterCommand(
+                        resolution.SingleFile,
+                        configuration,
+                        archOption,
+                        runtimeOption,
+                        properties,
+                        manifest,
+                        outputAppXDirectory)));
         }
 
         /// <summary>
@@ -509,7 +517,8 @@ internal partial class RunCommand
             FileInfo manifest,
             DirectoryInfo layoutDirectory,
             bool unregisterOnExit,
-            bool isJson)
+            bool isJson,
+            string? unregisterCommand = null)
         {
             // Gate on Warning, not Information: --quiet suppresses Information but still promises
             // warnings, and silently replacing another app's registration is exactly what a user needs
@@ -562,7 +571,7 @@ internal partial class RunCommand
                 }
 
                 ansiConsole.MarkupLineInterpolated(
-                    $"{UiSymbols.Note} '{singleFile.Name}' stays registered as '{packageName}' after it exits. Remove it with 'winapp unregister {singleFile.Name}', or use --unregister-on-exit.");
+                    $"{UiSymbols.Note} '{singleFile.Name}' stays registered as '{packageName}' after it exits. Remove it with '{unregisterCommand ?? $"winapp unregister {singleFile.Name}"}', or use --unregister-on-exit.");
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or XmlException or ArgumentException or InvalidOperationException)
             {
@@ -570,6 +579,83 @@ internal partial class RunCommand
                 // exception types still surface rather than being silently swallowed.
                 logger.LogDebug("Could not check for an existing registration: {Message}", ex.Message);
             }
+        }
+
+        /// <summary>
+        /// Builds the <c>winapp unregister</c> command that removes THIS registration, runnable from any
+        /// directory.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The bare file name only works from the file's own directory and breaks entirely on a path
+        /// containing spaces, so the full path is quoted through <see cref="WindowsCommandLine.JoinArguments"/>.
+        /// </para>
+        /// <para>
+        /// Which form to emit follows what <c>unregister</c> accepts. It re-derives a file-based app's
+        /// identity through <c>SingleFileManifestPlanner.ResolvePackageName</c>, which reads an authored
+        /// manifest for tiers 2-3 and infers the name for tier 4 — so the <c>.cs</c> form resolves the same
+        /// package the run registered, provided the identity-shaping options are repeated. A tier-1
+        /// <c>--manifest</c> is the one thing it cannot re-derive, and <c>unregister</c> REJECTS an input
+        /// alongside <c>--manifest</c> (they can name different packages) as well as the resolution options
+        /// without one. That case therefore emits the manifest form alone.
+        /// </para>
+        /// </remarks>
+        private static string BuildUnregisterCommand(
+            FileInfo singleFile,
+            string configuration,
+            string? archOption,
+            string? runtimeOption,
+            IReadOnlyList<string> properties,
+            FileInfo? explicitManifest,
+            DirectoryInfo? outputAppXDirectory)
+        {
+            var tokens = new List<string> { "winapp", "unregister" };
+
+            if (explicitManifest != null)
+            {
+                tokens.Add("--manifest");
+                tokens.Add(explicitManifest.FullName);
+            }
+            else
+            {
+                tokens.Add(singleFile.FullName);
+
+                if (!string.Equals(configuration, "Debug", StringComparison.OrdinalIgnoreCase))
+                {
+                    tokens.Add("-c");
+                    tokens.Add(configuration);
+                }
+
+                // --runtime's architecture beats --arch, so repeat whichever the user actually passed.
+                if (!string.IsNullOrWhiteSpace(runtimeOption))
+                {
+                    tokens.Add("-r");
+                    tokens.Add(runtimeOption);
+                }
+                else if (!string.IsNullOrWhiteSpace(archOption))
+                {
+                    tokens.Add("--arch");
+                    tokens.Add(archOption);
+                }
+
+                // A command-line property overrides the file's own #:property directives, so one that
+                // shaped the identity has to be repeated for the same name to come back out.
+                foreach (var property in properties)
+                {
+                    tokens.Add("-p");
+                    tokens.Add(property);
+                }
+            }
+
+            // Shapes the layout ownership check rather than the identity, so it applies to both forms.
+            if (outputAppXDirectory != null)
+            {
+                tokens.Add("--output-appx-directory");
+                tokens.Add(outputAppXDirectory.FullName);
+            }
+
+            return WindowsCommandLine.JoinArguments(tokens)
+                ?? $"winapp unregister {singleFile.FullName}";
         }
 
         /// <summary>

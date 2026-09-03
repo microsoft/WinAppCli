@@ -746,11 +746,19 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
 
     #region Registration lifetime
 
+    /// <summary>
+    /// Widens the test console so an assertion can see a whole command line. Spectre wraps at the profile
+    /// width (80 columns by default) and breaks a long path MID-TOKEN, which no substring assertion can
+    /// match through.
+    /// </summary>
+    private void WidenConsoleForCommandAssertions() => TestAnsiConsole.Profile.Width = 500;
+
     [TestMethod]
     public async Task SingleFileMode_FirstRegistration_SaysThePackageOutlivesTheRun()
     {
         // `winapp run app.cs` leaves a package registered, which is invisible unless we say so — and the
         // generated manifest lives in the SDK's temp output, so the user has no path to point unregister at.
+        WidenConsoleForCommandAssertions();
         var (singleFile, outputDir) = CreateSingleFileApp();
         SetOutcome(singleFile, outputDir);
         _fakePackageRegistrationService.FakeDevPackages = [];
@@ -760,7 +768,96 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
 
         var output = TestAnsiConsole.Output;
         StringAssert.Contains(output, "stays registered");
-        StringAssert.Contains(output, "winapp unregister counter.cs");
+
+        // The FULL path, not the bare name: the note is read after the run, from wherever the user happens
+        // to be, and `winapp unregister counter.cs` only resolves inside the file's own directory.
+        StringAssert.Contains(output, $"winapp unregister {singleFile.FullName}");
+    }
+
+    [TestMethod]
+    public async Task SingleFileMode_PathWithSpaces_QuotesTheUnregisterCommand()
+    {
+        // Unquoted, `winapp unregister C:\my apps\counter.cs` parses as two arguments and fails.
+        WidenConsoleForCommandAssertions();
+        var sourceDir = _tempDirectory.CreateSubdirectory($"my apps {Guid.NewGuid():N}");
+        var singleFile = new FileInfo(Path.Join(sourceDir.FullName, "counter.cs"));
+        File.WriteAllText(singleFile.FullName, "Console.WriteLine(\"hi\");");
+        var outputDir = _tempDirectory.CreateSubdirectory($"runfile_{Guid.NewGuid():N}");
+        File.WriteAllText(Path.Join(outputDir.FullName, "counter.exe"), "MZ");
+
+        SetOutcome(singleFile, outputDir);
+        _fakePackageRegistrationService.FakeDevPackages = [];
+        var command = GetRequiredService<RunCommand>();
+
+        await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--detach"]);
+
+        StringAssert.Contains(TestAnsiConsole.Output, $"winapp unregister \"{singleFile.FullName}\"");
+    }
+
+    [TestMethod]
+    public async Task SingleFileMode_IdentityShapingOptions_AreRepeatedInTheUnregisterCommand()
+    {
+        // `unregister` re-evaluates the identity from the .cs, and a command-line property overrides the
+        // file's own #:property directives — so without these the command resolves a DIFFERENT package.
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir);
+        _fakePackageRegistrationService.FakeDevPackages = [];
+        var command = GetRequiredService<RunCommand>();
+
+        await ParseAndInvokeWithCaptureAsync(
+            command,
+            [singleFile.FullName, "--detach", "-c", "Release", "-p", "WinAppPackageName=com.contoso.counter"]);
+
+        var output = TestAnsiConsole.Output;
+        StringAssert.Contains(output, "-c Release");
+        StringAssert.Contains(output, "-p WinAppPackageName=com.contoso.counter");
+    }
+
+    [TestMethod]
+    public async Task SingleFileMode_ExplicitManifest_UnregisterCommandNamesTheManifestAlone()
+    {
+        // `unregister` REJECTS an input alongside --manifest, so naming both would emit a command that
+        // cannot run. The manifest states the identity, so it stands on its own.
+        WidenConsoleForCommandAssertions();
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir);
+        var manifest = new FileInfo(Path.Join(outputDir.FullName, "Authored.appxmanifest"));
+        File.WriteAllText(
+            manifest.FullName,
+            """
+            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
+              <Identity Name="com.contoso.authored" Publisher="CN=Test" Version="1.0.0.0" />
+            </Package>
+            """);
+        _fakePackageRegistrationService.FakeDevPackages = [];
+        var command = GetRequiredService<RunCommand>();
+
+        await ParseAndInvokeWithCaptureAsync(
+            command,
+            [singleFile.FullName, "--detach", "--manifest", manifest.FullName]);
+
+        var output = TestAnsiConsole.Output;
+        StringAssert.Contains(output, $"winapp unregister --manifest {manifest.FullName}");
+        Assert.IsFalse(
+            output.Contains($"unregister {singleFile.FullName}", StringComparison.Ordinal),
+            "An input alongside --manifest is rejected by unregister");
+    }
+
+    [TestMethod]
+    public async Task SingleFileMode_NotYetRegistered_ReportsNothingWhenRegistrationFails()
+    {
+        // The note promises the package outlives the run. Printing it before registration is attempted
+        // would state that about a package that does not exist.
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir);
+        _fakePackageRegistrationService.FakeDevPackages = [];
+        _fakeMsixService.ExceptionToThrow = new InvalidOperationException("registration refused");
+        var command = GetRequiredService<RunCommand>();
+
+        await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--detach"]);
+
+        Assert.IsFalse(TestAnsiConsole.Output.Contains("stays registered", StringComparison.Ordinal),
+            "Nothing stays registered when registration never succeeded");
     }
 
     [TestMethod]
@@ -801,8 +898,9 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
     [DoNotParallelize]
     public async Task SingleFileMode_RegisteredFromElsewhere_WarnsAboutReplacingIt()
     {
-        // Two counter.cs files in different folders share the default identity, and the second silently
-        // replaces the first.
+        // A dev registration of this app's identity already exists, installed from a DIFFERENT location.
+        // Reachable when two .cs files explicitly share one '#:property WinAppPackageName' — the path hash
+        // in the default identity is what keeps unrelated same-named files from landing here.
         var (singleFile, outputDir) = CreateSingleFileApp();
         SetOutcome(singleFile, outputDir);
         _fakePackageRegistrationService.FakeDevPackages =
