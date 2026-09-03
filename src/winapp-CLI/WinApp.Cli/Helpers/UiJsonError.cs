@@ -30,9 +30,6 @@ internal static class UiJsonError
     public const string CodeFrameOutputFailed = "frame_output_failed";
     public const string CodePartialOutput = "partial_output";
 
-    /// <summary>The command was cancelled while waiting for the desktop and never ran.</summary>
-    public const string CodeCancelled = "cancelled";
-
     /// <summary>Write a JSON error envelope to stderr. No-op when <paramref name="json"/> is false.</summary>
     /// <param name="errorOut">
     /// Optional error writer; defaults to <see cref="Console.Error"/>. Pass
