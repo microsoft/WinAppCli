@@ -184,11 +184,19 @@ internal static class ApiCacheBuilder
     /// older cache layout, so upgrading does not strand exports nothing will ever read
     /// again.
     /// <para>
-    /// Only siblings whose <c>meta.json</c> is missing or records a different
-    /// <see cref="ApiCachePaths.CacheFormatVersion"/> are removed. A sibling written by
-    /// this layout is left alone: it is another project's genuinely different asset
-    /// selection for the same package version, and deleting it would make two projects
-    /// evict each other on every refresh.
+    /// A sibling whose <c>meta.json</c> records the current
+    /// <see cref="ApiCachePaths.CacheFormatVersion"/> is left alone: it is another
+    /// project's genuinely different asset selection for the same package version, and
+    /// deleting it would make two projects evict each other on every refresh.
+    /// </para>
+    /// <para>
+    /// A key-shaped sibling with no readable <c>meta.json</c> is also left alone. Only a
+    /// finished export writes that file, so the directory belongs either to an export
+    /// another process is running right now — the explicit refresh path does not hold the
+    /// cache lock — or to a run that crashed. Deleting it would pull a live export out
+    /// from under a concurrent process, whereas keeping it costs disk space only: the
+    /// reuse check rejects a cache with no <c>meta.json</c>, so the next run rebuilds it
+    /// in place.
     /// </para>
     /// </summary>
     private static void PruneStalePackageCaches(string keptPackageCacheDir)
@@ -202,10 +210,17 @@ internal static class ApiCacheBuilder
         {
             foreach (string sibling in Directory.EnumerateDirectories(versionDir))
             {
-                if (string.Equals(sibling, keptPackageCacheDir, StringComparison.OrdinalIgnoreCase)
-                    || CacheFormatOf(sibling) == ApiCachePaths.CacheFormatVersion)
+                if (string.Equals(sibling, keptPackageCacheDir, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
+                }
+                if (IsPackageKeyDirectoryName(Path.GetFileName(sibling)))
+                {
+                    int? format = CacheFormatOf(sibling);
+                    if (format is null || format == ApiCachePaths.CacheFormatVersion)
+                    {
+                        continue;
+                    }
                 }
                 Directory.Delete(sibling, recursive: true);
             }
@@ -216,6 +231,15 @@ internal static class ApiCacheBuilder
             // disk space, not correctness, so it must never fail the refresh.
         }
     }
+
+    /// <summary>
+    /// Whether a directory name is one this layout mints — an
+    /// <see cref="ApiCachePaths.ShortHash"/> of the asset paths. Anything else beside a
+    /// package cache directory was left by an earlier layout that wrote a package's
+    /// contents straight into the version directory.
+    /// </summary>
+    private static bool IsPackageKeyDirectoryName(string name) =>
+        name.Length == ApiCachePaths.ShortHashLength && name.All(Uri.IsHexDigit);
 
     /// <summary>
     /// The <see cref="ApiCachePaths.CacheFormatVersion"/> recorded in a package cache

@@ -202,7 +202,11 @@ internal static partial class NuGetResolver
     /// <summary>The leading <c>major.minor</c> of a version-like string, or null.</summary>
     private static string? MajorMinor(string value)
     {
-        string[] parts = value.Split('.');
+        // Both sides can carry a prerelease suffix — the runtime folder for an
+        // experimental release is labelled `2.0-experimental3` — and the digits before
+        // it are still the release. Without this, the minor fails to parse, the label
+        // reads as unrecognizable, and the mismatch is waved through.
+        string[] parts = value.Split('-')[0].Split('.');
         if (parts.Length < 2
             || !int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out int major)
             || !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out int minor))

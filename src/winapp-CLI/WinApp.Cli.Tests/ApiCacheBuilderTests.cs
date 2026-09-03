@@ -138,11 +138,13 @@ public sealed class ApiCacheBuilderTests
 
         string versionDir = Path.Combine(cacheDir, "packages", "Contoso.Sdk", "1.0.0");
         string oldLayoutTypes = Path.Combine(versionDir, "types");
-        string oldFormatDir = Path.Combine(versionDir, "deadbeefdeadbeef");
-        string otherSelection = Path.Combine(versionDir, "cafecafecafecafe");
+        string oldFormatDir = Path.Combine(versionDir, "deadbeef");
+        string otherSelection = Path.Combine(versionDir, "cafecafe");
+        string exportInFlight = Path.Combine(versionDir, "0badf00d");
         Directory.CreateDirectory(oldLayoutTypes);
         Directory.CreateDirectory(oldFormatDir);
         Directory.CreateDirectory(otherSelection);
+        Directory.CreateDirectory(exportInFlight);
         File.WriteAllText(Path.Combine(oldFormatDir, "meta.json"), MetaJson(ApiCachePaths.CacheFormatVersion - 1));
         File.WriteAllText(Path.Combine(otherSelection, "meta.json"), MetaJson(ApiCachePaths.CacheFormatVersion));
 
@@ -158,6 +160,11 @@ public sealed class ApiCacheBuilderTests
         // Another project's genuinely different asset selection is still current, and
         // deleting it would make the two projects evict each other on every refresh.
         Assert.IsTrue(Directory.Exists(otherSelection), "current-format sibling must be kept");
+
+        // meta.json is written last, so a cache directory without one may be an export
+        // another process is running right now — `find-api refresh` does not hold the
+        // cache lock. Deleting it recursively would break that run mid-write.
+        Assert.IsTrue(Directory.Exists(exportInFlight), "an export in flight must not be deleted");
     }
 
     /// <summary>A complete <c>meta.json</c> body recording <paramref name="format"/>.</summary>

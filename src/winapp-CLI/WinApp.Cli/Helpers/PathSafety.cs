@@ -79,8 +79,11 @@ internal static class PathSafety
         return false;
     }
 
-    // True for UNC / network paths (`\\server\share`, `\\?\UNC\…`,
-    // `\\.\UNC\…`). Local DOS device paths (`\\?\C:\…`) are not network.
+    // True for any path that is not plainly a local drive: UNC (`\\server\share`,
+    // `\\?\UNC\…`, `\\.\UNC\…`) and every other DOS device path. Only a drive letter
+    // (`\\?\C:\…`) or a volume GUID (`\\?\Volume{…}\…`) after the device prefix names
+    // local storage; `\\?\GLOBALROOT\Device\Mup\server\share` reaches the SMB redirector
+    // just as a UNC path does, so an allow-list is the only safe reading.
     public static bool IsNetworkPath(string path)
     {
         if (string.IsNullOrEmpty(path))
@@ -90,28 +93,26 @@ internal static class PathSafety
 
         var p = path.Replace('/', '\\');
 
+        if (p.Length < 3 || p[0] != '\\' || p[1] != '\\')
+        {
+            return false;
+        }
+
         // Plain UNC: \\server\share…
-        if (p.Length >= 3
-            && p[0] == '\\' && p[1] == '\\'
-            && p[2] != '?' && p[2] != '.')
+        if (p[2] != '?' && p[2] != '.')
         {
             return true;
         }
 
-        // Device-prefixed UNC: \\?\UNC\… or \\.\UNC\…
-        if (p.Length >= 8
-            && p[0] == '\\' && p[1] == '\\'
-            && (p[2] == '?' || p[2] == '.')
-            && p[3] == '\\'
-            && (p[4] == 'U' || p[4] == 'u')
-            && (p[5] == 'N' || p[5] == 'n')
-            && (p[6] == 'C' || p[6] == 'c')
-            && p[7] == '\\')
+        // Device path: \\?\<device>… or \\.\<device>…
+        if (p.Length < 4 || p[3] != '\\')
         {
             return true;
         }
-
-        return false;
+        var device = p.Substring(4);
+        bool isDriveLetter = device.Length >= 2 && char.IsAsciiLetter(device[0]) && device[1] == ':';
+        bool isVolumeGuid = device.StartsWith("Volume{", StringComparison.OrdinalIgnoreCase);
+        return !isDriveLetter && !isVolumeGuid;
     }
 
     // Preserve `C:\`; `C:` is drive-relative and would probe the wrong path.

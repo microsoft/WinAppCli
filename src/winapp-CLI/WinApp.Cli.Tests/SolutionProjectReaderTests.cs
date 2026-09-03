@@ -36,6 +36,15 @@ public class SolutionProjectReaderTests
     }
 
     [TestMethod]
+    public void TryResolveRelativePath_DeviceNamespaceNetworkPath_IsRejected()
+    {
+        // \\?\GLOBALROOT\Device\Mup\... reaches the SMB redirector without spelling
+        // "UNC", and being rooted it discards the solution directory entirely.
+        Assert.IsNull(SolutionProjectReader.TryResolveRelativePath(
+            @"C:\repo", @"\\?\GLOBALROOT\Device\Mup\attacker.example\share\Evil.csproj"));
+    }
+
+    [TestMethod]
     public void ReadProjectPaths_UncProject_IsSkipped()
     {
         // End to end through the solution reader: the malicious entry is dropped and the

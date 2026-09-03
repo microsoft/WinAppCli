@@ -41,4 +41,16 @@ public class NuGetResolverRuntimeMatchTests
         Assert.IsTrue(NuGetResolver.RuntimeMatchesRelease("experimental", "1.8.260222000"));
         Assert.IsTrue(NuGetResolver.RuntimeMatchesRelease("1.8", "not-a-version"));
     }
+
+    [TestMethod]
+    public void RuntimeMatchesRelease_PrereleaseRuntimeLabel_ComparesTheReleaseBeforeTheSuffix()
+    {
+        // An experimental runtime's folder is labelled "2.0-experimental3". Parsing the
+        // minor straight out of that fails, and a failed parse is treated as
+        // "unrecognizable, take it as-is" — which waves the mismatch through and reopens
+        // the very bug the release check exists to prevent.
+        Assert.IsFalse(NuGetResolver.RuntimeMatchesRelease("2.0-experimental3", "1.8.260222000"));
+        Assert.IsTrue(NuGetResolver.RuntimeMatchesRelease("1.8-experimental3", "1.8.260222000"));
+        Assert.IsTrue(NuGetResolver.RuntimeMatchesRelease("1.8", "1.8.250401001-preview1"));
+    }
 }

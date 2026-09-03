@@ -60,12 +60,15 @@ internal static class ApiCachePaths
     internal static bool TryPackageCacheDir(string cacheDir, ProjectPackageRef package, out string dir) =>
         TryPackageCacheDir(cacheDir, package.Id, package.Version, package.AssetPathKey, out dir);
 
+    /// <summary>Character count of a <see cref="ShortHash"/>.</summary>
+    internal const int ShortHashLength = 8;
+
     /// <summary>
     /// First 8 hex characters of the SHA-256 of <paramref name="value"/>, used to
     /// make otherwise-lossy cache file and directory names injective.
     /// </summary>
     internal static string ShortHash(string value) =>
-        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))[..8].ToLowerInvariant();
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))[..ShortHashLength].ToLowerInvariant();
 
     /// <summary>
     /// Maps a namespace (or the <c>_GlobalNamespace</c> sentinel) to its
