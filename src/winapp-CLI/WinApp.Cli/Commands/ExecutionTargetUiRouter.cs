@@ -195,7 +195,7 @@ internal sealed class ExecutionTargetUiRouter(
             var owner = GuestOwnerContext.WithOwner(
                 environment: null,
                 GuestOwnerContext.ResolveGuestToken(
-                    target.Reference.Id, target.Epoch.Value));
+                    target.Reference.StateKey, target.Epoch.Value));
 
             // Buffered only when the guest path would otherwise appear in the result. Streaming is
             // the default so a long-running verb still shows progress as it happens.

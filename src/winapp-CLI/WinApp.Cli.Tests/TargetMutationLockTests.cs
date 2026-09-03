@@ -204,7 +204,7 @@ public class TargetMutationLockTests
 
         // Scoping the lock to the same root as the state it protects keeps both per-user, and lets
         // future targets serialize independently.
-        StringAssert.Contains(path, "windows-sandbox-default", StringComparison.OrdinalIgnoreCase);
+        StringAssert.Contains(path, _target.StateKey, StringComparison.Ordinal);
         Assert.AreEqual(TargetMutationLock.LockFileName, Path.GetFileName(path));
     }
 

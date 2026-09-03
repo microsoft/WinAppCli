@@ -61,16 +61,16 @@ Does the project already have an appxmanifest.xml?
    ├─ Need to run a Windows SDK tool directly (makeappx, signtool, makepri)?
    │  └─ winapp tool <toolname> <args>
    └─ Need to remove a development registration?
-      └─ winapp unregister  (add --sandbox to remove it from the Sandbox instead)
+      └─ winapp unregister  (add --on sandbox to remove it from the Sandbox instead)
 
 Need to run or automate the app somewhere other than the user's own desktop?
-├─ Yes → add --sandbox to run / unregister / ui  (see the winapp-sandbox skill)
-│  ├─ Run it there → winapp run . --sandbox
-│  ├─ Automate it there → winapp ui <verb> --sandbox -a <appname>
-│  ├─ Run an arbitrary command there → winapp sandbox exec -- <command> [args...]
-│  ├─ Move files in or out → winapp sandbox cp <source> <destination>
-│  └─ Remove just this app from it → winapp unregister --sandbox
-└─ No → the same commands without --sandbox act on this machine
+├─ Yes → add --on sandbox to run / unregister / ui  (see the winapp-sandbox skill)
+│  ├─ Run it there → winapp run . --on sandbox
+│  ├─ Automate it there → winapp ui <verb> --on sandbox -a <appname>
+│  ├─ Run an arbitrary command there → winapp target exec sandbox -- <command> [args...]
+│  ├─ Move files in or out → winapp target push sandbox <source> <destination>
+│  └─ Remove just this app from it → winapp unregister --on sandbox
+└─ No → the same commands without --on sandbox act on this machine
 
 Want to inspect or interact with a running app's UI?
 ├─ See element tree → winapp ui inspect -a <appname>
@@ -84,7 +84,7 @@ Want to inspect or interact with a running app's UI?
 ├─ Wait for UI state → winapp ui wait-for <selector> -a <appname> --timeout 5000
 ├─ Inject touch gestures (tap/swipe/pinch/long-press) → winapp ui touch <selector> -a <appname> --gesture swipe --direction right --distance 200
 ├─ Inject pen/stylus ink stroke or tap → winapp ui pen <selector> -a <appname> --path "10,10 200,200"
-├─ Do any of the above without taking over the user's desktop → add --sandbox (or -a sandbox:<appname>)
+├─ Do any of the above without taking over the user's desktop → add --on sandbox
 └─ List app windows → winapp ui list-windows -a <appname> [--show-hidden]
 
 Building a WinUI 3 UI and need to find the right control or a working sample?
@@ -111,9 +111,9 @@ Building a WinUI 3 UI and need to find the right control or a working sample?
 
 8. **Run `winapp --cli-schema` for the full CLI reference.** If you need exact option names, defaults, argument types, or details about any command, run `winapp --cli-schema` — it outputs the complete CLI structure as JSON. Use this whenever the information in this file isn't sufficient.
 
-9. **`--sandbox` never silently falls back to this machine.** A command that asked for the Sandbox either runs there or fails. Prerequisites are Windows 11 24H2+ on a supported edition and hardware virtualization; **`--sandbox` is the user's consent for winapp to install what is missing**, so it enables the Windows Sandbox optional feature (UAC prompt) and installs the Store-delivered client itself, and Windows may show its own update UI and take focus while that runs. winapp never reboots. Missing prerequisites are handled *before* the app is built. **A Sandbox that is already running is taken over and prepared, not refused** — and **winapp never stops a Sandbox**, ever, including one it took over. Preparing a guest changes it (bootstrap shares, connected client, Developer Mode, an inbound firewall rule for the agent), so anything already running there shares that session. Ending a Sandbox stays with `wsb list`, `wsb connect --id <id>`, `wsb stop --id <id>`. The instance persists between commands and rebuilds, so later runs transfer only what changed. Consult the **winapp-sandbox skill** for the full workflow and error-code table.
+9. **`--on sandbox` never silently falls back to this machine.** A command that asked for the Sandbox either runs there or fails. Prerequisites are Windows 11 24H2+ on a supported edition and hardware virtualization; **`--on sandbox` is the user's consent for winapp to install what is missing**, so it enables the Windows Sandbox optional feature (UAC prompt) and installs the Store-delivered client itself, and Windows may show its own update UI and take focus while that runs. winapp never reboots. Missing prerequisites are handled *before* the app is built. **A Sandbox that is already running is taken over and prepared, not refused** — and **winapp never stops a Sandbox**, ever, including one it took over. Preparing a guest changes it (bootstrap shares, connected client, Developer Mode, an inbound firewall rule for the agent), so anything already running there shares that session. Ending a Sandbox stays with `wsb list`, `wsb connect --id <id>`, `wsb stop --id <id>`. The instance persists between commands and rebuilds, so later runs transfer only what changed. Consult the **winapp-sandbox skill** for the full workflow and error-code table.
 
-10. **`--sandbox` isolates the running app, not the build, and is one trust boundary.** Project evaluation, restore, and compilation still happen on the host, so it does **not** make an untrusted project safe to open. Everything inside the Sandbox shares one user account, desktop, registry, runtimes, and network. Also: UI targets must be explicit (`-a`/`--window`, discover with `winapp ui list-windows --sandbox`); guest PIDs and window handles are valid only within the Sandbox generation that produced them; the Sandbox window must stay connected for real input and screen recording; shared runtimes are provisioned into the guest from host caches and verified before every launch; and `--debug-output` is refused for *unpackaged* apps in the Sandbox.
+10. **`--on sandbox` isolates the running app, not the build, and is one trust boundary.** Project evaluation, restore, and compilation still happen on the host, so it does **not** make an untrusted project safe to open. Everything inside the Sandbox shares one user account, desktop, registry, runtimes, and network. Also: UI targets must be explicit (`-a`/`--window`, discover with `winapp ui list-windows --on sandbox`); guest PIDs and window handles are valid only within the Sandbox generation that produced them; the Sandbox window must stay connected for real input and screen recording; shared runtimes are provisioned into the guest from host caches and verified before every launch; and `--debug-output` is refused for *unpackaged* apps in the Sandbox.
 
 ## Complete command reference
 
@@ -210,7 +210,7 @@ Building a WinUI 3 UI and need to find the right control or a working sample?
 - `--debug-output` — capture `OutputDebugString` messages and first-chance exceptions (prevents other debuggers like VS/VS Code from attaching). For WinUI apps it also auto-runs a stowed-exception (`0xC000027B`) triage pass (`!xamlstowed`/`!xamltriage`) that recovers the originating HRESULT and native XAML dispatch stack. The first triage run downloads debugger components (engine bits from NuGet + `JsProvider.dll` from the WinDbg CDN) and caches them under `~\.winapp\dbgtools\`; if downloads are blocked, install Debugging Tools for Windows or point `WINAPP_DBGTOOLS_DIR` at a debugger directory containing `dbgeng.dll` and `JsProvider.dll`.
 - `--symbols` — with `--debug-output`, download Microsoft public symbols for richer native crash stacks (first run downloads and caches them)
 - `--output-appx-directory <path>` — custom output directory for the loose layout
-- `--sandbox` — deploy and run the app inside the Windows Sandbox winapp manages instead of on this machine. The app is still **built on the host**; only registration, launch, and debugging move. Every other run option keeps its meaning (`--detach`, `--no-launch`, `--clean`, `--unregister-on-exit`, `--with-alias`, `--json`), except `--debug-output`, which is refused for unpackaged apps in the Sandbox. No fallback to local execution. Note that `--detach` on an **unpackaged** app yields a process that lives only for the current guest agent's lifetime: it stops if the Sandbox closes or if winapp automatically repairs the agent, with no error reported at that moment — rerun to bring it back, or run in the foreground when it must survive a long sequence. A packaged app is activated by Windows rather than started by the agent and was observed to survive an agent repair.
+- `--on sandbox` — deploy and run the app inside the Windows Sandbox winapp manages instead of on this machine. The app is still **built on the host**; only registration, launch, and debugging move. Every other run option keeps its meaning (`--detach`, `--no-launch`, `--clean`, `--unregister-on-exit`, `--with-alias`, `--json`), except `--debug-output`, which is refused for unpackaged apps in the Sandbox. No fallback to local execution. Note that `--detach` on an **unpackaged** app yields a process that lives only for the current guest agent's lifetime: it stops if the Sandbox closes or if winapp automatically repairs the agent, with no error reported at that moment — rerun to bring it back, or run in the foreground when it must survive a long sequence. A packaged app is activated by Windows rather than started by the agent and was observed to survive an agent repair.
 **Requires:** Folder mode — built app output directory + `appxmanifest.xml`. Project mode — a `.csproj`/`.sln`/`.slnx` (or directory containing one) + .NET SDK 8.0.100+.
 
 ### `winapp unregister`
@@ -219,26 +219,26 @@ Building a WinUI 3 UI and need to find the right control or a working sample?
 **Key options:**
 - `--manifest <path>` — manifest identifying the package (default: auto-detect)
 - `--force` — skip the install-location check and unregister even if the package was registered from a different project tree
-- `--sandbox` — remove the registration from the managed Windows Sandbox instead of this machine. Only ever removes the app winapp registered there; it does not stop the Sandbox.
+- `--on sandbox` — remove the registration from the managed Windows Sandbox instead of this machine. Only ever removes the app winapp registered there; it does not stop the Sandbox.
 - `--json` — machine-readable output
 
-### `winapp sandbox exec -- <command> [args...]`
+### `winapp target exec sandbox -- <command> [args...]`
 **Purpose:** Run one command inside the managed Windows Sandbox as the interactive Sandbox user.
-**When to use:** To prepare a dependency, or diagnose an app that `winapp run --sandbox` cannot resolve on its own. Not a substitute for `winapp run --sandbox`.
+**When to use:** To prepare a dependency, or diagnose an app that `winapp run --on sandbox` cannot resolve on its own. Not a substitute for `winapp run --on sandbox`.
 **Key options:**
 - `--cwd <path>` — working directory inside the guest
 - `--json` — machine-readable output
 **Behavior:** Everything after `--` is passed through as a structured argument array, so quoting and spacing survive exactly. Streams stdin, stdout, and stderr, and returns the guest process's exit code — infrastructure failures use a distinct code (`70`), so "winapp could not run it" stays distinguishable from "it failed". **Not a full terminal (no ConPTY)**, so interactive console apps see redirected pipes. Arguments, paths, environment, and stream contents are excluded from telemetry.
 
-### `winapp sandbox cp <source> <destination>`
+### `winapp target push sandbox <host-source> <target-destination>` / `winapp target pull sandbox <target-source> <host-destination>`
 **Purpose:** Copy files or folders between the host and the managed Windows Sandbox.
 **When to use:** To stage a setup script or input data into the guest, or bring results back out.
-**Behavior:** Exactly one endpoint must carry the `sandbox:` prefix, so the direction is never guessed. Copy-out is contained under the requested host destination, and transfers are size- and hash-verified before anything is published — an interrupted transfer never leaves a plausible-looking partial file. Symbolic links and junctions in a host source are not followed.
+**Behavior:** The verb is the direction, so it is never guessed and neither path carries a marker. Target paths are relative to the managed work area (`C:\WinApp\work`); a rooted or UNC target path is refused rather than silently re-rooted. Copy-out is contained under the requested host destination, and transfers are size- and hash-verified before anything is published — an interrupted transfer never leaves a plausible-looking partial file. Symbolic links and junctions in a host source are not followed.
 **Examples:**
 ```powershell
-winapp sandbox cp .\setup.ps1 sandbox:Setup\setup.ps1
-winapp sandbox exec --cwd C:\WinApp\work\Setup -- powershell -ExecutionPolicy Bypass -File .\setup.ps1
-winapp sandbox cp sandbox:Results .\results
+winapp target push sandbox .\setup.ps1 Setup\setup.ps1
+winapp target exec sandbox --cwd C:\WinApp\work\Setup -- powershell -ExecutionPolicy Bypass -File .\setup.ps1
+winapp target pull sandbox Results .\results
 ```
 Guest paths are relative to `C:\WinApp\work`; a drive-absolute, rooted, or UNC guest path is refused rather than re-rooted, and each copy prints the resolved destination to use as the next `--cwd`. `-ExecutionPolicy Bypass` is required because a fresh Sandbox starts at `Restricted`, so a freshly copied script is otherwise refused with `UnauthorizedAccess`.
 
@@ -353,7 +353,7 @@ Guest paths are relative to `C:\WinApp\work`; a drive-absolute, rooted, or UNC g
 - `ui list-windows -a <app> [--show-hidden]` — list windows, popups, and dialogs with HWNDs (untitled zero-size windows hidden by default)
 - `ui get-focused -a <app>` — show the element with keyboard focus
 
-**Running against the Windows Sandbox:** add `--sandbox` to any of these verbs to automate an app inside the Sandbox winapp manages instead of the user's own desktop — nothing steals the user's focus, cursor, or keyboard, and they can keep working. For string app targets, `-a sandbox:<appname>` is an equivalent shorthand; a numeric `--window` needs the explicit `--sandbox` flag, because a handle carries no scope of its own. Targets stay explicit (discover them with `winapp ui list-windows --sandbox`), artifacts from `screenshot`/`record` are copied back to the requested host path with the JSON path rewritten, and the Sandbox window must stay connected for real input and screen recording. See the **winapp-sandbox skill**.
+**Running against the Windows Sandbox:** add `--on sandbox` to any of these verbs to automate an app inside the Sandbox winapp manages instead of the user's own desktop — nothing steals the user's focus, cursor, or keyboard, and they can keep working. An app name, PID, or window handle carries no scope of its own, so `--on sandbox` is what says where to look; without it the same value names something on the user's desktop. Targets stay explicit (discover them with `winapp ui list-windows --on sandbox`), artifacts from `screenshot`/`record` are copied back to the requested host path with the JSON path rewritten, and the Sandbox window must stay connected for real input and screen recording. See the **winapp-sandbox skill**.
 
 ## Framework-specific guidance
 
@@ -452,11 +452,11 @@ winapp package ./dist --cert $CERT_PATH --cert-password $CERT_PWD --quiet
 
 ### Run and UI-automate without taking over the user's desktop
 ```powershell
-winapp run . --sandbox --detach            # Build on host, run in the managed Sandbox
-winapp ui list-windows --sandbox           # Discover targets (they are never inferred)
-winapp ui invoke --sandbox SubmitButton -a MyApp
-winapp ui screenshot --sandbox -a MyApp -o .\result.png
-winapp unregister --sandbox                # Remove just this app; the Sandbox keeps running
+winapp run . --on sandbox --detach            # Build on host, run in the managed Sandbox
+winapp ui list-windows --on sandbox           # Discover targets (they are never inferred)
+winapp ui invoke --on sandbox SubmitButton -a MyApp
+winapp ui screenshot --on sandbox -a MyApp -o .\result.png
+winapp unregister --on sandbox                # Remove just this app; the Sandbox keeps running
 ```
 The Sandbox persists between commands and rebuilds, so later runs transfer only what changed. If one is already running, winapp uses it rather than asking the user to close it. winapp never stops a Sandbox — that stays with `wsb stop --id <id>`.
 
@@ -481,8 +481,8 @@ When the user encounters an error, check these common causes:
 | `sandbox_setup_failed` | Windows refused to enable the feature or start the client | Check edition, firmware virtualization, and whether policy allows optional features |
 | `sandbox_unmanaged_instance` | A running Sandbox could not be prepared, or more than one is running | Wait for it to finish starting and retry, or close the ones that are not needed. **Never stop one for the user** — it may hold work that matters |
 | `sandbox_input_not_ready` / `sandbox_no_interactive_session` | The Sandbox window is disconnected or minimized | Reconnect with `wsb connect --id <id>`; inspection still works, input and recording do not |
-| `sandbox_runtime_provision_failed` | A runtime the app needs is missing in the guest | The error names it. Publish self-contained, or install it via `winapp sandbox exec` |
-| Detached **unpackaged** Sandbox app vanished, no error reported | It was started by the guest agent and ended with it, usually because winapp repaired the agent automatically | Rerun `winapp run . --sandbox --detach`; run in the foreground when the app must outlive a long sequence |
+| `sandbox_runtime_provision_failed` | A runtime the app needs is missing in the guest | The error names it. Publish self-contained, or install it via `winapp target exec sandbox` |
+| Detached **unpackaged** Sandbox app vanished, no error reported | It was started by the guest agent and ended with it, usually because winapp repaired the agent automatically | Rerun `winapp run . --on sandbox --detach`; run in the foreground when the app must outlive a long sequence |
 | Copied-in script fails with `UnauthorizedAccess` | A fresh Sandbox starts with the PowerShell execution policy at `Restricted` | Invoke it as `powershell -ExecutionPolicy Bypass -File .\script.ps1` |
 
 ## Key files and concepts

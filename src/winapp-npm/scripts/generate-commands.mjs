@@ -110,8 +110,25 @@ const DEPRECATED_ARG_ALIASES = {
  * Map shape: `{ '<cmd path>': { '<cli option>': '<property name>' } }`.
  */
 const OPTION_PROP_RENAMES = {
-  'sandbox exec': { '--cwd': 'guestCwd' },
+  'target exec': { '--cwd': 'targetCwd' },
 };
+
+/**
+ * Command trees that honour `--on`.
+ *
+ * `--on` is registered recursively on the winapp root so that *every* command parses the token
+ * consistently — that is a parser-safety property, not an API one: a command that did not declare
+ * it would let System.CommandLine bind `--on sandbox` to a nearby positional argument and then run
+ * on this machine while reporting success. Commands outside this list parse `--on` only to reject
+ * it, so emitting an `on` property on their wrappers would advertise an option that always fails.
+ *
+ * Kept in step with `ITargetAwareCommand` in the CLI by
+ * `ExecutionTargetSelectionTests.TargetAwareCommands_MatchTheGeneratorList`.
+ */
+const TARGET_AWARE_COMMANDS = ['run', 'ui', 'unregister'];
+
+/** The recursive selector option, which only target-aware commands should expose. */
+const TARGET_SELECTOR_OPTION = '--on';
 
 /**
  * Nullable enum types — strip `System.Nullable<...>` wrapper.
@@ -190,7 +207,7 @@ const PASSTHROUGH_COMMANDS = {
   // The executable and its arguments must follow '--', or winapp would parse the command's own
   // flags as its own. Emitting them as a plain positional produced a wrapper that could not run
   // any command taking a flag.
-  'sandbox exec': { propName: 'command', description: "Executable and arguments to run inside the Sandbox, e.g. ['dotnet', '--info'] (forwarded after --).", separator: ' -- ' },
+  'target exec': { propName: 'command', description: "Executable and arguments to run on the target, e.g. ['dotnet', '--info'] (forwarded after --).", separator: ' -- ' },
 };
 
 // ---------------------------------------------------------------------------
@@ -216,21 +233,55 @@ function collectRecursiveOptions(cmd, inherited) {
   return { ...inherited, ...recursive };
 }
 
-function flattenCommands(node, parentPath = [], inherited = {}) {
+function flattenCommands(node, parentPath = [], inherited = null) {
   const results = [];
   const subs = node.subcommands || {};
+
+  // `--on` is declared once, on the root, so that every command parses it and a misspelling can
+  // never be absorbed by a positional argument. Groups have their recursive options collected on
+  // the way down; the root does not, so the selector is seeded here.
+  //
+  // Only the selector. The root's other recursive options (`--cli-schema`, `--caller`) describe
+  // winapp itself rather than the command, and putting them on every wrapper would offer callers a
+  // property that prints a schema instead of doing what they asked.
+  const inheritedOptions = inherited ?? rootSelectorOption(node);
 
   for (const [name, cmd] of Object.entries(subs)) {
     if (cmd.hidden) continue;
     const cmdPath = [...parentPath, name];
 
     if (cmd.subcommands && Object.keys(cmd.subcommands).length > 0) {
-      results.push(...flattenCommands(cmd, cmdPath, collectRecursiveOptions(cmd, inherited)));
+      results.push(...flattenCommands(cmd, cmdPath, collectRecursiveOptions(cmd, inheritedOptions)));
     } else {
-      results.push({ path: cmdPath, cmd: inheritRecursiveOptions(cmd, inherited) });
+      results.push({
+        path: cmdPath,
+        cmd: inheritRecursiveOptions(cmd, dropUnsupportedSelector(cmdPath, inheritedOptions)),
+      });
     }
   }
   return results;
+}
+
+function rootSelectorOption(root) {
+  const selector = (root.options || {})[TARGET_SELECTOR_OPTION];
+  return selector ? { [TARGET_SELECTOR_OPTION]: selector } : {};
+}
+
+/**
+ * Removes `--on` from what a leaf inherits unless that leaf can actually honour it.
+ *
+ * See `TARGET_AWARE_COMMANDS`: the CLI parses the option everywhere so a misspelling cannot be
+ * absorbed by a positional argument, but only these trees do anything with it. A wrapper that
+ * offered `on` on, say, `certInfo` would be offering a property whose only possible outcome is a
+ * non-zero exit.
+ */
+function dropUnsupportedSelector(cmdPath, inherited) {
+  if (TARGET_AWARE_COMMANDS.includes(cmdPath[0]) || !(TARGET_SELECTOR_OPTION in inherited)) {
+    return inherited;
+  }
+
+  const { [TARGET_SELECTOR_OPTION]: _dropped, ...rest } = inherited;
+  return rest;
 }
 
 // ---------------------------------------------------------------------------

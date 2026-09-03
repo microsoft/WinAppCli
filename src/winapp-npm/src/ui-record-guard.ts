@@ -44,7 +44,7 @@ export const UI_RECORD_ARG_SPECS: readonly UiRecordArgSpec[] = [
   { property: 'json', flag: '--json', kind: 'boolean' },
   { property: 'maxEdge', flag: '--max-edge', kind: 'value' },
   { property: 'output', flag: '--output', kind: 'value' },
-  { property: 'sandbox', flag: '--sandbox', kind: 'boolean' },
+  { property: 'on', flag: '--on', kind: 'value' },
   { property: 'window', flag: '--window', kind: 'value' },
   { property: 'quiet', flag: '--quiet', kind: 'boolean' },
   { property: 'verbose', flag: '--verbose', kind: 'boolean' },

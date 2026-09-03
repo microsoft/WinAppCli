@@ -620,7 +620,7 @@ public class HostSourceWalkerTests
     /// The defect: the destination kind was re-derived by asking <c>File.Exists</c> about the
     /// source root, which for a named file is its <em>parent directory</em> — always false. The
     /// copy then treated the file as a folder member and appended its name, so
-    /// <c>cp .\setup.ps1 sandbox:Setup\setup.ps1</c> produced
+    /// <c>push sandbox .\setup.ps1 Setup\setup.ps1</c> produced
     /// <c>Setup\setup.ps1\setup.ps1</c>: the command exited 0, and the file was not where the
     /// caller asked for it, so the next command failed.
     /// </remarks>

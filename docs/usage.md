@@ -677,7 +677,7 @@ winapp run [<input>] [options]
 - `--detach` - Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with `--json`). Cannot be combined with `--no-launch`, `--debug-output`, `--with-alias`, or `--unregister-on-exit`.
 - `--clean` - Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments.
 - `--json` - Format output as JSON for programmatic consumption (e.g. CI/automation). Useful with `--detach` to capture the PID. Cannot be combined with `--with-alias` or `--debug-output`.
-- `--sandbox` - Deploy and run the app inside the Windows Sandbox winapp manages, instead of on this machine. The app is still built on the host; registration, launch, and debugging happen in the Sandbox, which stays running afterwards so a rerun transfers only what changed. Nothing is registered and no runtime is installed on your machine. Every option above keeps its meaning, because the guest runs the same `winapp run`. There is no fallback to local execution. One limit applies to `--detach`: an unpackaged app launched this way runs only for the lifetime of the current guest agent, so it stops if the Sandbox closes or if winapp automatically repairs the agent — rerun the command to bring it back. See [Detached apps and the agent's lifetime](sandbox-execution.md#detached-apps-and-the-agents-lifetime) and [Windows Sandbox execution](sandbox-execution.md).
+- `--on <target>` - Run the app on the named execution target instead of on this machine. Omit it and the app runs here, as it always has. The only target today is `sandbox`, the Windows Sandbox winapp manages: the app is still built on the host, while registration, launch, and debugging happen in the Sandbox, which stays running afterwards so a rerun transfers only what changed. Nothing is registered and no runtime is installed on your machine. Every option above keeps its meaning, because the target runs the same `winapp run`. There is no fallback to local execution: if the target cannot be prepared, the command fails. One limit applies to `--detach`: an unpackaged app launched this way runs only for the lifetime of the current guest agent, so it stops if the Sandbox closes or if winapp automatically repairs the agent — rerun the command to bring it back. See [Detached apps and the agent's lifetime](sandbox-execution.md#detached-apps-and-the-agents-lifetime) and [Windows Sandbox execution](sandbox-execution.md).
 
 **Application data persistence:**
 
@@ -876,7 +876,7 @@ winapp unregister [options]
 
 - `--manifest <path>` - Path to Package.appxmanifest (default: auto-detect from current directory)
 - `--force` - Skip the install-location directory check and unregister even if the package was registered from a different project tree
-- `--sandbox` - Unregister the package inside the Windows Sandbox winapp manages instead of on this machine. Only the exact package the matching deployment registered is removed: winapp's own record must show it registered this identity in the current Sandbox generation, and the guest must independently confirm the registration is a development package rooted in that deployment's managed folder. A package installed in the Sandbox by anything other than winapp is never touched. See [Windows Sandbox execution](sandbox-execution.md).
+- `--on <target>` - Unregister the package on the named execution target instead of on this machine. Only the exact package the matching deployment registered is removed: winapp's own record must show it registered this identity in the current target generation, and the target must independently confirm the registration is a development package rooted in that deployment's managed folder. A package installed on the target by anything other than winapp is never touched. See [Windows Sandbox execution](sandbox-execution.md).
 - `--json` - Format output as JSON
 
 **What it does:**
@@ -1206,76 +1206,78 @@ winapp get-winapp-path [options]
 
 ---
 
-### sandbox
+### target
 
-Run commands and copy files inside the Windows Sandbox winapp manages. These are escape hatches: reach for them when you need to prepare a dependency, inspect state, or diagnose something `winapp run --sandbox` cannot resolve on its own.
+Run commands and copy files on an execution target. These are escape hatches: reach for them when you need to prepare a dependency, inspect state, or diagnose something `winapp run --on <target>` cannot resolve on its own.
 
-Both commands start, reuse, or take over the one Sandbox Windows allows, installing the Sandbox prerequisites first if the machine needs them. Neither ever stops a Sandbox — ending one stays with the Windows Sandbox CLI (`wsb`). See [Windows Sandbox execution](sandbox-execution.md) for the full model.
+Every verb takes the target as its first argument. `sandbox` is the only target these verbs accept today; see [Windows Sandbox execution](sandbox-execution.md) for what it is and how it is prepared.
+
+All three start, reuse, or take over the one Sandbox Windows allows, installing the Sandbox prerequisites first if the machine needs them. None ever stops a Sandbox — ending one stays with the Windows Sandbox CLI (`wsb`).
 
 > [!NOTE]
-> `winapp run --sandbox`, `winapp unregister --sandbox`, and these commands are in development and
-> are not available in a released build yet.
+> `--on`, `winapp target`, and Windows Sandbox execution are in development and are not available
+> in a released build yet.
 
-#### sandbox exec
+#### target exec
 
-Run a command inside the Sandbox, as the interactive Sandbox user.
+Run a command on the target, as its interactive user.
 
 ```bash
-winapp sandbox exec [--cwd <path>] [--json] -- <executable> [arguments...]
+winapp target exec <target> [--cwd <path>] [--json] -- <executable> [arguments...]
 ```
 
 Everything after `--` is passed through as a structured argument array, so quoting, spacing, and non-ASCII text survive exactly, and nothing can be reinterpreted as an extra argument.
 
 ```bash
-winapp sandbox exec -- dotnet --info
-winapp sandbox exec --cwd C:\WinApp\work -- powershell -ExecutionPolicy Bypass -File .\test.ps1
+winapp target exec sandbox -- dotnet --info
+winapp target exec sandbox --cwd C:\WinApp\work -- powershell -ExecutionPolicy Bypass -File .\test.ps1
 ```
 
 **Behavior:**
 
 - Streams stdin, stdout, and stderr.
-- Returns the guest process's exit code. Infrastructure failures use a distinct exit code (`70`), so "winapp could not run your command" is always distinguishable from "your command failed".
-- Forwards your Cooperative UI Turns owner context, so a script run this way can invoke guest `winapp ui` commands without losing its workflow ownership.
+- Returns the target process's exit code. Infrastructure failures use a distinct exit code (`70`), so "winapp could not run your command" is always distinguishable from "your command failed".
+- `--json` changes only how a winapp failure is reported: as a structured envelope on stderr. The command's own stdout is always relayed byte-for-byte, because it is the command's output and not winapp's.
+- Forwards your Cooperative UI Turns owner context, so a script run this way can invoke the target's `winapp ui` commands without losing its workflow ownership.
 - Does **not** provide a full terminal or ConPTY. Interactive console applications may observe redirected pipes.
 - Arguments, paths, environment, and stream contents are excluded from telemetry entirely.
 
-#### sandbox cp
+#### target push and target pull
 
-Copy files or directories between the host and the Sandbox.
+Copy files or directories between this machine and the target. The verb is the direction, so neither path carries a marker and neither side can be mistaken for the other.
 
 ```bash
-winapp sandbox cp <source> <destination> [--json]
+winapp target push <target> <host-source> <target-destination> [--json]
+winapp target pull <target> <target-source> <host-destination> [--json]
 ```
 
-Exactly one endpoint must be prefixed with `sandbox:`. Requiring exactly one — rather than inferring the direction from which path happens to exist — means the command can never guess wrong about which side is being overwritten.
-
-**Guest paths are relative to `C:\WinApp\work`**, the folder winapp manages inside the Sandbox. That is what makes containment provable: a path you pass can only ever resolve inside a root the guest owns. A drive-absolute, rooted, or UNC guest path is refused with a message naming the work root, rather than silently re-rooted — silently accepting `sandbox:C:\Setup\setup.ps1` would place the file somewhere you never named while reporting success.
+**Target paths are relative to `C:\WinApp\work`**, the folder winapp manages inside the Sandbox. That is what makes containment provable: a path you pass can only ever resolve inside a root the target owns. A drive-absolute, rooted, or UNC target path is refused with a message naming the work root, rather than silently re-rooted — silently accepting `C:\Setup\setup.ps1` as a target path would place the file somewhere you never named while reporting success.
 
 ```bash
-winapp sandbox cp .\setup.ps1 sandbox:Setup\setup.ps1
-winapp sandbox cp .\build sandbox:build
-winapp sandbox cp sandbox:Results .\results
+winapp target push sandbox .\setup.ps1 Setup\setup.ps1
+winapp target push sandbox .\build build
+winapp target pull sandbox Results .\results
 ```
 
-Each copy into the Sandbox reports where the file actually landed, which is the path to use next:
+Each push reports where the file actually landed, which is the path to use next:
 
 ```bash
-winapp sandbox cp .\setup.ps1 sandbox:Setup\setup.ps1
-# Copied 1 file(s), skipped 0 unchanged, to C:\WinApp\work\Setup\setup.ps1 in the Sandbox.
+winapp target push sandbox .\setup.ps1 Setup\setup.ps1
+# Copied 1 file(s), skipped 0 unchanged, to C:\WinApp\work\Setup\setup.ps1 on sandbox.
 
-winapp sandbox exec --cwd C:\WinApp\work\Setup -- powershell -ExecutionPolicy Bypass -File .\setup.ps1
+winapp target exec sandbox --cwd C:\WinApp\work\Setup -- powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```
 
 `-ExecutionPolicy Bypass` is part of the sequence, not an optional extra: a fresh Sandbox starts with the execution policy at `Restricted`, so a script you just copied in is refused with `UnauthorizedAccess` until you pass it.
 
 **Behavior:**
 
-- A single file lands at exactly the destination you name — `sandbox:Setup\setup.ps1` is that file, not a folder to put it in.
+- A single file lands at exactly the destination you name — `Setup\setup.ps1` is that file, not a folder to put it in.
 - A directory preserves its structure beneath the destination.
 - Copies files and directories, preserving structure and useful timestamps.
 - Skips files whose content already matches, compared by hash rather than timestamp.
 - Replaces changed files atomically, after verifying size and hash. An interrupted copy never publishes a partial file over one that was correct.
-- Does not expose arbitrary mapped host folders to guest applications.
+- Does not expose arbitrary mapped host folders to target applications.
 
 ---
 
@@ -1553,7 +1555,7 @@ winapp ui [command] [options]
 **Options:**
 - `-a, --app <app>` - Target app (name, title, or PID)
 - `-w, --window <hwnd>` - Target window by HWND (stable)
-- `--sandbox` - Run the command inside the Windows Sandbox winapp manages instead of on this desktop. Accepted by every `ui` verb. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection, so nothing steals your focus or types into your windows. A `-o/--output` file is copied back to the path you asked for and verified before it is published, and the result reports your path rather than the guest's. An `--app` value may also opt in with a `sandbox:` prefix (`-a sandbox:MyApp`); a numeric `--window` carries no scope of its own and requires `--sandbox`. See [Windows Sandbox execution](sandbox-execution.md).
+- `--on <target>` - Run the command on the named execution target instead of on this desktop. Accepted by every `ui` verb; omit it and the command runs here. The whole command is forwarded to the target's own winapp: the host performs no UI Automation, window discovery, capture, or input injection, so nothing steals your focus or types into your windows. A `-o/--output` file is copied back to the path you asked for and verified before it is published, and the result reports your path rather than the target's. An `--app` name, PID, or `--window` handle is always interpreted on the selected target, so a PID from a `--on sandbox` run needs `--on sandbox` again to be found. See [Windows Sandbox execution](sandbox-execution.md).
 
 #### ui record
 

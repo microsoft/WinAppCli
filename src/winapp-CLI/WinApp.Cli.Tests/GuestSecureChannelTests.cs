@@ -16,7 +16,7 @@ namespace WinApp.Cli.Tests;
 [TestClass]
 public class GuestSecureChannelTests
 {
-    private const string TargetId = "windows-sandbox:default";
+    private const string TargetId = "sandbox-default-6b0d287c0c51bc40";
     private const string Epoch = "instance-1:nonce-1";
 
     private static byte[] NewPreSharedKey() => RandomNumberGenerator.GetBytes(GuestProtocol.PreSharedKeySize);
@@ -180,7 +180,7 @@ public class GuestSecureChannelTests
         var psk = NewPreSharedKey();
 
         var failure = await EstablishExpectingFailureAsync(
-            psk, psk, hostTargetId: "windows-sandbox:default", guestTargetId: "hyperv:other");
+            psk, psk, hostTargetId: "sandbox-default-6b0d287c0c51bc40", guestTargetId: "hyperv:other");
 
         Assert.AreEqual(ExecutionTargetErrorCodes.TransportFailed, failure.Error.Code);
     }

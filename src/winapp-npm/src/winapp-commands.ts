@@ -599,6 +599,8 @@ export interface RunOptions extends CommonOptions {
   input?: string;
   /** @deprecated Use `input` instead. Retained for backward compatibility. */
   inputFolder?: string;
+  /** Run this command on the named execution target instead of this machine. Supported: 'sandbox' (the Windows Sandbox winapp manages) and 'local' (the default). There is no fallback: if the target cannot be prepared, the command fails rather than running here. */
+  on?: string;
   /** Project mode: target architecture (x64, arm64, or x86). Ignored in folder mode. Default: the current process architecture. */
   arch?: string;
   /** Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value). */
@@ -633,8 +635,6 @@ export interface RunOptions extends CommonOptions {
   property?: string | string[];
   /** Project mode: target .NET runtime identifier (RID), e.g. win-x64. Project mode uses only the RID's architecture, always builds the canonical win-<arch>, and rejects non-Windows RIDs (e.g. linux-x64); it overrides --arch. Ignored in folder mode. */
   runtime?: string;
-  /** Deploy and run the app inside the Windows Sandbox winapp manages, instead of on this machine. The app is still built on the host; registration, launch, and debugging happen in the Sandbox, which stays running afterwards for the next run. There is no fallback to local execution. */
-  sandbox?: boolean;
   /** Download symbols from Microsoft Symbol Server for richer native crash analysis, including the WinUI stowed-exception dispatch stack. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. */
   symbols?: boolean;
   /** Unregister the development package after the application exits. Only removes packages registered in development mode. */
@@ -652,6 +652,7 @@ export async function run(options: RunOptions = {}): Promise<WinappResult> {
   const args: string[] = ['run'];
   const inputValue = options.input ?? options.inputFolder;
   if (inputValue) args.push(inputValue);
+  if (options.on) args.push('--on', options.on);
   if (options.arch) args.push('--arch', options.arch);
   if (options.args) args.push('--args', options.args);
   if (options.clean) args.push('--clean');
@@ -672,7 +673,6 @@ export async function run(options: RunOptions = {}): Promise<WinappResult> {
     for (const v of propertyArr) args.push('--property', v);
   }
   if (options.runtime) args.push('--runtime', options.runtime);
-  if (options.sandbox) args.push('--sandbox');
   if (options.symbols) args.push('--symbols');
   if (options.unregisterOnExit) args.push('--unregister-on-exit');
   if (options.withAlias) args.push('--with-alias');
@@ -680,59 +680,6 @@ export async function run(options: RunOptions = {}): Promise<WinappResult> {
     const appArgsArr = Array.isArray(options.appArgs) ? options.appArgs : [options.appArgs];
     if (appArgsArr.length > 0) {
       args.push('--', ...appArgsArr);
-    }
-  }
-  return execCommand(args, options);
-}
-
-// ---------------------------------------------------------------------------
-// sandbox cp
-// ---------------------------------------------------------------------------
-
-export interface SandboxCpOptions extends CommonOptions {
-  /** Source path. Prefix with 'sandbox:' to copy out of the Sandbox. */
-  source: string;
-  /** Destination path. Prefix with 'sandbox:' to copy into the Sandbox. */
-  destination: string;
-  /** Format output as JSON */
-  json?: boolean;
-}
-
-/**
- * Copy files or directories between the host and the Windows Sandbox winapp manages. Exactly one path must be prefixed with 'sandbox:'. Directory structure and useful timestamps are preserved, unchanged files are skipped, and changed files are replaced atomically.
- */
-export async function sandboxCp(options: SandboxCpOptions): Promise<WinappResult> {
-  const args: string[] = ['sandbox', 'cp'];
-  args.push(options.source);
-  args.push(options.destination);
-  if (options.json) args.push('--json');
-  return execCommand(args, options);
-}
-
-// ---------------------------------------------------------------------------
-// sandbox exec
-// ---------------------------------------------------------------------------
-
-export interface SandboxExecOptions extends CommonOptions {
-  /** Working directory inside the Sandbox. */
-  guestCwd?: string;
-  /** Format output as JSON */
-  json?: boolean;
-  /** Executable and arguments to run inside the Sandbox, e.g. ['dotnet', '--info'] (forwarded after --). */
-  command?: string | string[];
-}
-
-/**
- * Run a command inside the Windows Sandbox winapp manages, as the interactive Sandbox user. Streams stdin, stdout, and stderr, and returns the guest process's exit code. Does not provide a full terminal, so interactive console applications may see redirected pipes.
- */
-export async function sandboxExec(options: SandboxExecOptions = {}): Promise<WinappResult> {
-  const args: string[] = ['sandbox', 'exec'];
-  if (options.guestCwd) args.push('--cwd', options.guestCwd);
-  if (options.json) args.push('--json');
-  if (options.command !== undefined) {
-    const commandArr = Array.isArray(options.command) ? options.command : [options.command];
-    if (commandArr.length > 0) {
-      args.push('--', ...commandArr);
     }
   }
   return execCommand(args, options);
@@ -787,6 +734,92 @@ export async function store(options: StoreOptions = {}): Promise<WinappResult> {
 }
 
 // ---------------------------------------------------------------------------
+// target exec
+// ---------------------------------------------------------------------------
+
+export interface TargetExecOptions extends CommonOptions {
+  /** Execution target to act on. Currently: 'sandbox'. */
+  target: string;
+  /** Working directory on the target. */
+  targetCwd?: string;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Executable and arguments to run on the target, e.g. ['dotnet', '--info'] (forwarded after --). */
+  command?: string | string[];
+}
+
+/**
+ * Run a command on an execution target, as that target's interactive user. Streams stdin, stdout, and stderr, and returns the command's own exit code. Does not provide a full terminal, so interactive console applications may see redirected pipes.
+ */
+export async function targetExec(options: TargetExecOptions): Promise<WinappResult> {
+  const args: string[] = ['target', 'exec'];
+  args.push(options.target);
+  if (options.targetCwd) args.push('--cwd', options.targetCwd);
+  if (options.json) args.push('--json');
+  if (options.command !== undefined) {
+    const commandArr = Array.isArray(options.command) ? options.command : [options.command];
+    if (commandArr.length > 0) {
+      args.push('--', ...commandArr);
+    }
+  }
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// target pull
+// ---------------------------------------------------------------------------
+
+export interface TargetPullOptions extends CommonOptions {
+  /** Execution target to act on. Currently: 'sandbox'. */
+  target: string;
+  /** File or directory on the target to copy, relative to its managed work area. */
+  source: string;
+  /** Destination path on this machine. */
+  destination: string;
+  /** Format output as JSON */
+  json?: boolean;
+}
+
+/**
+ * Copy files or directories from an execution target to this machine. Directory structure and useful timestamps are preserved, unchanged files are skipped, and changed files are replaced atomically.
+ */
+export async function targetPull(options: TargetPullOptions): Promise<WinappResult> {
+  const args: string[] = ['target', 'pull'];
+  args.push(options.target);
+  args.push(options.source);
+  args.push(options.destination);
+  if (options.json) args.push('--json');
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// target push
+// ---------------------------------------------------------------------------
+
+export interface TargetPushOptions extends CommonOptions {
+  /** Execution target to act on. Currently: 'sandbox'. */
+  target: string;
+  /** File or directory on this machine to copy. */
+  source: string;
+  /** Destination path on the target, relative to its managed work area. */
+  destination: string;
+  /** Format output as JSON */
+  json?: boolean;
+}
+
+/**
+ * Copy files or directories from this machine to an execution target. Directory structure and useful timestamps are preserved, unchanged files are skipped, and changed files are replaced atomically.
+ */
+export async function targetPush(options: TargetPushOptions): Promise<WinappResult> {
+  const args: string[] = ['target', 'push'];
+  args.push(options.target);
+  args.push(options.source);
+  args.push(options.destination);
+  if (options.json) args.push('--json');
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
 // tool
 // ---------------------------------------------------------------------------
 
@@ -816,8 +849,8 @@ export async function tool(options: ToolOptions = {}): Promise<WinappResult> {
 export interface UiClickOptions extends CommonOptions {
   /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
   selector?: string;
-  /** Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. */
-  sandbox?: boolean;
+  /** Run this command on the named execution target instead of this machine. Supported: 'sandbox' (the Windows Sandbox winapp manages) and 'local' (the default). There is no fallback: if the target cannot be prepared, the command fails rather than running here. */
+  on?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
   /** Perform a double-click instead of a single click */
@@ -836,7 +869,7 @@ export interface UiClickOptions extends CommonOptions {
 export async function uiClick(options: UiClickOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'click'];
   if (options.selector) args.push(options.selector);
-  if (options.sandbox) args.push('--sandbox');
+  if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.double) args.push('--double');
   if (options.json) args.push('--json');
@@ -854,8 +887,8 @@ export interface UiDragOptions extends CommonOptions {
   from?: string;
   /** End point — an element selector (drops at its center) or screen coordinates x,y as reported by 'ui inspect' (e.g. pn-target-d746 or 300,400). */
   to?: string;
-  /** Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. */
-  sandbox?: boolean;
+  /** Run this command on the named execution target instead of this machine. Supported: 'sandbox' (the Windows Sandbox winapp manages) and 'local' (the default). There is no fallback: if the target cannot be prepared, the command fails rather than running here. */
+  on?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
   /** Milliseconds to dwell at the destination after moving, before releasing (default: 0). Lets drop targets / merge overlays that arm from a sustained hover latch before release. */
@@ -877,7 +910,7 @@ export async function uiDrag(options: UiDragOptions = {}): Promise<WinappResult>
   const args: string[] = ['ui', 'drag'];
   if (options.from) args.push(options.from);
   if (options.to) args.push(options.to);
-  if (options.sandbox) args.push('--sandbox');
+  if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.dwellMs !== undefined) args.push('--dwell-ms', options.dwellMs.toString());
   if (options.holdMs !== undefined) args.push('--hold-ms', options.holdMs.toString());
@@ -894,8 +927,8 @@ export async function uiDrag(options: UiDragOptions = {}): Promise<WinappResult>
 export interface UiFocusOptions extends CommonOptions {
   /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
   selector?: string;
-  /** Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. */
-  sandbox?: boolean;
+  /** Run this command on the named execution target instead of this machine. Supported: 'sandbox' (the Windows Sandbox winapp manages) and 'local' (the default). There is no fallback: if the target cannot be prepared, the command fails rather than running here. */
+  on?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
   /** Format output as JSON */
@@ -910,7 +943,7 @@ export interface UiFocusOptions extends CommonOptions {
 export async function uiFocus(options: UiFocusOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'focus'];
   if (options.selector) args.push(options.selector);
-  if (options.sandbox) args.push('--sandbox');
+  if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
   if (options.window !== undefined) args.push('--window', options.window.toString());
@@ -922,8 +955,8 @@ export async function uiFocus(options: UiFocusOptions = {}): Promise<WinappResul
 // ---------------------------------------------------------------------------
 
 export interface UiGetFocusedOptions extends CommonOptions {
-  /** Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. */
-  sandbox?: boolean;
+  /** Run this command on the named execution target instead of this machine. Supported: 'sandbox' (the Windows Sandbox winapp manages) and 'local' (the default). There is no fallback: if the target cannot be prepared, the command fails rather than running here. */
+  on?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
   /** Format output as JSON */
@@ -937,7 +970,7 @@ export interface UiGetFocusedOptions extends CommonOptions {
  */
 export async function uiGetFocused(options: UiGetFocusedOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'get-focused'];
-  if (options.sandbox) args.push('--sandbox');
+  if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
   if (options.window !== undefined) args.push('--window', options.window.toString());
@@ -951,8 +984,8 @@ export async function uiGetFocused(options: UiGetFocusedOptions = {}): Promise<W
 export interface UiGetPropertyOptions extends CommonOptions {
   /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
   selector?: string;
-  /** Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. */
-  sandbox?: boolean;
+  /** Run this command on the named execution target instead of this machine. Supported: 'sandbox' (the Windows Sandbox winapp manages) and 'local' (the default). There is no fallback: if the target cannot be prepared, the command fails rather than running here. */
+  on?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
   /** Format output as JSON */
@@ -969,7 +1002,7 @@ export interface UiGetPropertyOptions extends CommonOptions {
 export async function uiGetProperty(options: UiGetPropertyOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'get-property'];
   if (options.selector) args.push(options.selector);
-  if (options.sandbox) args.push('--sandbox');
+  if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
   if (options.property) args.push('--property', options.property);
@@ -984,8 +1017,8 @@ export async function uiGetProperty(options: UiGetPropertyOptions = {}): Promise
 export interface UiGetValueOptions extends CommonOptions {
   /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
   selector?: string;
-  /** Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. */
-  sandbox?: boolean;
+  /** Run this command on the named execution target instead of this machine. Supported: 'sandbox' (the Windows Sandbox winapp manages) and 'local' (the default). There is no fallback: if the target cannot be prepared, the command fails rather than running here. */
+  on?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
   /** Format output as JSON */
@@ -1000,7 +1033,7 @@ export interface UiGetValueOptions extends CommonOptions {
 export async function uiGetValue(options: UiGetValueOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'get-value'];
   if (options.selector) args.push(options.selector);
-  if (options.sandbox) args.push('--sandbox');
+  if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
   if (options.window !== undefined) args.push('--window', options.window.toString());
@@ -1014,8 +1047,8 @@ export async function uiGetValue(options: UiGetValueOptions = {}): Promise<Winap
 export interface UiHoverOptions extends CommonOptions {
   /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
   selector?: string;
-  /** Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. */
-  sandbox?: boolean;
+  /** Run this command on the named execution target instead of this machine. Supported: 'sandbox' (the Windows Sandbox winapp manages) and 'local' (the default). There is no fallback: if the target cannot be prepared, the command fails rather than running here. */
+  on?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
   /** Time in milliseconds to wait after hovering for hover effects to appear (default: 800) */
@@ -1032,7 +1065,7 @@ export interface UiHoverOptions extends CommonOptions {
 export async function uiHover(options: UiHoverOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'hover'];
   if (options.selector) args.push(options.selector);
-  if (options.sandbox) args.push('--sandbox');
+  if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.dwellTime !== undefined) args.push('--dwell-time', options.dwellTime.toString());
   if (options.json) args.push('--json');
@@ -1047,8 +1080,8 @@ export async function uiHover(options: UiHoverOptions = {}): Promise<WinappResul
 export interface UiInspectOptions extends CommonOptions {
   /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
   selector?: string;
-  /** Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. */
-  sandbox?: boolean;
+  /** Run this command on the named execution target instead of this machine. Supported: 'sandbox' (the Windows Sandbox winapp manages) and 'local' (the default). There is no fallback: if the target cannot be prepared, the command fails rather than running here. */
+  on?: string;
   /** Walk up the tree from the specified element to the root */
   ancestors?: boolean;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
@@ -1073,7 +1106,7 @@ export interface UiInspectOptions extends CommonOptions {
 export async function uiInspect(options: UiInspectOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'inspect'];
   if (options.selector) args.push(options.selector);
-  if (options.sandbox) args.push('--sandbox');
+  if (options.on) args.push('--on', options.on);
   if (options.ancestors) args.push('--ancestors');
   if (options.app) args.push('--app', options.app);
   if (options.depth !== undefined) args.push('--depth', options.depth.toString());
@@ -1092,8 +1125,8 @@ export async function uiInspect(options: UiInspectOptions = {}): Promise<WinappR
 export interface UiInvokeOptions extends CommonOptions {
   /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
   selector?: string;
-  /** Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. */
-  sandbox?: boolean;
+  /** Run this command on the named execution target instead of this machine. Supported: 'sandbox' (the Windows Sandbox winapp manages) and 'local' (the default). There is no fallback: if the target cannot be prepared, the command fails rather than running here. */
+  on?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
   /** Format output as JSON */
@@ -1108,7 +1141,7 @@ export interface UiInvokeOptions extends CommonOptions {
 export async function uiInvoke(options: UiInvokeOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'invoke'];
   if (options.selector) args.push(options.selector);
-  if (options.sandbox) args.push('--sandbox');
+  if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
   if (options.window !== undefined) args.push('--window', options.window.toString());
@@ -1120,8 +1153,8 @@ export async function uiInvoke(options: UiInvokeOptions = {}): Promise<WinappRes
 // ---------------------------------------------------------------------------
 
 export interface UiListWindowsOptions extends CommonOptions {
-  /** Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. */
-  sandbox?: boolean;
+  /** Run this command on the named execution target instead of this machine. Supported: 'sandbox' (the Windows Sandbox winapp manages) and 'local' (the default). There is no fallback: if the target cannot be prepared, the command fails rather than running here. */
+  on?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
   /** Format output as JSON */
@@ -1135,7 +1168,7 @@ export interface UiListWindowsOptions extends CommonOptions {
  */
 export async function uiListWindows(options: UiListWindowsOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'list-windows'];
-  if (options.sandbox) args.push('--sandbox');
+  if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
   if (options.showHidden) args.push('--show-hidden');
@@ -1149,8 +1182,8 @@ export async function uiListWindows(options: UiListWindowsOptions = {}): Promise
 export interface UiPenOptions extends CommonOptions {
   /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
   selector?: string;
-  /** Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. */
-  sandbox?: boolean;
+  /** Run this command on the named execution target instead of this machine. Supported: 'sandbox' (the Windows Sandbox winapp manages) and 'local' (the default). There is no fallback: if the target cannot be prepared, the command fails rather than running here. */
+  on?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
   /** Pen contact point as screen coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. Ignored when --path is given. */
@@ -1179,7 +1212,7 @@ export interface UiPenOptions extends CommonOptions {
 export async function uiPen(options: UiPenOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'pen'];
   if (options.selector) args.push(options.selector);
-  if (options.sandbox) args.push('--sandbox');
+  if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.at) args.push('--at', options.at);
   if (options.durationMs !== undefined) args.push('--duration-ms', options.durationMs.toString());
@@ -1200,8 +1233,8 @@ export async function uiPen(options: UiPenOptions = {}): Promise<WinappResult> {
 export interface UiRecordOptions extends CommonOptions {
   /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
   selector?: string;
-  /** Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. */
-  sandbox?: boolean;
+  /** Run this command on the named execution target instead of this machine. Supported: 'sandbox' (the Windows Sandbox winapp manages) and 'local' (the default). There is no fallback: if the target cannot be prepared, the command fails rather than running here. */
+  on?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
   /** Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). */
@@ -1232,8 +1265,8 @@ export interface UiRecordOptions extends CommonOptions {
 export interface UiScreenshotOptions extends CommonOptions {
   /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
   selector?: string;
-  /** Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. */
-  sandbox?: boolean;
+  /** Run this command on the named execution target instead of this machine. Supported: 'sandbox' (the Windows Sandbox winapp manages) and 'local' (the default). There is no fallback: if the target cannot be prepared, the command fails rather than running here. */
+  on?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
   /** Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). */
@@ -1254,7 +1287,7 @@ export interface UiScreenshotOptions extends CommonOptions {
 export async function uiScreenshot(options: UiScreenshotOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'screenshot'];
   if (options.selector) args.push(options.selector);
-  if (options.sandbox) args.push('--sandbox');
+  if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.captureScreen) args.push('--capture-screen');
   if (options.focus) args.push('--focus');
@@ -1271,8 +1304,8 @@ export async function uiScreenshot(options: UiScreenshotOptions = {}): Promise<W
 export interface UiScrollOptions extends CommonOptions {
   /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
   selector?: string;
-  /** Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. */
-  sandbox?: boolean;
+  /** Run this command on the named execution target instead of this machine. Supported: 'sandbox' (the Windows Sandbox winapp manages) and 'local' (the default). There is no fallback: if the target cannot be prepared, the command fails rather than running here. */
+  on?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
   /** Scroll direction: up, down, left, right */
@@ -1293,7 +1326,7 @@ export interface UiScrollOptions extends CommonOptions {
 export async function uiScroll(options: UiScrollOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'scroll'];
   if (options.selector) args.push(options.selector);
-  if (options.sandbox) args.push('--sandbox');
+  if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.direction) args.push('--direction', options.direction);
   if (options.json) args.push('--json');
@@ -1310,8 +1343,8 @@ export async function uiScroll(options: UiScrollOptions = {}): Promise<WinappRes
 export interface UiScrollIntoViewOptions extends CommonOptions {
   /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
   selector?: string;
-  /** Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. */
-  sandbox?: boolean;
+  /** Run this command on the named execution target instead of this machine. Supported: 'sandbox' (the Windows Sandbox winapp manages) and 'local' (the default). There is no fallback: if the target cannot be prepared, the command fails rather than running here. */
+  on?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
   /** Format output as JSON */
@@ -1326,7 +1359,7 @@ export interface UiScrollIntoViewOptions extends CommonOptions {
 export async function uiScrollIntoView(options: UiScrollIntoViewOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'scroll-into-view'];
   if (options.selector) args.push(options.selector);
-  if (options.sandbox) args.push('--sandbox');
+  if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
   if (options.window !== undefined) args.push('--window', options.window.toString());
@@ -1340,8 +1373,8 @@ export async function uiScrollIntoView(options: UiScrollIntoViewOptions = {}): P
 export interface UiSearchOptions extends CommonOptions {
   /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
   selector?: string;
-  /** Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. */
-  sandbox?: boolean;
+  /** Run this command on the named execution target instead of this machine. Supported: 'sandbox' (the Windows Sandbox winapp manages) and 'local' (the default). There is no fallback: if the target cannot be prepared, the command fails rather than running here. */
+  on?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
   /** Format output as JSON */
@@ -1358,7 +1391,7 @@ export interface UiSearchOptions extends CommonOptions {
 export async function uiSearch(options: UiSearchOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'search'];
   if (options.selector) args.push(options.selector);
-  if (options.sandbox) args.push('--sandbox');
+  if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
   if (options.max !== undefined) args.push('--max', options.max.toString());
@@ -1373,8 +1406,8 @@ export async function uiSearch(options: UiSearchOptions = {}): Promise<WinappRes
 export interface UiSendKeysOptions extends CommonOptions {
   /** Keys to send. Whitespace-separated tokens: named keys (down, enter, tab, esc, f5), modifier combos (ctrl+shift+t, alt+f4), raw virtual keys (vk=0x42), or literal text (hello). Use text=<literal> to type a single value verbatim when it would otherwise be read as a key name or combo (text=enter types "enter"; text=ctrl+a types "ctrl+a"); backslash escapes \s \t \n \r \\ are supported (text=a\s\sb types "a b"). To type the whole argument literally without escaping each token, pass --verbatim instead. Quote multi-token strings, e.g. "ctrl+a delete". */
   keys?: string;
-  /** Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. */
-  sandbox?: boolean;
+  /** Run this command on the named execution target instead of this machine. Supported: 'sandbox' (the Windows Sandbox winapp manages) and 'local' (the default). There is no fallback: if the target cannot be prepared, the command fails rather than running here. */
+  on?: string;
   /** Allow synthesizing system-/shell-reserved combos (win+<key>, alt+f4, alt+tab, ctrl+esc, …) via --via send-input, which are refused by default because they act on the OS/shell beyond the target app. Opt in to drive global hotkeys (e.g. PowerToys' win+shift+v, win+r). No effect on --via post-message (already window-scoped; a warning is emitted if set without send-input). Note: win+l and ctrl+alt+del stay blocked even with this flag — win+l locks the workstation (LockWorkStation() via the shell hook), which is unrecoverable from automation, and ctrl+alt+del is a Secure Attention Sequence (SAS) that Windows drops from injected input regardless of this flag, so it can never take effect. */
   allowSystemKeys?: boolean;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
@@ -1397,7 +1430,7 @@ export interface UiSendKeysOptions extends CommonOptions {
 export async function uiSendKeys(options: UiSendKeysOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'send-keys'];
   if (options.keys) args.push(options.keys);
-  if (options.sandbox) args.push('--sandbox');
+  if (options.on) args.push('--on', options.on);
   if (options.allowSystemKeys) args.push('--allow-system-keys');
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
@@ -1417,8 +1450,8 @@ export interface UiSetValueOptions extends CommonOptions {
   selector?: string;
   /** Value to set (text for TextBox/ComboBox, number for Slider) */
   value?: string;
-  /** Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. */
-  sandbox?: boolean;
+  /** Run this command on the named execution target instead of this machine. Supported: 'sandbox' (the Windows Sandbox winapp manages) and 'local' (the default). There is no fallback: if the target cannot be prepared, the command fails rather than running here. */
+  on?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
   /** Format output as JSON */
@@ -1434,7 +1467,7 @@ export async function uiSetValue(options: UiSetValueOptions = {}): Promise<Winap
   const args: string[] = ['ui', 'set-value'];
   if (options.selector) args.push(options.selector);
   if (options.value) args.push(options.value);
-  if (options.sandbox) args.push('--sandbox');
+  if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
   if (options.window !== undefined) args.push('--window', options.window.toString());
@@ -1446,8 +1479,8 @@ export async function uiSetValue(options: UiSetValueOptions = {}): Promise<Winap
 // ---------------------------------------------------------------------------
 
 export interface UiStatusOptions extends CommonOptions {
-  /** Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. */
-  sandbox?: boolean;
+  /** Run this command on the named execution target instead of this machine. Supported: 'sandbox' (the Windows Sandbox winapp manages) and 'local' (the default). There is no fallback: if the target cannot be prepared, the command fails rather than running here. */
+  on?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
   /** Format output as JSON */
@@ -1461,7 +1494,7 @@ export interface UiStatusOptions extends CommonOptions {
  */
 export async function uiStatus(options: UiStatusOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'status'];
-  if (options.sandbox) args.push('--sandbox');
+  if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
   if (options.window !== undefined) args.push('--window', options.window.toString());
@@ -1475,8 +1508,8 @@ export async function uiStatus(options: UiStatusOptions = {}): Promise<WinappRes
 export interface UiTouchOptions extends CommonOptions {
   /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
   selector?: string;
-  /** Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. */
-  sandbox?: boolean;
+  /** Run this command on the named execution target instead of this machine. Supported: 'sandbox' (the Windows Sandbox winapp manages) and 'local' (the default). There is no fallback: if the target cannot be prepared, the command fails rather than running here. */
+  on?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
   /** Explicit start point as screen coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. */
@@ -1507,7 +1540,7 @@ export interface UiTouchOptions extends CommonOptions {
 export async function uiTouch(options: UiTouchOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'touch'];
   if (options.selector) args.push(options.selector);
-  if (options.sandbox) args.push('--sandbox');
+  if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.at) args.push('--at', options.at);
   if (options.direction) args.push('--direction', options.direction);
@@ -1529,8 +1562,8 @@ export async function uiTouch(options: UiTouchOptions = {}): Promise<WinappResul
 export interface UiWaitForOptions extends CommonOptions {
   /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
   selector?: string;
-  /** Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. */
-  sandbox?: boolean;
+  /** Run this command on the named execution target instead of this machine. Supported: 'sandbox' (the Windows Sandbox winapp manages) and 'local' (the default). There is no fallback: if the target cannot be prepared, the command fails rather than running here. */
+  on?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
   /** Use substring matching for --value instead of exact match */
@@ -1555,7 +1588,7 @@ export interface UiWaitForOptions extends CommonOptions {
 export async function uiWaitFor(options: UiWaitForOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'wait-for'];
   if (options.selector) args.push(options.selector);
-  if (options.sandbox) args.push('--sandbox');
+  if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.contains) args.push('--contains');
   if (options.gone) args.push('--gone');
@@ -1572,14 +1605,14 @@ export async function uiWaitFor(options: UiWaitForOptions = {}): Promise<WinappR
 // ---------------------------------------------------------------------------
 
 export interface UnregisterOptions extends CommonOptions {
+  /** Run this command on the named execution target instead of this machine. Supported: 'sandbox' (the Windows Sandbox winapp manages) and 'local' (the default). There is no fallback: if the target cannot be prepared, the command fails rather than running here. */
+  on?: string;
   /** Skip the install-location directory check and unregister even if the package was registered from a different project tree */
   force?: boolean;
   /** Format output as JSON */
   json?: boolean;
   /** Path to the Package.appxmanifest (default: auto-detect from current directory) */
   manifest?: string;
-  /** Unregister the package inside the Windows Sandbox winapp manages, instead of on this machine. Only the exact package this manifest's app was deployed as is removed; a package installed in the Sandbox by anything other than winapp is never touched. */
-  sandbox?: boolean;
 }
 
 /**
@@ -1587,10 +1620,10 @@ export interface UnregisterOptions extends CommonOptions {
  */
 export async function unregister(options: UnregisterOptions = {}): Promise<WinappResult> {
   const args: string[] = ['unregister'];
+  if (options.on) args.push('--on', options.on);
   if (options.force) args.push('--force');
   if (options.json) args.push('--json');
   if (options.manifest) args.push('--manifest', options.manifest);
-  if (options.sandbox) args.push('--sandbox');
   return execCommand(args, options);
 }
 

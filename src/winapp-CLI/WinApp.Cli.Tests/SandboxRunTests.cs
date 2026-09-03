@@ -883,17 +883,17 @@ public class SandboxRunTests
 
         // The guest's own process ID, not the agent's child: a UI command pointed at the launcher
         // would target the wrong process.
-        Assert.AreEqual("sandbox:4212", root.GetProperty("AppTarget").GetString());
+        Assert.AreEqual("--on sandbox -a 4212", root.GetProperty("UiTargetArgs").GetString());
 
         var target = root.GetProperty("ExecutionTarget");
-        Assert.AreEqual("windows-sandbox", target.GetProperty("Kind").GetString());
-        Assert.AreEqual("windows-sandbox:default", target.GetProperty("Id").GetString());
+        Assert.AreEqual("sandbox", target.GetProperty("Kind").GetString());
+        Assert.AreEqual("default", target.GetProperty("Id").GetString());
         Assert.AreEqual("arm64", target.GetProperty("Architecture").GetString());
         Assert.AreEqual(Epoch.Value, target.GetProperty("Epoch").GetString());
     }
 
     [TestMethod]
-    public void AugmentGuestJson_WithoutAProcess_OmitsTheCopyableTarget()
+    public void AugmentGuestJson_WithoutAProcess_OmitsTheCopyableCommand()
     {
         var guestPayload = """{"AUMID":"Contoso.MyApp_abc!App"}"""u8.ToArray();
 
@@ -901,7 +901,7 @@ public class SandboxRunTests
             guestPayload, TargetInfo(), agentProcessId: 0);
 
         using var document = JsonDocument.Parse(augmented!);
-        Assert.IsFalse(document.RootElement.TryGetProperty("AppTarget", out _));
+        Assert.IsFalse(document.RootElement.TryGetProperty("UiTargetArgs", out _));
     }
 
     /// <summary>

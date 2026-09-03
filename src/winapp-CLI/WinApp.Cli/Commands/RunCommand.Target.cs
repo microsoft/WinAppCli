@@ -358,7 +358,7 @@ internal partial class RunCommand
                 var ownerEnvironment = GuestOwnerContext.WithOwner(
                     environment: null,
                     GuestOwnerContext.ResolveGuestToken(
-                        target.Reference.Id, target.Epoch.Value));
+                        target.Reference.StateKey, target.Epoch.Value));
 
                 // A per-user .NET installation is discoverable to an apphost through DOTNET_ROOT and
                 // nothing else without machine-wide registration, so the root provisioning created

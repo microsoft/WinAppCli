@@ -1,13 +1,13 @@
 <!-- mslearn: true -->
 <!-- ms.topic: concept-article -->
-<!-- description: Run, debug, and UI-automate Windows applications inside a persistent Windows Sandbox using the winapp CLI --sandbox option. -->
+<!-- description: Run, debug, and UI-automate Windows applications inside a persistent Windows Sandbox using the winapp CLI --on sandbox option. -->
 # Windows Sandbox execution
 
 Build on your machine, then run and automate the app inside a persistent Windows Sandbox.
 
 > [!NOTE]
-> This feature is in development. `winapp run --sandbox`, `winapp unregister --sandbox`,
-> `winapp ui ... --sandbox`, `winapp sandbox exec`, and `winapp sandbox cp` work. This page
+> This feature is in development. `winapp run --on sandbox`, `winapp unregister --on sandbox`,
+> `winapp ui ... --on sandbox`, `winapp target exec sandbox`, and `winapp target push sandbox` work. This page
 > documents the behaviour and its failure modes so they are reviewable alongside the code.
 
 ## Why
@@ -20,17 +20,17 @@ Sandbox execution moves the application and its automation into an isolated Wind
 while builds stay on the host and stay fast.
 
 ```powershell
-winapp run . --sandbox
-winapp ui inspect --sandbox -a MyApp
-winapp ui invoke --sandbox SubmitButton -a MyApp
+winapp run . --on sandbox
+winapp ui inspect --on sandbox -a MyApp
+winapp ui invoke --on sandbox SubmitButton -a MyApp
 ```
 
 The Sandbox stays running between commands and between rebuilds, so a rerun transfers only what
 changed.
 
-## What `--sandbox` does and does not protect
+## What `--on sandbox` does and does not protect
 
-`--sandbox` isolates the **running** application. It does **not** make an untrusted project safe
+`--on sandbox` isolates the **running** application. It does **not** make an untrusted project safe
 to open: project evaluation, package restore, and compilation all happen on the host.
 
 Everything inside the Sandbox is one trust boundary. Applications and workflows sharing it also
@@ -49,7 +49,7 @@ Paths crossing into the guest are canonicalized, confined to a managed root, and
 component is a reparse point — a junction or symbolic link. Managed folders are never enumerated
 through one either, so a link cannot make content outside a managed root appear to be inside it.
 
-The same rule applies on the **host** side, to the folder a deployment or `sandbox cp` reads from.
+The same rule applies on the **host** side, to the folder a deployment or `target push`/`target pull` reads from.
 Those folders are walked one level at a time with every directory tested before it is descended
 into, **starting with the root itself** — the per-entry check never sees the root, because the walk
 begins by enumerating the root's contents rather than by looking at it, so a root that is a junction
@@ -58,7 +58,7 @@ reached *through* a directory junction is an ordinary file and carries no repars
 `build\logs` pointing at `C:\Users\you\.ssh` would otherwise be hashed and copied into the guest as
 `build\logs\id_rsa`. A junction that points back at its own ancestor ends the walk for the same
 reason, instead of recursing until the path length gives out. Deployment refuses such a folder
-outright; `sandbox cp` treats a link inside the folder as absent and copies only what is genuinely
+outright; `target push`/`target pull` treats a link inside the folder as absent and copies only what is genuinely
 inside the folder you named. A linked *root* is refused by both, because copying nothing while
 reporting success is a worse answer than saying so.
 
@@ -85,9 +85,9 @@ separate machines.
 ## Running an app
 
 ```powershell
-winapp run . --sandbox
-winapp run .\MyApp.csproj --sandbox --detach --json
-winapp run .\publish --sandbox --clean
+winapp run . --on sandbox
+winapp run .\MyApp.csproj --on sandbox --detach --json
+winapp run .\publish --on sandbox --clean
 ```
 
 The app is built and its package layout is produced on the host, exactly as a local run would
@@ -117,7 +117,7 @@ Build options — `--configuration`, `--arch`, `--framework`, `--property`, `--n
 **unpackaged** app there is one limit worth knowing before you rely on it:
 
 ```powershell
-winapp run .\publish --sandbox --detach   # returns; app is running in the Sandbox
+winapp run .\publish --on sandbox --detach   # returns; app is running in the Sandbox
 ```
 
 That process runs for as long as the **current guest agent** does. winapp starts it as a child of the
@@ -133,7 +133,7 @@ no error at the moment it stopped, because nothing was waiting on it.
 If a later command reports the app is no longer running, rerun it:
 
 ```powershell
-winapp run .\publish --sandbox --detach
+winapp run .\publish --on sandbox --detach
 ```
 
 A **packaged** app is launched through Windows' own activation rather than as a child of the agent, and
@@ -209,10 +209,10 @@ ones:
   "ProcessId": 4212,
   "Sandbox": true,
   "ProcessScope": "sandbox",
-  "AppTarget": "sandbox:4212",
+  "UiTargetArgs": "--on sandbox -a 4212",
   "ExecutionTarget": {
-    "Kind": "windows-sandbox",
-    "Id": "windows-sandbox:default",
+    "Kind": "sandbox",
+    "Id": "default",
     "Architecture": "arm64",
     "Epoch": "..."
   }
@@ -225,8 +225,8 @@ from a previous generation is rejected rather than resolved against whatever San
 ## Removing an app
 
 ```powershell
-winapp unregister --sandbox
-winapp unregister --sandbox --manifest .\Package.appxmanifest
+winapp unregister --on sandbox
+winapp unregister --on sandbox --manifest .\Package.appxmanifest
 ```
 
 This removes only the package the matching deployment registered. Ownership has to hold twice
@@ -238,13 +238,13 @@ satisfies neither and is never touched.
 ## Automating the UI
 
 ```powershell
-winapp ui inspect --sandbox -a MyApp
-winapp ui invoke --sandbox SubmitButton -a MyApp
-winapp ui screenshot --sandbox -a MyApp -o .\result.png
-winapp ui record --sandbox -a MyApp --duration-sec 5 -o .\result.mp4
+winapp ui inspect --on sandbox -a MyApp
+winapp ui invoke --on sandbox SubmitButton -a MyApp
+winapp ui screenshot --on sandbox -a MyApp -o .\result.png
+winapp ui record --on sandbox -a MyApp --duration-sec 5 -o .\result.mp4
 ```
 
-Every `ui` verb accepts `--sandbox`. The command is intercepted once, before any local UI service
+Every `ui` verb accepts `--on sandbox`. The command is intercepted once, before any local UI service
 runs, and forwarded whole to guest winapp — so the host performs no UI Automation, window discovery,
 capture, or input injection. That is the point: a Sandbox workflow cannot steal your focus, move your
 cursor, or type into your windows.
@@ -252,15 +252,15 @@ cursor, or type into your windows.
 A string app target can opt in by prefix instead:
 
 ```powershell
-winapp ui inspect -a sandbox:MyApp
-winapp ui inspect -a sandbox:4212
+winapp ui inspect --on sandbox -a MyApp
+winapp ui inspect --on sandbox -a 4212
 ```
 
-A numeric `--window` is left alone and needs `--sandbox`, because a window handle carries no scope of
+A numeric `--window` is left alone and needs `--on sandbox`, because a window handle carries no scope of
 its own — inferring one would resolve a host window against the guest, or the reverse.
 
 Targeting is unchanged: if neither `--app` nor `--window` is given, the command fails and lists guest
-targets rather than guessing. `winapp ui list-windows --sandbox` is the discovery path.
+targets rather than guessing. `winapp ui list-windows --on sandbox` is the discovery path.
 
 Guest process IDs and window handles are valid only inside the execution target's current epoch, and
 values from a previous generation are rejected rather than resolved against a recreated Sandbox.
@@ -282,7 +282,7 @@ staging path it was actually written to.
 - Windows 11 24H2 or newer, on a supported edition
 - Hardware virtualization enabled
 
-`--sandbox` is your consent for winapp to install what it needs. If Windows Sandbox is not set up
+`--on sandbox` is your consent for winapp to install what it needs. If Windows Sandbox is not set up
 yet, winapp enables the optional feature and installs the Store-delivered Sandbox client for you, in
 the same command. Two things you should expect while that happens:
 
@@ -313,7 +313,7 @@ Real input and screen capture additionally need an unlocked interactive host ses
 
 ## Lifecycle
 
-Windows permits one Sandbox at a time, so `--sandbox` uses that one.
+Windows permits one Sandbox at a time, so `--on sandbox` uses that one.
 
 If a Sandbox is already running when you run a winapp command — because you started it yourself,
 because a previous command left it up, or because the client installer opened one — winapp uses it
@@ -322,7 +322,7 @@ instead of asking you to close it.
 **Using an existing Sandbox changes it.** winapp maps its bootstrap folders into that guest, connects
 its client, turns on Developer Mode, and adds an inbound firewall rule for its agent. Whatever is
 already running in that guest shares the session with what winapp deploys, which is the same trust
-boundary [described above](#what---sandbox-does-and-does-not-protect). Nothing already in the guest is
+boundary [described above](#what---on-sandbox-does-and-does-not-protect). Nothing already in the guest is
 removed, and **winapp never stops a Sandbox** — not on success, not on failure, and not for one it
 took over.
 
@@ -478,7 +478,7 @@ allowlist is a closed list of known packages, not a rule about names. Any other 
 available payload is verified in the guest instead; if the Sandbox already has it, the run proceeds.
 
 The complete graph is verified before **every** launch, not just the first. A clean provisioning
-record says what winapp did, not what the guest currently has — `sandbox exec` gives any caller a
+record says what winapp did, not what the guest currently has — `target exec` gives any caller a
 way to change package and runtime state inside the same Sandbox generation. Re-verification is
 cheap: payloads the guest already holds are not re-transferred, and nothing already satisfied is
 reinstalled. The record's job is narrower — it says whether a previous pass was interrupted, and
@@ -565,7 +565,7 @@ There is no background winapp service. Concurrent winapp processes coordinate th
 locks, atomic revisioned state files, and a generation identity carried on every request and result.
 
 The guest agent serves several winapp commands at once — up to eight channels — so a running
-application and a separate inspection, input, capture, or `sandbox exec` proceed independently. Each
+application and a separate inspection, input, capture, or `target exec` proceed independently. Each
 channel is authenticated on its own and is isolated from the others: operation identities, standard
 input, cancellation, and failure never cross between them, and losing one channel stops only the
 operations that channel started. Past eight channels a command is refused immediately with
@@ -597,7 +597,7 @@ never mix into machine-readable output.
     "message": "The Windows Sandbox feature was enabled and Windows needs a restart to finish.",
     "context": { "setupState": "FeaturePayloadMissing", "featurePayloadPresent": "false" },
     "userAction": "Restart Windows, then run the command again.",
-    "example": "winapp run . --sandbox"
+    "example": "winapp run . --on sandbox"
   }
 }
 ```
@@ -638,7 +638,7 @@ Windows Sandbox is the only public target. Internally it sits behind a narrow bo
 Hyper-V, Dev Box, or remote-machine target can reuse everything above it without a rewrite.
 
 ```text
-run / ui / unregister / sandbox exec / sandbox cp
+run / ui / unregister / target exec / target push
         │
         ▼
 ExecutionTargetOrchestrator      probe → connect (locked) → negotiate → lock (only if mutating)
@@ -669,7 +669,7 @@ startup diagnostics to a bounded, guest-writable folder the host reads once and 
 
 ### Telemetry
 
-`winapp sandbox exec` and `winapp sandbox cp` never contribute executable or argument values,
+`winapp target exec sandbox` and `winapp target push sandbox` never contribute executable or argument values,
 environment variables, host or guest paths, stream contents, or file names to telemetry. String,
 file, and directory values are recorded as a constant placeholder rather than their content, and
 tests pin that so a future change to the redaction rule cannot silently start collecting them.

@@ -289,7 +289,10 @@ internal static class Program
             Console.Error.WriteLine(advice);
         }
 
-        return NewCommand.ExitInvalidArgs;
+        // The same code every other malformed winapp command line returns. This is a parse mistake,
+        // not a failure to reach a target, and conflating the two would make an unknown option look
+        // like an unavailable machine.
+        return TargetOutput.InvalidCommandLineExitCode;
     }
 
     /// <summary>

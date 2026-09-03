@@ -1,6 +1,6 @@
 ---
 name: winapp-sandbox
-description: Run, debug, and UI-automate a Windows app inside a persistent Windows Sandbox instead of the user's own desktop, using winapp's --sandbox option. Use when an agent needs to launch or automate an app without stealing the user's focus, cursor, or keyboard, when UI automation must not disturb the machine it runs on, or when an app should be exercised in a disposable Windows environment. Also covers running arbitrary commands and copying files into that Sandbox.
+description: Run, debug, and UI-automate a Windows app inside a persistent Windows Sandbox instead of the user's own desktop, using winapp's --on sandbox option. Use when an agent needs to launch or automate an app without stealing the user's focus, cursor, or keyboard, when UI automation must not disturb the machine it runs on, or when an app should be exercised in a disposable Windows environment. Also covers running arbitrary commands and copying files into that Sandbox.
 ---
 ## When to use
 
@@ -16,7 +16,7 @@ Builds still happen on the host and stay fast. Only running, debugging, and auto
 - Windows 11 24H2 or newer, on a supported edition, with hardware virtualization enabled
 - An unlocked interactive host session while a command needs real input or screen recording
 
-`--sandbox` is consent for winapp to install what it needs. On a machine where Windows Sandbox is not
+`--on sandbox` is consent for winapp to install what it needs. On a machine where Windows Sandbox is not
 set up, winapp enables the optional feature and installs the Store-delivered client during the same
 command. Expect a UAC prompt for the feature, and expect Windows to show its own update UI — which
 can take focus — while the client installs. winapp never restarts the machine.
@@ -32,10 +32,10 @@ running locally** — a command that asked for Sandbox either runs there or fail
 ### Run an app and automate it
 
 ```powershell
-winapp run . --sandbox
-winapp ui inspect --sandbox -a MyApp
-winapp ui invoke --sandbox SubmitButton -a MyApp
-winapp ui screenshot --sandbox -a MyApp -o .\result.png
+winapp run . --on sandbox
+winapp ui inspect --on sandbox -a MyApp
+winapp ui invoke --on sandbox SubmitButton -a MyApp
+winapp ui screenshot --on sandbox -a MyApp -o .\result.png
 ```
 
 The Sandbox stays running between commands and between rebuilds, so the second run transfers only
@@ -44,8 +44,8 @@ what changed.
 ### Capture evidence
 
 ```powershell
-winapp ui screenshot --sandbox -a MyApp -o .\before.png
-winapp ui record --sandbox -a MyApp --duration-sec 5 -o .\demo.mp4
+winapp ui screenshot --on sandbox -a MyApp -o .\before.png
+winapp ui record --on sandbox -a MyApp --duration-sec 5 -o .\demo.mp4
 ```
 
 `-o` lands at the host path given. The file is verified against the size and hash the guest reported
@@ -54,14 +54,14 @@ before it is published, so an interrupted transfer never leaves a plausible-look
 ### Iterate
 
 ```powershell
-winapp run . --sandbox --detach   # returns once the app is up (see the note below)
-winapp ui list-windows --sandbox  # discover targets
-winapp run . --sandbox --clean    # fresh application data
-winapp unregister --sandbox       # remove just this app from the Sandbox
+winapp run . --on sandbox --detach   # returns once the app is up (see the note below)
+winapp ui list-windows --on sandbox  # discover targets
+winapp run . --on sandbox --clean    # fresh application data
+winapp unregister --on sandbox       # remove just this app from the Sandbox
 ```
 
 Several winapp commands can use one Sandbox at the same time, so a foreground `winapp run .
---sandbox` running in one terminal does not hold up `winapp ui list-windows --sandbox` in another.
+--on sandbox` running in one terminal does not hold up `winapp ui list-windows --on sandbox` in another.
 Past eight commands at once the next one fails immediately with `sandbox_agent_busy` instead of
 waiting. Deployment and registration still take turns, so two commands never redeploy at once.
 
@@ -71,7 +71,7 @@ so a cancelled command cannot strand guest processes holding files the next depl
 The same containment ends the app when the agent does — including when winapp repairs the agent
 automatically, which it does without asking if a later command finds it unresponsive or replaces it
 after a winapp upgrade. Nothing reports an error at that moment, because nothing was waiting on the
-app. Rerun `winapp run . --sandbox --detach` to bring it back, and prefer a foreground run when the app
+app. Rerun `winapp run . --on sandbox --detach` to bring it back, and prefer a foreground run when the app
 must survive a long automation sequence. A packaged app is activated by Windows rather than started by
 the agent and was observed to survive an agent repair that ended an unpackaged one; closing or
 restarting the Sandbox still ends both.
@@ -79,33 +79,33 @@ restarting the Sandbox still ends both.
 ### Prepare dependencies or diagnose
 
 ```powershell
-winapp sandbox exec -- dotnet --info
-winapp sandbox cp .\setup.ps1 sandbox:Setup\setup.ps1
-winapp sandbox exec --cwd C:\WinApp\work\Setup -- powershell -ExecutionPolicy Bypass -File .\setup.ps1
-winapp sandbox cp sandbox:Results .\results
+winapp target exec sandbox -- dotnet --info
+winapp target push sandbox .\setup.ps1 Setup\setup.ps1
+winapp target exec sandbox --cwd C:\WinApp\work\Setup -- powershell -ExecutionPolicy Bypass -File .\setup.ps1
+winapp target pull sandbox Results .\results
 ```
 
 `-ExecutionPolicy Bypass` belongs in that command. A fresh Sandbox starts at `Restricted`, so a script
 you just copied in is refused with `UnauthorizedAccess` without it.
 
-`sandbox cp` requires exactly one endpoint prefixed with `sandbox:`, so the direction is never
-guessed. Symbolic links and junctions in a host source are not followed — only what is genuinely
+`target push` and `target pull` name the direction in the verb, so it is never guessed and neither
+path carries a marker. Symbolic links and junctions in a host source are not followed — only what is genuinely
 inside the folder you named is copied.
 
-**Guest paths are relative to `C:\WinApp\work`.** That is the folder winapp manages inside the
-Sandbox, and resolving every guest path against it is what keeps a path you pass from selecting an
-arbitrary location. A drive-absolute, rooted, or UNC guest path is refused with a message naming the
+**Target paths are relative to `C:\WinApp\work`.** That is the folder winapp manages inside the
+Sandbox, and resolving every target path against it is what keeps a path you pass from selecting an
+arbitrary location. A drive-absolute, rooted, or UNC target path is refused with a message naming the
 work root rather than quietly re-rooted, so a copy never reports success for a file that is not where
 you asked for it. Each copy into the Sandbox prints the resolved destination — use that as the
 `--cwd` of whatever you run next.
 
-A single file lands at exactly the destination you name: `sandbox:Setup\setup.ps1` *is* the file, not
+A single file lands at exactly the destination you name: `Setup\setup.ps1` *is* the file, not
 a folder to place it in. A directory keeps its own structure beneath the destination.
 
 ## What to know before relying on it
 
 **The Sandbox stays and is reused.** The instance, its agent, and your deployment persist between
-commands, so `winapp run . --sandbox` followed by several `winapp ui ... --sandbox` commands is one
+commands, so `winapp run . --on sandbox` followed by several `winapp ui ... --on sandbox` commands is one
 environment, not several. A later command reconnects to the agent that is already running rather than
 restarting it, and read-only verbs (`inspect`, `search`, `get-property`, `get-focused`,
 `list-windows`, `wait-for`, `status`) do **not** reconnect the Sandbox window — so they never
@@ -125,14 +125,16 @@ winapp cannot replace it in place. It says so and asks you to close the Sandbox 
 with a file error.
 
 **Targets must be explicit.** `--app` or `--window` is required, exactly as locally. Use
-`winapp ui list-windows --sandbox` to discover them; no command infers the most recent launch.
+`winapp ui list-windows --on sandbox` to discover them; no command infers the most recent launch.
 
 **Guest process IDs and window handles are scoped.** They are valid only inside the Sandbox
 generation that produced them. After the Sandbox is recreated, stale values are rejected rather than
 resolved against the new one.
 
-**A `sandbox:` prefix is an alternative to the flag** for string app targets — `-a sandbox:MyApp`.
-A numeric `--window` needs `--sandbox`, because a handle carries no scope of its own.
+**An app name, PID, or window handle is always read on the selected target.** None of them carries
+a scope of its own, so `--on sandbox` is what says where to look — `--on sandbox -a MyApp`,
+`--on sandbox -a 4212`, `--on sandbox -w 123456`. Without it, the same values name something on
+this desktop.
 
 **Every run option keeps its meaning** — `--detach`, `--debug-output`, `--no-launch`, `--clean`,
 `--unregister-on-exit`, `--with-alias`, `--json` — because the Sandbox runs the ordinary
@@ -140,7 +142,7 @@ A numeric `--window` needs `--sandbox`, because a handle carries no scope of its
 refused up front, and `--detach` on an unpackaged app gives you a process that lasts only as long as
 the current guest agent, as described under *Iterate* above.
 
-**`--sandbox` isolates the running app, not the build.** Project evaluation, restore, and compilation
+**`--on sandbox` isolates the running app, not the build.** Project evaluation, restore, and compilation
 happen on the host, so it does not make an untrusted project safe to open. Everything inside the
 Sandbox is one trust boundary: apps sharing it share the user account, desktop, registry, runtimes,
 and network, and can interfere with one another.
@@ -155,7 +157,7 @@ with the app launched against it. The one package winapp downloads — the deskt
 pass an Authenticode Microsoft-signature check *and* an identity/version/architecture/publisher check
 before it is cached, so a rejected payload never poisons the host cache. The complete graph is
 verified before every launch, because
-`sandbox exec` can change guest runtime state between runs. Anything that cannot be satisfied fails
+`target exec` can change guest runtime state between runs. Anything that cannot be satisfied fails
 with `sandbox_runtime_provision_failed` naming it, before launch. Publishing self-contained avoids
 the requirement entirely.
 
@@ -190,7 +192,7 @@ off-screen and without stealing focus. If that still leaves no input desktop it 
 | `sandbox_transfer_interrupted` | A transfer stopped; nothing was published | Retry. The error names the artifact, expected size, and what arrived |
 | `sandbox_agent_incompatible` | The guest agent needs a newer winapp, or a different winapp version is already running it | `winapp update`. If you upgraded winapp while a Sandbox was running, close the Sandbox so a fresh agent starts |
 | `sandbox_agent_busy` | Eight winapp commands are already using this Sandbox | Wait for one to finish, then retry |
-| `sandbox_runtime_provision_failed` | A runtime the app requires is missing from the Sandbox | The error names it. Publish self-contained, or install it with `winapp sandbox exec` |
+| `sandbox_runtime_provision_failed` | A runtime the app requires is missing from the Sandbox | The error names it. Publish self-contained, or install it with `winapp target exec sandbox` |
 
 Infrastructure failures use codes distinct from your app's exit codes, so "winapp could not run your
 app" is always distinguishable from "your app failed".
@@ -199,8 +201,8 @@ Two problems report no winapp error code at all:
 
 | Symptom | Cause | What to do |
 |---|---|---|
-| A detached **unpackaged** app is gone, and no command reported it stopping | It was started by the guest agent and ended with it, most often because winapp automatically repaired the agent | Rerun `winapp run . --sandbox --detach`. For an app that must survive a long automation sequence, run it in the foreground instead |
-| A script copied in with `sandbox cp` fails with `UnauthorizedAccess` | A fresh Sandbox starts with the PowerShell execution policy at `Restricted` | Run it as `powershell -ExecutionPolicy Bypass -File .\script.ps1` |
+| A detached **unpackaged** app is gone, and no command reported it stopping | It was started by the guest agent and ended with it, most often because winapp automatically repaired the agent | Rerun `winapp run . --on sandbox --detach`. For an app that must survive a long automation sequence, run it in the foreground instead |
+| A script copied in with `target push`/`target pull` fails with `UnauthorizedAccess` | A fresh Sandbox starts with the PowerShell execution policy at `Restricted` | Run it as `powershell -ExecutionPolicy Bypass -File .\script.ps1` |
 
 ## Full documentation
 

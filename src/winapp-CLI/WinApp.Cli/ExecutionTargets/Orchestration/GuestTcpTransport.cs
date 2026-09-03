@@ -52,7 +52,7 @@ internal sealed record GuestBootstrapMaterial
         new()
         {
             SchemaVersion = CurrentSchemaVersion,
-            TargetId = target.Id,
+            TargetId = target.StateKey,
             TargetEpoch = epoch.Value,
             PreSharedKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(GuestProtocol.PreSharedKeySize)),
             Port = port,

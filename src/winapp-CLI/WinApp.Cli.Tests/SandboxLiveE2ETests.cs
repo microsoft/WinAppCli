@@ -374,7 +374,7 @@ public partial class SandboxLiveE2ETests
     /// that close it would hang until the timeout rather than echo anything.
     /// </remarks>
     [TestMethod]
-    public async Task SandboxExec_ForwardsStandardInputToTheGuestProcess()
+    public async Task TargetExec_ForwardsStandardInputToTheGuestProcess()
     {
         await SkipIfUnsupportedOrOccupiedAsync();
 
@@ -506,7 +506,7 @@ public partial class SandboxLiveE2ETests
     /// result is inconclusive rather than a pass that proved nothing.
     /// </remarks>
     [TestMethod]
-    public async Task SandboxCopy_DoesNotFollowAHostDirectoryJunction()
+    public async Task TargetPush_DoesNotFollowAHostDirectoryJunction()
     {
         await SkipIfUnsupportedOrOccupiedAsync();
 
@@ -519,7 +519,7 @@ public partial class SandboxLiveE2ETests
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
         timeout.CancelAfter(CommandTimeout);
 
-        var root = TestPaths.TempRoot(nameof(SandboxCopy_DoesNotFollowAHostDirectoryJunction));
+        var root = TestPaths.TempRoot(nameof(TargetPush_DoesNotFollowAHostDirectoryJunction));
         var outside = TestPaths.TempRoot("live-outside");
         var guestFolder = $"junction-{Guid.NewGuid():n}";
         var link = TestPaths.Under(root, "linked");

@@ -18,7 +18,7 @@ namespace WinApp.Cli.Tests;
 [TestClass]
 public class GuestOwnerContextTests
 {
-    private const string TargetId = "windows-sandbox:default";
+    private const string TargetId = "sandbox-default-6b0d287c0c51bc40";
     private const string Epoch = "sandbox-1:nonce-a";
 
     private static Dictionary<string, string?> WithOwnerVariable(string? value) =>

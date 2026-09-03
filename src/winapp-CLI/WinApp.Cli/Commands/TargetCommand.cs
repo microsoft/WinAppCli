@@ -201,7 +201,7 @@ internal class TargetExecCommand : Command, IShortDescription
                     // commands without losing its workflow ownership.
                     Environment = GuestOwnerContext.WithOwner(
                         environment: null,
-                        GuestOwnerContext.ResolveGuestToken(target.Reference.Id, target.Epoch.Value)),
+                        GuestOwnerContext.ResolveGuestToken(target.Reference.StateKey, target.Epoch.Value)),
                 };
 
                 var result = await target.Operations.ExecuteAsync(
@@ -532,15 +532,19 @@ internal static class TargetOutput
     /// </summary>
     /// <remarks>
     /// Separate from <see cref="Fail"/> because the two are different failures with different
-    /// contracts. This one happens before anything is prepared — nothing was attempted, and the
-    /// command line itself is what is wrong — so it exits with the CLI's ordinary invalid-argument
-    /// code rather than the code that means "the target could not be used".
+    /// contracts. This one happens before anything is prepared: nothing was attempted, and the
+    /// command line itself is what is wrong. It exits 1, the code every other malformed winapp
+    /// command line already returns, rather than the code that means "the target could not be
+    /// used" — a caller distinguishing those two needs them to stay distinct.
     /// </remarks>
     public static int RejectSelection(IAnsiConsole console, bool json, ExecutionTargetErrorInfo error)
     {
         Fail(console, json, error);
-        return NewCommand.ExitInvalidArgs;
+        return InvalidCommandLineExitCode;
     }
+
+    /// <summary>Exit code for a command line that does not name a usable target.</summary>
+    internal const int InvalidCommandLineExitCode = 1;
 
     /// <summary>Exit code used for execution-target infrastructure failures.</summary>
     internal const int TargetInfrastructureExitCode = 70;

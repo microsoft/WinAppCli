@@ -22,7 +22,7 @@ namespace WinApp.Cli.Tests;
 internal sealed class ConcurrentGuestAgentHarness : IAsyncDisposable
 {
     /// <summary>Target both ends of every connection must agree they are serving.</summary>
-    public const string TargetId = "windows-sandbox:default";
+    public const string TargetId = "sandbox-default-6b0d287c0c51bc40";
 
     /// <summary>
     /// How long a host waits to be accepted and authenticated.

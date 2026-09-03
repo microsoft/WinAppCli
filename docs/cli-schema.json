@@ -36,6 +36,18 @@
       "required": false,
       "recursive": true
     },
+    "--on": {
+      "description": "Run this command on the named execution target instead of this machine. Supported: 'sandbox' (the Windows Sandbox winapp manages) and 'local' (the default). There is no fallback: if the target cannot be prepared, the command fails rather than running here.",
+      "hidden": false,
+      "valueType": "System.String",
+      "hasDefaultValue": false,
+      "arity": {
+        "minimum": 1,
+        "maximum": 1
+      },
+      "required": false,
+      "recursive": true
+    },
     "--version": {
       "description": "Show version information",
       "hidden": false,
@@ -2132,19 +2144,6 @@
           "required": false,
           "recursive": false
         },
-        "--sandbox": {
-          "description": "Deploy and run the app inside the Windows Sandbox winapp manages, instead of on this machine. The app is still built on the host; registration, launch, and debugging happen in the Sandbox, which stays running afterwards for the next run. There is no fallback to local execution.",
-          "hidden": false,
-          "valueType": "System.Boolean",
-          "hasDefaultValue": true,
-          "defaultValue": false,
-          "arity": {
-            "minimum": 0,
-            "maximum": 1
-          },
-          "required": false,
-          "recursive": false
-        },
         "--symbols": {
           "description": "Download symbols from Microsoft Symbol Server for richer native crash analysis, including the WinUI stowed-exception dispatch stack. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache.",
           "hidden": false,
@@ -2199,162 +2198,6 @@
           },
           "required": false,
           "recursive": false
-        }
-      }
-    },
-    "sandbox": {
-      "description": "Run commands and copy files inside the Windows Sandbox winapp manages. Use these to prepare dependencies or diagnose an application that 'winapp run --sandbox' cannot resolve on its own.",
-      "hidden": false,
-      "subcommands": {
-        "cp": {
-          "description": "Copy files or directories between the host and the Windows Sandbox winapp manages. Exactly one path must be prefixed with 'sandbox:'. Directory structure and useful timestamps are preserved, unchanged files are skipped, and changed files are replaced atomically.",
-          "hidden": false,
-          "arguments": {
-            "source": {
-              "description": "Source path. Prefix with 'sandbox:' to copy out of the Sandbox.",
-              "order": 0,
-              "hidden": false,
-              "valueType": "System.String",
-              "hasDefaultValue": false,
-              "arity": {
-                "minimum": 1,
-                "maximum": 1
-              }
-            },
-            "destination": {
-              "description": "Destination path. Prefix with 'sandbox:' to copy into the Sandbox.",
-              "order": 1,
-              "hidden": false,
-              "valueType": "System.String",
-              "hasDefaultValue": false,
-              "arity": {
-                "minimum": 1,
-                "maximum": 1
-              }
-            }
-          },
-          "options": {
-            "--json": {
-              "description": "Format output as JSON",
-              "hidden": false,
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--quiet": {
-              "description": "Suppress progress messages",
-              "hidden": false,
-              "aliases": [
-                "-q"
-              ],
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--verbose": {
-              "description": "Enable verbose output",
-              "hidden": false,
-              "aliases": [
-                "-v"
-              ],
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            }
-          }
-        },
-        "exec": {
-          "description": "Run a command inside the Windows Sandbox winapp manages, as the interactive Sandbox user. Streams stdin, stdout, and stderr, and returns the guest process's exit code. Does not provide a full terminal, so interactive console applications may see redirected pipes.",
-          "hidden": false,
-          "arguments": {
-            "command": {
-              "description": "Executable and arguments to run inside the Sandbox, after '--'.",
-              "order": 0,
-              "hidden": false,
-              "valueType": "System.String[]",
-              "hasDefaultValue": false,
-              "arity": {
-                "minimum": 1
-              }
-            }
-          },
-          "options": {
-            "--cwd": {
-              "description": "Working directory inside the Sandbox.",
-              "hidden": false,
-              "valueType": "System.String",
-              "hasDefaultValue": false,
-              "arity": {
-                "minimum": 1,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--json": {
-              "description": "Format output as JSON",
-              "hidden": false,
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--quiet": {
-              "description": "Suppress progress messages",
-              "hidden": false,
-              "aliases": [
-                "-q"
-              ],
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--verbose": {
-              "description": "Enable verbose output",
-              "hidden": false,
-              "aliases": [
-                "-v"
-              ],
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            }
-          }
         }
       }
     },
@@ -2449,6 +2292,270 @@
       "description": "Run a Microsoft Store Developer CLI command. This command will download the Microsoft Store Developer CLI if not already downloaded. Learn more about the Microsoft Store Developer CLI here: https://aka.ms/msstoredevcli",
       "hidden": false
     },
+    "target": {
+      "description": "Run commands and copy files on an execution target such as the Windows Sandbox winapp manages. Use these to prepare dependencies or diagnose an application that 'winapp run --on <target>' cannot resolve on its own.",
+      "hidden": false,
+      "subcommands": {
+        "exec": {
+          "description": "Run a command on an execution target, as that target's interactive user. Streams stdin, stdout, and stderr, and returns the command's own exit code. Does not provide a full terminal, so interactive console applications may see redirected pipes.",
+          "hidden": false,
+          "arguments": {
+            "target": {
+              "description": "Execution target to act on. Currently: 'sandbox'.",
+              "order": 0,
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              }
+            },
+            "command": {
+              "description": "Executable and arguments to run on the target, after '--'.",
+              "order": 1,
+              "hidden": false,
+              "valueType": "System.String[]",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1
+              }
+            }
+          },
+          "options": {
+            "--cwd": {
+              "description": "Working directory on the target.",
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--json": {
+              "description": "Format output as JSON",
+              "hidden": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--quiet": {
+              "description": "Suppress progress messages",
+              "hidden": false,
+              "aliases": [
+                "-q"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--verbose": {
+              "description": "Enable verbose output",
+              "hidden": false,
+              "aliases": [
+                "-v"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            }
+          }
+        },
+        "pull": {
+          "description": "Copy files or directories from an execution target to this machine. Directory structure and useful timestamps are preserved, unchanged files are skipped, and changed files are replaced atomically.",
+          "hidden": false,
+          "arguments": {
+            "target": {
+              "description": "Execution target to act on. Currently: 'sandbox'.",
+              "order": 0,
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              }
+            },
+            "source": {
+              "description": "File or directory on the target to copy, relative to its managed work area.",
+              "order": 1,
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              }
+            },
+            "destination": {
+              "description": "Destination path on this machine.",
+              "order": 2,
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              }
+            }
+          },
+          "options": {
+            "--json": {
+              "description": "Format output as JSON",
+              "hidden": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--quiet": {
+              "description": "Suppress progress messages",
+              "hidden": false,
+              "aliases": [
+                "-q"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--verbose": {
+              "description": "Enable verbose output",
+              "hidden": false,
+              "aliases": [
+                "-v"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            }
+          }
+        },
+        "push": {
+          "description": "Copy files or directories from this machine to an execution target. Directory structure and useful timestamps are preserved, unchanged files are skipped, and changed files are replaced atomically.",
+          "hidden": false,
+          "arguments": {
+            "target": {
+              "description": "Execution target to act on. Currently: 'sandbox'.",
+              "order": 0,
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              }
+            },
+            "source": {
+              "description": "File or directory on this machine to copy.",
+              "order": 1,
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              }
+            },
+            "destination": {
+              "description": "Destination path on the target, relative to its managed work area.",
+              "order": 2,
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              }
+            }
+          },
+          "options": {
+            "--json": {
+              "description": "Format output as JSON",
+              "hidden": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--quiet": {
+              "description": "Suppress progress messages",
+              "hidden": false,
+              "aliases": [
+                "-q"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--verbose": {
+              "description": "Enable verbose output",
+              "hidden": false,
+              "aliases": [
+                "-v"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            }
+          }
+        }
+      }
+    },
     "tool": {
       "description": "Run Windows SDK tools directly (makeappx, signtool, makepri, etc.). Auto-downloads Build Tools if needed. For most tasks, prefer higher-level commands like 'package' or 'sign'. Example: winapp tool makeappx pack /d ./folder /p ./out.msix",
       "hidden": false,
@@ -2493,21 +2600,6 @@
     "ui": {
       "description": "Inspect and interact with any running Windows app using UI Automation (UIA). Works with WPF, WinForms, Win32, Electron, and WinUI 3 apps.",
       "hidden": false,
-      "options": {
-        "--sandbox": {
-          "description": "Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option.",
-          "hidden": false,
-          "valueType": "System.Boolean",
-          "hasDefaultValue": true,
-          "defaultValue": false,
-          "arity": {
-            "minimum": 0,
-            "maximum": 1
-          },
-          "required": false,
-          "recursive": true
-        }
-      },
       "subcommands": {
         "click": {
           "description": "Click an element by slug or text search using mouse simulation. Works on elements that don't support InvokePattern (e.g., column headers, list items). Use --double for double-click, --right for right-click.",
@@ -5162,19 +5254,6 @@
           "aliases": [
             "-q"
           ],
-          "valueType": "System.Boolean",
-          "hasDefaultValue": true,
-          "defaultValue": false,
-          "arity": {
-            "minimum": 0,
-            "maximum": 1
-          },
-          "required": false,
-          "recursive": false
-        },
-        "--sandbox": {
-          "description": "Unregister the package inside the Windows Sandbox winapp manages, instead of on this machine. Only the exact package this manifest's app was deployed as is removed; a package installed in the Sandbox by anything other than winapp is never touched.",
-          "hidden": false,
           "valueType": "System.Boolean",
           "hasDefaultValue": true,
           "defaultValue": false,

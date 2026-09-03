@@ -30,7 +30,7 @@ namespace WinApp.Cli.Tests;
 [TestClass]
 public class GuestHandshakeSocketTests
 {
-    private const string TargetId = "windows-sandbox:default";
+    private const string TargetId = "sandbox-default-6b0d287c0c51bc40";
     private const string Loopback = "127.0.0.1";
 
     private static readonly TimeSpan Promptly = TimeSpan.FromSeconds(20);
