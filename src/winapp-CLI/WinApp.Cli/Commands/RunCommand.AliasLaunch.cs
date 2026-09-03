@@ -85,7 +85,15 @@ internal partial class RunCommand
 
             // The alias NAME is resolved later, from the manifest that is actually registered — the
             // package family it names is not known here for every mode.
-            return new AliasLaunchDecision(UseAlias: true, AliasName: null, Explicit: withAlias);
+            //
+            // A DECLARED preference is explicit, exactly like --with-alias: the NuGet targets forward
+            // WinAppRunUseExecutionAlias=true as --with-alias, so treating it as a mere default here would
+            // make the same property mean different things depending on whether the app was started through
+            // `dotnet run` or directly. Only the output-type inference is a default that may degrade.
+            return new AliasLaunchDecision(
+                UseAlias: true,
+                AliasName: null,
+                Explicit: withAlias || preferAlias == true);
         }
 
         /// <summary>

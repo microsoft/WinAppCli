@@ -2044,6 +2044,26 @@ public class RunCommandTests : BaseCommandTests
         TryKillByPid(helperPid);
     }
 
+    [TestMethod]
+    [DataRow(false, true, "WinExe", true, DisplayName = "declared true on a windowed app")]
+    [DataRow(false, true, "Exe", true, DisplayName = "declared true on a console app")]
+    [DataRow(true, null, "WinExe", true, DisplayName = "--with-alias")]
+    [DataRow(false, null, "Exe", false, DisplayName = "inferred from OutputType=Exe")]
+    public void ResolveAliasLaunch_MarksADeclaredPreferenceExplicit(
+        bool withAlias, bool? preferAlias, string outputType, bool expectExplicit)
+    {
+        // An explicit request fails when the alias is owned by another package; an inferred default
+        // degrades to AUMID. The NuGet targets forward WinAppRunUseExecutionAlias=true as --with-alias, so
+        // a declared preference has to be explicit here too — otherwise the same property means different
+        // things through `dotnet run` and through a direct `winapp run`.
+        var decision = RunCommand.Handler.ResolveAliasLaunch(
+            withAlias, withoutAlias: false, noLaunch: false, detach: false, isJson: false,
+            outputType, preferAlias);
+
+        Assert.IsTrue(decision.UseAlias);
+        Assert.AreEqual(expectExplicit, decision.Explicit);
+    }
+
     #endregion
 
     #region Manifest resolution + structured error tests

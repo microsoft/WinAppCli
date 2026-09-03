@@ -951,8 +951,9 @@ declare there is used as-is and winapp adds nothing.
 `winapp run` prints the alias it registered, so you don't have to compute the hash to find it.
 
 The alias is a command on your PATH that lasts as long as the package stays registered. If some other
-package already owns the name, winapp says so and launches via AUMID instead rather than starting the
-wrong app.
+package already owns the name, winapp says so. When it inferred the alias for you it launches via AUMID
+instead, rather than starting the wrong app; when you asked for one explicitly — with `--with-alias` or
+`#:property WinAppRunUseExecutionAlias=true` — it fails instead of quietly doing something else.
 
 Two project-mode options do **not** apply, because a file-based app configures itself. They are
 rejected with a message naming the directive to use instead:
@@ -1088,12 +1089,14 @@ The following MSBuild properties can be set in your `.csproj` to control behavio
 
 **Mutually exclusive settings.** `WinAppRunNoLaunch` and `WinAppRunDetach` each describe a different
 launch behavior, so they conflict with the other launch properties and with each other. Setting a
-conflicting pair fails the run with `--X and --Y cannot be used together`:
+conflicting pair fails the run with `--X and --Y cannot be used together`. Only
+`WinAppRunUseExecutionAlias=true` conflicts — setting it to `false` asks for AUMID activation, which is
+what both of these already use:
 
 | Property | Cannot be combined with |
 |----------|-------------------------|
-| `WinAppRunNoLaunch` | `WinAppRunDetach`, `WinAppRunUseExecutionAlias`, `WinAppRunDebugOutput`, `WinAppRunUnregisterOnExit` |
-| `WinAppRunDetach` | `WinAppRunNoLaunch`, `WinAppRunUseExecutionAlias`, `WinAppRunDebugOutput`, `WinAppRunUnregisterOnExit` |
+| `WinAppRunNoLaunch` | `WinAppRunDetach`, `WinAppRunUseExecutionAlias=true`, `WinAppRunDebugOutput`, `WinAppRunUnregisterOnExit` |
+| `WinAppRunDetach` | `WinAppRunNoLaunch`, `WinAppRunUseExecutionAlias=true`, `WinAppRunDebugOutput`, `WinAppRunUnregisterOnExit` |
 
 `WinAppRunUseExecutionAlias`, `WinAppRunDebugOutput`, and `WinAppRunUnregisterOnExit` can be combined
 with each other. `WinAppRunClean`, `WinAppRunSymbols`, `WinAppRunExecutable`, and `WinAppLaunchArgs`

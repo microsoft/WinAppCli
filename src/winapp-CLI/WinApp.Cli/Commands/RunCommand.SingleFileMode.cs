@@ -588,15 +588,14 @@ internal partial class RunCommand
                 return;
             }
 
-            foreach (var installLocation in prior.InstallLocations)
+            var installedElsewhere = prior.InstallLocations
+                .FirstOrDefault(location => !PathsPointToSameLocation(location, layoutDirectory.FullName));
+            if (installedElsewhere is not null)
             {
-                if (!PathsPointToSameLocation(installLocation, layoutDirectory.FullName))
-                {
-                    logger.LogWarning(
-                        "{UISymbol} Replacing the existing registration of '{PackageName}', which was installed from a different location ({InstallLocation}). Set '#:property {Property}=<name>' to give this app its own package identity.",
-                        UiSymbols.Warning, prior.PackageName, installLocation, SingleFileManifestPlanner.PackageNameProperty);
-                    return;
-                }
+                logger.LogWarning(
+                    "{UISymbol} Replacing the existing registration of '{PackageName}', which was installed from a different location ({InstallLocation}). Set '#:property {Property}=<name>' to give this app its own package identity.",
+                    UiSymbols.Warning, prior.PackageName, installedElsewhere, SingleFileManifestPlanner.PackageNameProperty);
+                return;
             }
 
             // Already registered from here, or --unregister-on-exit removes it: the note would be wrong.
