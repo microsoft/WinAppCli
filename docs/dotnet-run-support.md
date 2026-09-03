@@ -77,8 +77,8 @@ samples/
 | `WinAppLooseLayoutPath` | `$(OutputPath)AppX\` | Output directory for loose-layout package |
 | `WinAppLaunchArgs` | (empty) | Arguments to pass to the app on launch |
 | `WinAppCliPath` | (in package) | Path to the winapp.exe CLI |
-| `WinAppRunUseExecutionAlias` | inferred from the app | Launch via execution alias instead of AUMID activation, so console I/O stays in the current terminal. Left unset, winapp infers it from the built binary: a console app uses an alias and a windowed app uses AUMID. Set `true` or `false` to decide it yourself. Cannot be combined with `WinAppRunNoLaunch`. |
-| `WinAppRunNoLaunch` | `false` | Only register package identity without launching the app. Cannot be combined with `WinAppRunUseExecutionAlias`. |
+| `WinAppRunUseExecutionAlias` | inferred from the app | Launch via execution alias instead of AUMID activation, so console I/O stays in the current terminal. Left unset, winapp infers it from the built binary: a console app uses an alias and a windowed app uses AUMID. Set `true` or `false` to decide it yourself. `true` cannot be combined with `WinAppRunNoLaunch` or `WinAppRunDetach`. |
+| `WinAppRunNoLaunch` | `false` | Only register package identity without launching the app. Cannot be combined with `WinAppRunUseExecutionAlias=true`. |
 | `WinAppRunDebugOutput` | `false` | Attach as a debugger to capture `OutputDebugString` messages and first-chance exceptions. Only one debugger can attach at a time, so Visual Studio or VS Code cannot debug simultaneously. Use `WinAppRunNoLaunch` instead to attach a different debugger. Cannot be combined with `WinAppRunNoLaunch`. |
 | `WinAppRunDetach` | `false` | Return immediately after launching instead of waiting for the app to exit. Prints the PID. |
 | `WinAppRunUnregisterOnExit` | `false` | Unregister the development package after the app exits. Only removes packages registered in development mode. |
@@ -94,8 +94,8 @@ properties that need a tracked, running process, nor with each other:
 
 | Property | Cannot be combined with |
 |----------|-------------------------|
-| `WinAppRunNoLaunch` | `WinAppRunDetach`, `WinAppRunUseExecutionAlias`, `WinAppRunDebugOutput`, `WinAppRunUnregisterOnExit` |
-| `WinAppRunDetach` | `WinAppRunNoLaunch`, `WinAppRunUseExecutionAlias`, `WinAppRunDebugOutput`, `WinAppRunUnregisterOnExit` |
+| `WinAppRunNoLaunch` | `WinAppRunDetach`, `WinAppRunUseExecutionAlias=true`, `WinAppRunDebugOutput`, `WinAppRunUnregisterOnExit` |
+| `WinAppRunDetach` | `WinAppRunNoLaunch`, `WinAppRunUseExecutionAlias=true`, `WinAppRunDebugOutput`, `WinAppRunUnregisterOnExit` |
 
 The CLI rejects a conflicting pair before doing any work, so the run fails immediately:
 
