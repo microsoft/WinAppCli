@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -37,6 +37,7 @@
 
     <!-- Allow test project to access internal types -->
     <InternalsVisibleTo>WinApp.Cli.Tests</InternalsVisibleTo>
+    <InternalsVisibleTo>WinApp.Cli.SnapshotBaker</InternalsVisibleTo>
 
     <!-- The *first* DefineConstants is removed during Official Release Builds (.pipelines/Unstub.ps1)-->
     <DefineConstants>TELEMETRYEVENTSOURCE_PUBLIC</DefineConstants>
@@ -53,11 +54,22 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- find-ui curated enrichment (tags/keywords) + core patterns. The large
-         Gallery/Toolkit scenario corpora are NOT embedded — they are fetched
-         from GitHub on first use and cached per-user. -->
+    <!-- find-ui curated enrichment (tags/keywords) + core patterns. -->
     <EmbeddedResource Include="Services\Controls\Data\core-patterns.json" LogicalName="core-patterns.json" />
     <EmbeddedResource Include="Services\Controls\Data\gallery-tags.json" LogicalName="gallery-tags.json" />
+    <!--
+      The baked corpus floor (see EmbeddedSnapshot.cs). Only the Brotli blob is committed
+      and embedded: the corpus is a backup for the offline case, refreshed wholesale by
+      the release bake, so release time is its source of truth rather than a committed
+      text copy. snapshot-manifest.json stays readable so per-source scenario counts are
+      still reviewable in a diff.
+    -->
+    <EmbeddedResource Include="Services\Controls\Data\snapshot-manifest.json"
+                      LogicalName="snapshot-manifest.json"
+                      Condition="Exists('Services\Controls\Data\snapshot-manifest.json')" />
+    <EmbeddedResource Include="Services\Controls\Data\snapshot-*.json.br">
+      <LogicalName>%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <ItemGroup>
@@ -92,12 +104,22 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\WinApp.UIAutomation\WinApp.UIAutomation.csproj" />
+    <ProjectReference Include="..\WinApp.UIAutomation.Recording\WinApp.UIAutomation.Recording.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
       <_Parameter1>WinApp.Cli.Tests</_Parameter1>
     </AssemblyAttribute>
     <!-- The OneFuzz harness targets ZipRangeExtractor, which is internal. -->
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
       <_Parameter1>WinApp.Cli.Fuzz</_Parameter1>
+    </AssemblyAttribute>
+    <!-- Build-time corpus baker (not shipped). Needs ProviderRegistry, the fetchers and
+         PathSafety, which is why the bake cannot simply be a script in CI. -->
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>WinApp.Cli.SnapshotBaker</_Parameter1>
     </AssemblyAttribute>
   </ItemGroup>
 

@@ -77,6 +77,11 @@ dotnet build src/winapp-CLI/winapp.sln -c Debug
 # Run native CLI in-tree
 dotnet run --project src/winapp-CLI/WinApp.Cli/WinApp.Cli.csproj -- <args>
 
+# Build the NuGet packages. -SkipCliPackage builds only the UI Automation libraries, which need
+# no published CLI and so pack in seconds; without it the CLI tools package is built too and
+# artifacts/cli must already hold an x64 + arm64 publish.
+.\scripts\package-nuget.ps1 -SkipCliPackage
+
 # Update npm package after CLI changes
 cd src/winapp-npm && npm run build              # builds C# CLI + copies to npm bin
 cd src/winapp-npm && npm run build-copy-only    # copies already-built Release binaries
@@ -135,6 +140,41 @@ $t = azureauth aad --resource 499b84ac-1321-427f-aa17-267ca6975798 `
     --tenant 72f988bf-86f1-41af-91ab-2d7cd011db47 --output token
 $env:VSS_NUGET_ACCESSTOKEN = ($t | Select-Object -Last 1).Trim()
 ```
+
+End-to-end tests that shell out to `dotnet add package Microsoft.WindowsAppSDK` need that feed to be
+a registered source. If `nuget.org` is disabled and no internal feed is registered, they fail with
+`[ERROR] - Failed to add Microsoft.WindowsAppSDK package reference`.
+
+Do **not** fix this by adding a global package source — these tests run in `%TEMP%`, outside the
+repo, so a repo-local `nuget.config` never applies to them, and a machine-wide registration is a
+persistent change to a shared dev box. Instead point `APPDATA` at a throwaway directory holding
+the repo's own feed config, which scopes the whole thing to the session:
+
+```powershell
+$feed = 'https://pkgs.dev.azure.com/microsoft/pde-oss/_packaging/pde-oss_Internal/nuget/v3/index.json'
+
+# NuGet resolves its user-level config from %APPDATA%\NuGet\NuGet.Config, so redirecting APPDATA
+# swaps in the repo's feed list without touching the real one.
+$cfg = Join-Path $env:TEMP "winapp-nuget-$PID"
+New-Item -ItemType Directory -Path "$cfg\NuGet" -Force | Out-Null
+Copy-Item .pipelines\release-nuget.config "$cfg\NuGet\NuGet.Config"
+$env:APPDATA = $cfg
+
+# The Azure Artifacts credential provider needs the endpoint spelled out.
+# VSS_NUGET_ACCESSTOKEN alone is NOT enough here - the service index returns 401 without this.
+$env:VSS_NUGET_EXTERNAL_FEED_ENDPOINTS = @{
+    endpointCredentials = @(@{ endpoint = $feed; username = 'docker'; password = $env:VSS_NUGET_ACCESSTOKEN })
+} | ConvertTo-Json -Compress -Depth 5
+```
+
+`.pipelines/release-nuget.config` is the single source of truth for the feed URL — do not hardcode
+it somewhere else. CI does the same thing less surgically, by copying that file over
+`%APPDATA%\NuGet\NuGet.Config` on a throwaway agent.
+
+Because `APPDATA` is redirected, run this in a dedicated shell and let it end with the run.
+
+Note that the CLI's own package downloads read this same `nuget.config` hierarchy, so redirecting
+`APPDATA` covers both them and anything that shells out to `dotnet`.
 
 More generally: if something fails locally but passes in CI, the difference is configuration,
 not luck. Check `.pipelines/templates/build.yaml` for the environment CI provides before
@@ -214,6 +254,25 @@ Sample & guide tests run via `.github/workflows/test-samples.yml` using a GitHub
 | Copilot-specific plugin components | `plugins/winapp/com.github.copilot/` |
 | Plugin marketplaces | `.github/plugin/marketplace.json`, `.claude-plugin/marketplace.json` |
 | Samples | `samples/` (electron, cpp-app, dotnet-app, etc.) |
+| ADO pipelines | `.pipelines/` — see [`.pipelines/README.md`](.pipelines/README.md) |
+
+### Editing the ADO pipelines
+
+Agent setup (.NET, Node, internal feeds and their auth) is shared via
+`.pipelines/templates/build-env.yaml`. Change it there, not in each pipeline.
+
+1ES **release jobs cannot check out the repo**, so any step inside a `templateContext.type:
+releaseJob` job cannot call a `.ps1` from the working tree. It *can* still share logic via a
+YAML `- template:` reference, because templates are expanded at compile time — that is how
+`release.yml`'s Build-stage preflight and its `Release_GitHub` job share
+`templates/release-assets.yaml`. Prefer that over
+duplicating inline script between the two.
+
+`.pipelines/release.yml` both ships releases (from `rel/v*`) and rehearses one weekly (from
+`main`). Every publishing action is gated on `startsWith(variables['Build.SourceBranch'],
+'refs/heads/rel/v')` — derived from the branch, not a parameter, because Azure DevOps compiles
+scheduled and triggered runs with parameter *defaults*. If you add a publishing step, gate it the
+same way, and write the condition as a positive test for `rel/v*` so it fails closed.
 
 ## CLI command semantics
 
