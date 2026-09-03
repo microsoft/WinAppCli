@@ -40,6 +40,10 @@ You need an **existing app project** — `winapp init` does **not** create new p
 
 To start a brand-new **WinUI** app (rather than adding Windows support to an existing project), use `winapp new`. It verifies the .NET SDK, installs the official WinUI `dotnet new` template pack on demand (grabbing the latest, or offering to update a stale one), and scaffolds the app against your installed SDK's target framework. Most WinUI templates already include packaging/identity, so **no `winapp init` step is needed** afterward — follow the template-specific next step `winapp new` prints when it finishes. App templates go straight to `winapp run` (which builds and launches the app); the `winui-lib` (class library) and `winui-unittest` templates differ (reference the library from an app project, or `winapp run` the packaged test app to run its tests). The template list is read live from the installed pack — run `winapp new --list` to see the current set.
 
+The pack ships two styles of app. **XAML** templates (`winui`, `winui-navview`, `winui-tabview`, `winui-mvvm`) define the UI in markup with a C# code-behind. **Reactor** templates (`reactor`, `reactor-mvu`, `reactor-navview`, `reactor-tabview`) are pure C# with no XAML, using an MVU pattern.
+
+> **Reactor templates are experimental.** They reference the prerelease `Microsoft.UI.Reactor` packages, whose APIs can change or be removed in a future release — don't pick one unless the user explicitly asks for Reactor. `winapp new` marks them **(Experimental)** in `--list` and in the picker, reports `"Experimental": true` in `--json`, and never selects one as the default. They also require the **.NET 10 SDK or newer**; on an older SDK `winapp new` fails up front naming the version it needs.
+
 > A first run, template-pack update, or newly published Windows App SDK version may take longer while missing NuGet packages download and restore. If scaffolding continues beyond 10 seconds, `winapp new` updates its status message rather than silently waiting.
 
 ```powershell
@@ -51,6 +55,9 @@ winapp new --list
 
 # One-shot with a specific template (short names come from `winapp new --list`)
 winapp new --name MyApp --template winui-navview
+
+# Experimental Reactor app (pure C#, no XAML) — requires the .NET 10 SDK
+winapp new --name MyApp --template reactor-mvu
 
 # Diagnose a failed scaffold: --verbose streams dotnet new's post-creation actions
 # (restore, package add, etc.) live so the underlying dotnet error is visible
