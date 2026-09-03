@@ -40,7 +40,7 @@ internal class CommandCompletedEvent : EventBase
 
     public int ExitCode { get; }
 
-    /// <summary>How the workflow owner was resolved: <c>Explicit</c>, <c>Parent</c>, or <c>Anonymous</c>.</summary>
+    /// <summary>How the owner was resolved: <c>Workflow</c> (from <c>WINAPP_UI_WORKFLOW_ID</c>) or <c>Anonymous</c>.</summary>
     public string? UiIdentitySource { get; }
 
     /// <summary>Coordination mode: <c>Observe</c>, <c>TurnShared</c>, or <c>DesktopExclusive</c>.</summary>

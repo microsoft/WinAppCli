@@ -247,19 +247,6 @@ internal sealed class InteractiveDesktopScheduler(IMonotonicClock clock)
     }
 
     /// <summary>
-    /// Removes this process's command or waiter entry without touching the idle deadline. Used when a
-    /// queued command is cancelled before it ever ran (spec §11.1).
-    /// </summary>
-    public void RemoveParticipant(
-        InteractiveDesktopState state,
-        ICoordinationLivenessProbe probe,
-        UiParticipantIdentity participant)
-    {
-        RemoveParticipantEntries(state, participant);
-        Normalize(state, probe);
-    }
-
-    /// <summary>
     /// Whether <paramref name="owner"/> currently holds the turn. Callers use this before opening a
     /// participant lease, so a detached observation never creates one.
     /// </summary>

@@ -4,8 +4,9 @@
 namespace WinApp.Cli.Services.InteractiveDesktop;
 
 /// <summary>
-/// Stable error codes for coordination failures. These appear in the <c>--json</c> error envelope and
-/// are mirrored in <c>UiJsonError</c> so UI commands emit one consistent shape.
+/// Stable error codes for coordination failures. These appear in the <c>--json</c> error envelope,
+/// alongside the command-level codes in <c>UiJsonError</c>, and are declared here only — a duplicate
+/// set of constants drifted from these once already and shipped a code no code path emitted.
 /// </summary>
 internal static class UiCoordinationErrorCodes
 {
