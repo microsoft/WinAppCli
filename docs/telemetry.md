@@ -85,7 +85,7 @@ The telemetry feature collects the following data:
 | CI environment | A boolean flag indicating whether the CLI is running in a Continuous Integration environment. |
 | Caller | The value of the `WINAPP_CLI_CALLER` environment variable, if set. This allows wrapper tools (like the npm package) to identify themselves. |
 | `find-ui` usage | For the `winapp find-ui` command only, an additional usage event with non-personal, bounded values: the mode (`search`, `fetch`, or `list`); the selected `--source` (a fixed value — `gallery`, `toolkit`, `reactor`, or `core`); the catalog scenario IDs fetched (e.g. `gallery-tabview-1`), which identify built-in WinUI sample controls, never your code; whether `--json` was used; and result/ID counts. The free-form search query is **never** collected, and any requested IDs that don't match a real catalog entry are counted but **not** collected as text. |
-| `winapp ui` desktop coordination | For `winapp ui` commands only, a privacy-minimized summary of how the command shared the desktop with other UI workflows: how the workflow identity was resolved (`Explicit`, `Parent`, or `Anonymous` — never the identity itself), the coordination mode (`Observe`, `TurnShared`, or `DesktopExclusive`), how the turn was obtained (new, continuation, queued, handoff-after-idle, or detached), the outcome (completed, cancelled, coordination failure, or corruption recovery), and **coarse buckets** for how long this command waited for the desktop, how many commands were queued, and how long the owning workflow had held its turn. |
+| `winapp ui` desktop coordination | For `winapp ui` commands only, a privacy-minimized summary of how the command shared the desktop with other UI workflows: how the workflow identity was resolved (`Workflow` or `Anonymous` — never the identity itself), the coordination mode (`Observe`, `TurnShared`, or `DesktopExclusive`), how the turn was obtained (new, continuation, queued, handoff-after-idle, or detached), the outcome (completed, cancelled, coordination failure, or corruption recovery), and **coarse buckets** for how long this command waited for the desktop, how many commands were queued, and how long the owning workflow had held its turn. |
 
 ### Sanitization of sensitive data
 
@@ -95,7 +95,7 @@ The winapp CLI takes several measures to protect your privacy:
 - **Implicit values** (default values that weren't explicitly provided) are not collected.
 - **Parsing errors** are logged as `[error]` without including the actual erroneous input.
 - All string values in telemetry events undergo **sensitive string replacement** before transmission, which replaces any registered sensitive strings with anonymized tokens.
-- **Desktop coordination** never collects the `WINAPP_UI_OWNER_ID` value or its hash, process IDs, process or application names, window titles, selectors, element text, queue contents, or any part of the coordination state files. Durations and counts are reported only as fixed buckets (for example `1000-4999`), never as exact values.
+- **Desktop coordination** never collects the `WINAPP_UI_WORKFLOW_ID` value or its hash, process IDs, process or application names, window titles, selectors, element text, queue contents, or any part of the coordination state files. Durations and counts are reported only as fixed buckets (for example `1000-4999`), never as exact values.
 
 ## Crash exception telemetry
 

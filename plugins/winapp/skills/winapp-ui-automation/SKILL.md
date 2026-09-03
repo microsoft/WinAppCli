@@ -18,36 +18,43 @@ description: Inspect and interact with running Windows app UIs from the command 
 
 Windows has one foreground window, one keyboard focus, one cursor, and one input stream. `winapp ui`
 therefore makes desktop-driving commands take **cooperative turns** so concurrent workflows cannot
-steal each other's focus or dismiss each other's menus. Read-only commands never wait.
+steal each other's focus or dismiss each other's menus. That is always on. Read-only commands never
+wait.
+
+Keeping the desktop *across* commands is opt-in — without an id, each command is a one-shot that
+releases the desktop the moment it finishes:
 
 ```powershell
 # Set once per logical UI workflow — same value for cooperating calls, different values for
 # independent workflows (even from the same agent).
-$env:WINAPP_UI_OWNER_ID = [guid]::NewGuid().ToString()
+$env:WINAPP_UI_WORKFLOW_ID = [guid]::NewGuid().ToString()
 ```
 
 Rules that matter when driving this from an agent:
 
-- **Each tool call usually gets a fresh shell**, so parent-process grouping will NOT hold your
-  commands together. Inject the *same* `WINAPP_UI_OWNER_ID` into every cooperating call.
-- **A workflow keeps its turn for four seconds** after its last command. That covers back-to-back
-  commands in one script; it deliberately expires while you are reasoning.
+- **Each tool call usually gets a fresh shell**, and there is no process-ancestry fallback, so
+  commands are grouped ONLY by the id you inject. Without it every call is its own workflow.
+- **A workflow with an id keeps its turn for four seconds** after its last command. That covers
+  back-to-back commands in one script; it deliberately expires while you are reasoning.
 - **After a reasoning gap, replay your setup.** Another workflow may have used the desktop, so
   reopen the menu / re-navigate, re-resolve the element, then act. Do not assume transient UI
   survived.
 - **Prefer one tight script over many round trips** for a known sequence: `winapp ui invoke View -w
   $hwnd; winapp ui search "Status bar" -w $hwnd; winapp ui click "Status bar" -w $hwnd`.
-- **`record` shares the turn with its own workflow**, so same-owner clicks and typing are captured
-  while it runs.
+- **`record` shares the turn with its own workflow**, so same-workflow clicks and typing are captured
+  while it runs — but only if both commands carry the same id. A `record` with no id blocks everyone
+  else for its whole duration.
+- **Ordering is owner affinity, then FIFO.** An active workflow may keep issuing commands ahead of
+  others already waiting; once it yields or its grace expires, waiters are served in arrival order.
 - **Waiting is indefinite and cancellable.** A status line appears after one second; Ctrl+C exits
   `130` with error code `cancelled` and the command never ran.
 - **There is no hard cap** — a long script, unbounded recording, or failure loop can block other
   mutating workflows until it finishes or is stopped.
 
 Commands that never wait: `status`, `list-windows`, `inspect`, `search`, `get-*`, `wait-for`,
-`set-value`, `scroll-into-view`, `scroll --direction`/`--to`, and a plain `screenshot`.
+`set-value`, `scroll-into-view`, `scroll --direction`/`--to`.
 Commands that take a turn: `record` (shared) and `invoke`, `click`, `drag`, `hover`,
-`scroll --wheel`, `touch`, `pen`, `focus`, `send-keys`, `screenshot --focus`/`--capture-screen`
+`scroll --wheel`, `touch`, `pen`, `focus`, `send-keys`, `screenshot` (always exclusive)
 (exclusive).
 
 ## Common patterns
