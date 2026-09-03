@@ -3094,15 +3094,20 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
-    public async Task BuildAndResolveAsync_BuildFailure_ShortCircuitsBeforeEvaluate()
+    public async Task BuildAndResolveAsync_BuildFailure_ShortCircuitsBeforePostBuildEvaluate()
     {
-        // Change #1: a failed build pass must propagate its exit code and NOT evaluate properties.
+        // A failed build pass must propagate its exit code and skip the post-build evaluate. The
+        // publish-profile preflight still evaluates once before the build.
         var csproj = WriteFile("App.csproj", ExecutableCsproj);
-        var evaluated = false;
+        var evaluationCount = 0;
         var dotnet = new FakeDotNetService
         {
             RunDotnetStreamingHandler = (_, _, _) => 7,
-            RunDotnetCommandHandler = _ => { evaluated = true; return (0, PackagedPropertiesJson(), string.Empty); },
+            RunDotnetCommandHandler = _ =>
+            {
+                evaluationCount++;
+                return (0, PackagedPropertiesJson(), string.Empty);
+            },
         };
         var service = NewServiceWith(dotnet, LogLevel.Information, out _);
         var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Json: false);
@@ -3111,7 +3116,7 @@ public class ProjectRunServiceTests
 
         Assert.IsNull(outcome.Resolution, "a failed build must not resolve");
         Assert.AreEqual(7, outcome.ExitCode, "the build exit code must propagate");
-        Assert.IsFalse(evaluated, "a failed build must short-circuit before the evaluate pass");
+        Assert.AreEqual(1, evaluationCount, "a failed build must skip the post-build evaluate");
     }
 
     [TestMethod]

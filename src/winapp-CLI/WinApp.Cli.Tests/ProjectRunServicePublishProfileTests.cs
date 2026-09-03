@@ -296,6 +296,35 @@ public sealed class ProjectRunServicePublishProfileTests
     }
 
     [TestMethod]
+    public void CandidateTargetFrameworkChange_SuppressesInference()
+    {
+        var app = WriteApp();
+        WriteProfile("win-arm64.pubxml", "ARM64", "win-arm64");
+        var current = ProfileProperties(
+            app,
+            "win-anycpu.pubxml",
+            imported: false,
+            selfContained: false,
+            targetFramework: "net10.0-windows10.0.26100.0");
+        var candidate = ProfileProperties(
+            app,
+            "win-arm64.pubxml",
+            imported: true,
+            selfContained: true,
+            targetFramework: "net10.0-windows10.0.19041.0");
+
+        var resolved = ProjectRunService.ResolvePublishProfileFallback(
+            app,
+            Options("arm64"),
+            current,
+            candidate);
+
+        Assert.IsNull(
+            resolved.PublishProfile,
+            "an inferred profile must not silently retarget the app to a stale framework");
+    }
+
+    [TestMethod]
     public async Task SuccessfulRidOnlyBuild_DoesNotActivateFallbackProfile()
     {
         WriteFile("Library\\Library.csproj", """
@@ -492,6 +521,54 @@ public sealed class ProjectRunServicePublishProfileTests
         Assert.IsFalse(dotnet.StreamingCalls.Single().Contains("debug-arm64", StringComparison.Ordinal));
     }
 
+    [TestMethod]
+    public async Task ImportedDeclaration_UsesEffectiveMsBuildProfile()
+    {
+        WriteFile("Library\\Library.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+                <Platform>AnyCPU</Platform>
+              </PropertyGroup>
+            </Project>
+            """);
+        var app = WriteFile("App.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <OutputType>WinExe</OutputType>
+                <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+                <Platforms>x64;ARM64</Platforms>
+                <PublishTrimmed>true</PublishTrimmed>
+              </PropertyGroup>
+              <ItemGroup>
+                <ProjectReference Include="Library\Library.csproj" />
+              </ItemGroup>
+            </Project>
+            """);
+        WriteFile("Directory.Build.props", """
+            <Project>
+              <PropertyGroup>
+                <PublishProfile>imported-$(Platform.ToLower()).pubxml</PublishProfile>
+              </PropertyGroup>
+            </Project>
+            """);
+        WriteProfile("imported-arm64.pubxml", "ARM64", "win-arm64");
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = ProfileEvaluationHandler(
+                app,
+                publishTrimmed: true,
+                currentProfile: "imported-anycpu.pubxml",
+                candidateProfile: "imported-arm64.pubxml"),
+        };
+        var service = NewService(dotnet);
+
+        var outcome = await service.BuildAndResolveAsync(app, Options("arm64"), CancellationToken.None);
+
+        Assert.IsNotNull(outcome.Resolution);
+        StringAssert.Contains(dotnet.StreamingCalls.Single(), "-p:PublishProfile=imported-arm64.pubxml");
+    }
+
     private static ProjectRunOptions Options(string architecture, params string[] properties) =>
         new("Release", architecture, null, NoBuild: false, NoRestore: false, Properties: properties);
 
@@ -513,7 +590,8 @@ public sealed class ProjectRunServicePublishProfileTests
         bool imported,
         bool selfContained,
         bool publishTrimmed = true,
-        bool publishAot = false)
+        bool publishAot = false,
+        string targetFramework = "net10.0-windows10.0.26100.0")
     {
         var root = Path.Join(app.Directory!.FullName, "Properties", "PublishProfiles")
             + Path.DirectorySeparatorChar;
@@ -535,6 +613,7 @@ public sealed class ProjectRunServicePublishProfileTests
             ["WebPublishProfileFile"] = imported ? fullPath : string.Empty,
             ["PublishProfileImported"] = imported.ToString(),
             ["_PublishProfileRootFolder"] = root,
+            ["TargetFramework"] = targetFramework,
         };
     }
 

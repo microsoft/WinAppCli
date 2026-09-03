@@ -39,6 +39,7 @@ internal sealed partial class ProjectRunService(
         "WebPublishProfileFile",
         "PublishProfileImported",
         "_PublishProfileRootFolder",
+        "TargetFramework",
     ];
 
     /// <summary>

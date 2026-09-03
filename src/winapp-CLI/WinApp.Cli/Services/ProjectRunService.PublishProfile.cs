@@ -30,8 +30,7 @@ internal sealed partial class ProjectRunService
         string? csWinRTMetadataFolder,
         CancellationToken cancellationToken)
     {
-        if (!CanInferPublishProfile(options)
-            || !DeclaresPlatformDependentPublishProfile(csproj))
+        if (!CanInferPublishProfile(options))
         {
             return options;
         }
@@ -129,8 +128,12 @@ internal sealed partial class ProjectRunService
 
         var currentProfile = GetProp(currentProperties, "PublishProfile");
         var candidateProfile = GetProp(platformProperties, "PublishProfile");
+        var currentFramework = GetProp(currentProperties, "TargetFramework");
+        var candidateFramework = GetProp(platformProperties, "TargetFramework");
         if (string.IsNullOrWhiteSpace(candidateProfile)
             || string.Equals(currentProfile, candidateProfile, StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(currentFramework)
+            || !string.Equals(currentFramework, candidateFramework, StringComparison.OrdinalIgnoreCase)
             || !IsTrue(GetProp(platformProperties, "PublishProfileImported"))
             || !IsTrue(GetProp(platformProperties, "SelfContained"))
             || IsTrue(GetProp(platformProperties, "PublishAot"))
@@ -158,31 +161,6 @@ internal sealed partial class ProjectRunService
         && !UserSpecifiesProperty(options.Properties, "PublishProfileName")
         && !UserSpecifiesProperty(options.Properties, "PublishProfileFullPath")
         && !UserSpecifiesProperty(options.Properties, "WebPublishProfileFile");
-
-    private static bool DeclaresPlatformDependentPublishProfile(FileInfo project)
-    {
-        try
-        {
-            return XDocument
-                .Load(project.FullName)
-                .Descendants()
-                .Any(element =>
-                    element.Name.LocalName == "PublishProfile"
-                    && element.Value.Contains("$(Platform", StringComparison.OrdinalIgnoreCase));
-        }
-        catch (IOException)
-        {
-            return false;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return false;
-        }
-        catch (XmlException)
-        {
-            return false;
-        }
-    }
 
     private static bool RequiresSelfContainedProfile(IReadOnlyDictionary<string, string> properties) =>
         IsTrue(GetProp(properties, "PublishTrimmed"))
