@@ -319,10 +319,11 @@ internal class UnregisterCommand : Command, IShortDescription
                     //
                     // An UNKNOWN location (Windows could not resolve it, typically because the files were
                     // deleted) or an unresolved root counts as unverifiable, NOT as verified. Identity
-                    // alone is not proof of ownership: the default identity is the file stem, so
-                    // 'A\counter.cs' and 'B\counter.cs' both register 'counter'. Skipping the check there
-                    // would let `winapp unregister B\counter.cs` delete A's registration and its
-                    // application data. `--prune` is the supported way to clear registrations whose files
+                    // alone is not proof of ownership: a default single-file identity carries a hash of the
+                    // file's path, but an explicit WinAppPackageName or an authored manifest's Identity/@Name
+                    // is used verbatim, so two apps under different roots can deliberately share one. Skipping
+                    // the check there would let `winapp unregister B\counter.cs` delete A's registration and
+                    // its application data. `--prune` is the supported way to clear registrations whose files
                     // are gone, and it preserves that data.
                     if (!force)
                     {

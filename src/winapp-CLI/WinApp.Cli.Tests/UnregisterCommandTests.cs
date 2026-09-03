@@ -558,9 +558,10 @@ public class UnregisterCommandTests : BaseCommandTests
     [TestMethod]
     public async Task UnregisterCommand_SingleFile_UnresolvedBuildRoot_IsSkippedNotRemoved()
     {
-        // Identity alone is not proof of ownership: the default identity is the file stem, so
-        // 'A\counter.cs' and 'B\counter.cs' both register 'counter'. With no build root to compare
-        // against, removal would let one file delete the other's registration and app data.
+        // Identity alone is not proof of ownership: an explicit WinAppPackageName or an authored
+        // manifest's Identity/@Name is used verbatim, so two apps under different roots can deliberately
+        // share one. With no build root to compare against, removal would let one file delete the other's
+        // registration and app data.
         var singleFile = CreateSingleFile();
         var command = GetRequiredService<UnregisterCommand>();
 
