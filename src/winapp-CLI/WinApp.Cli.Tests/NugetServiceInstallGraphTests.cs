@@ -518,6 +518,7 @@ public class NugetServiceInstallGraphTests : BaseCommandTests
                 Assert.Fail(
                     "Install reported success after the upgrade failed. Installed: "
                     + string.Join(", ", installed!.Select(kv => $"{kv.Key}={kv.Value}")));
+                return;
             }
 
             StringAssert.Contains(failure.Message, "Drop.Shared", StringComparison.Ordinal);
