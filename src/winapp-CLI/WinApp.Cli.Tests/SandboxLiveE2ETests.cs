@@ -31,7 +31,7 @@ namespace WinApp.Cli.Tests;
 /// </remarks>
 [TestClass]
 [DoNotParallelize]
-public class SandboxLiveE2ETests
+public partial class SandboxLiveE2ETests
 {
     /// <summary>Set to <c>1</c> to run these tests.</summary>
     internal const string GateVariable = "WINAPP_SANDBOX_E2E";
@@ -113,7 +113,7 @@ public class SandboxLiveE2ETests
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
         timeout.CancelAfter(CommandTimeout);
-        var foregroundBefore = Windows.Win32.PInvoke.GetForegroundWindow();
+        var foregroundBefore = GetForegroundWindow();
 
         try
         {
@@ -128,7 +128,7 @@ public class SandboxLiveE2ETests
                 Assert.IsTrue(cold.Capabilities.SupportsInteractiveDesktop);
                 Assert.AreEqual(
                     foregroundBefore,
-                    Windows.Win32.PInvoke.GetForegroundWindow(),
+                    GetForegroundWindow(),
                     "Preparing the Sandbox must not change the host foreground window.");
 
                 firstEpoch = cold.Epoch.Value;
@@ -196,7 +196,7 @@ public class SandboxLiveE2ETests
 
             Assert.AreEqual(
                 foregroundBefore,
-                Windows.Win32.PInvoke.GetForegroundWindow(),
+                GetForegroundWindow(),
                 "Reusing the Sandbox must not change the host foreground window.");
         }
         finally
@@ -932,4 +932,12 @@ public class SandboxLiveE2ETests
             Trace.TraceWarning("Could not remove '{0}': {1}", path, ex.Message);
         }
     }
+
+    // The foreground-window checks read real Win32 state to prove preparing or reusing a Sandbox
+    // never steals focus. Declared here rather than through the generated Windows.Win32.PInvoke:
+    // this test project references both winapp and the UI Automation recording package, and each
+    // ships its own Windows.Win32.PInvoke, so the generated name is ambiguous from a test.
+    // Source-generated (LibraryImport) to match the rest of the suite's interop.
+    [System.Runtime.InteropServices.LibraryImport("user32.dll")]
+    private static partial nint GetForegroundWindow();
 }

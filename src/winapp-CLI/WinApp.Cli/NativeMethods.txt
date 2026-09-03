@@ -50,6 +50,9 @@ SetWindowPos
 AttachThreadInput
 BringWindowToTop
 IsWindow
+ShowWindow
+GetSystemMetrics
+GetWindowThreadProcessId
 MiniDumpWriteDump
 MINIDUMP_TYPE
 MINIDUMP_EXCEPTION_INFORMATION
