@@ -31,11 +31,25 @@ internal interface IApiMetadataService
 
     ApiQueryResult<ApiMembersOutput> Members(string fullName, ApiRequestScope scope, string? filter = null, bool includeAll = false);
 
+    /// <summary>Lists members for several types, reading the index once for the whole batch.</summary>
+    List<(string Type, ApiQueryResult<ApiMembersOutput> Result)> MembersBatch(
+        IReadOnlyList<string> fullNames, ApiRequestScope scope, string? filter = null, bool includeAll = false);
+
     ApiQueryResult<ApiCheckPropertyOutput> CheckProperty(string typeName, string propertyName, ApiRequestScope scope);
+
+    /// <summary>
+    /// Checks several properties of one type, reading the index once for the whole batch.
+    /// </summary>
+    List<(string Property, ApiQueryResult<ApiCheckPropertyOutput> Result)> CheckProperties(
+        string typeName, IReadOnlyList<string> propertyNames, ApiRequestScope scope);
 
     ApiQueryResult<ApiTypesOutput> Types(string ns, ApiRequestScope scope);
 
     ApiQueryResult<ApiEnumsOutput> Enums(string fullName, ApiRequestScope scope, string? filter = null);
+
+    /// <summary>Lists values for several enums, reading the index once for the whole batch.</summary>
+    List<(string Type, ApiQueryResult<ApiEnumsOutput> Result)> EnumsBatch(
+        IReadOnlyList<string> fullNames, ApiRequestScope scope, string? filter = null);
 
     ApiQueryResult<ApiNamespacesOutput> Namespaces(string? filter, ApiRequestScope scope);
 
@@ -63,14 +77,26 @@ internal sealed class ApiMetadataService(
     public ApiQueryResult<ApiMembersOutput> Members(string fullName, ApiRequestScope scope, string? filter = null, bool includeAll = false) =>
         WithManifest(scope, (cacheDir, manifest) => ApiQueryEngine.Members(fullName, filter, cacheDir, manifest, includeAll));
 
+    public List<(string Type, ApiQueryResult<ApiMembersOutput> Result)> MembersBatch(
+        IReadOnlyList<string> fullNames, ApiRequestScope scope, string? filter = null, bool includeAll = false) =>
+        WithManifestBatch(scope, fullNames, (cacheDir, manifest) => ApiQueryEngine.MembersBatch(fullNames, filter, cacheDir, manifest, includeAll));
+
     public ApiQueryResult<ApiCheckPropertyOutput> CheckProperty(string typeName, string propertyName, ApiRequestScope scope) =>
         WithManifest(scope, (cacheDir, manifest) => ApiQueryEngine.CheckProperty(typeName, propertyName, cacheDir, manifest));
+
+    public List<(string Property, ApiQueryResult<ApiCheckPropertyOutput> Result)> CheckProperties(
+        string typeName, IReadOnlyList<string> propertyNames, ApiRequestScope scope) =>
+        WithManifestBatch(scope, propertyNames, (cacheDir, manifest) => ApiQueryEngine.CheckProperties(typeName, propertyNames, cacheDir, manifest));
 
     public ApiQueryResult<ApiTypesOutput> Types(string ns, ApiRequestScope scope) =>
         WithManifest(scope, (cacheDir, manifest) => ApiQueryEngine.Types(ns, cacheDir, manifest));
 
     public ApiQueryResult<ApiEnumsOutput> Enums(string fullName, ApiRequestScope scope, string? filter = null) =>
         WithManifest(scope, (cacheDir, manifest) => ApiQueryEngine.Enums(fullName, filter, cacheDir, manifest));
+
+    public List<(string Type, ApiQueryResult<ApiEnumsOutput> Result)> EnumsBatch(
+        IReadOnlyList<string> fullNames, ApiRequestScope scope, string? filter = null) =>
+        WithManifestBatch(scope, fullNames, (cacheDir, manifest) => ApiQueryEngine.EnumsBatch(fullNames, filter, cacheDir, manifest));
 
     public ApiQueryResult<ApiNamespacesOutput> Namespaces(string? filter, ApiRequestScope scope) =>
         WithManifest(scope, (cacheDir, manifest) => ApiQueryEngine.Namespaces(filter, cacheDir, manifest));
@@ -215,18 +241,69 @@ internal sealed class ApiMetadataService(
 
         // Stamp scope and project identity centrally so every verb reports them
         // identically and no payload can silently omit which index answered.
-        // Project names are not unique across directories, so the directory is
-        // the only reliable identity — callers auditing which project served a
-        // query must not have to infer it from cache timestamps.
         if (result.Data is IApiScopedOutput scoped)
         {
-            scoped.Scope = resolved.IsSdk ? ApiScopeNames.Sdk : ApiScopeNames.Project;
-            scoped.ProjectName = resolved.Manifest.ProjectName;
-            scoped.ProjectDir = string.IsNullOrEmpty(resolved.Manifest.ProjectDir)
-                ? null
-                : resolved.Manifest.ProjectDir;
+            StampScope(scoped, resolved);
         }
         return result;
+    }
+
+    /// <summary>
+    /// Resolves the manifest once and runs a batch query against it, stamping scope onto
+    /// every result. A failure before the query applies to the whole batch, so each key
+    /// reports the same error rather than the batch collapsing to a single message.
+    /// </summary>
+    private List<(string Key, ApiQueryResult<T> Result)> WithManifestBatch<T>(
+        ApiRequestScope scope,
+        IReadOnlyList<string> keys,
+        Func<string, ProjectManifest, List<(string Key, ApiQueryResult<T> Result)>> query)
+        where T : class
+    {
+        static List<(string, ApiQueryResult<T>)> FailAll(IReadOnlyList<string> keys, string message)
+        {
+            var failed = new List<(string, ApiQueryResult<T>)>(keys.Count);
+            foreach (string key in keys)
+            {
+                failed.Add((key, ApiQueryResult<T>.NoProject(message)));
+            }
+            return failed;
+        }
+
+        string cacheDir = GetCacheDir();
+        string? indexError = AutoIndexIfStale(scope, cacheDir);
+        if (indexError is not null)
+        {
+            return FailAll(keys, indexError);
+        }
+        ResolvedScope resolved = ResolveManifest(scope, cacheDir);
+        if (resolved.Manifest is null)
+        {
+            return FailAll(keys, resolved.Error ?? NoProjectMessage);
+        }
+
+        var results = query(cacheDir, resolved.Manifest);
+        foreach ((_, ApiQueryResult<T> result) in results)
+        {
+            if (result.Data is IApiScopedOutput scoped)
+            {
+                StampScope(scoped, resolved);
+            }
+        }
+        return results;
+    }
+
+    /// <summary>
+    /// Records which index answered. Project names are not unique across directories, so
+    /// the directory is the only reliable identity — a caller auditing which project
+    /// served a query must not have to infer it from cache timestamps.
+    /// </summary>
+    private static void StampScope(IApiScopedOutput scoped, ResolvedScope resolved)
+    {
+        scoped.Scope = resolved.IsSdk ? ApiScopeNames.Sdk : ApiScopeNames.Project;
+        scoped.ProjectName = resolved.Manifest!.ProjectName;
+        scoped.ProjectDir = string.IsNullOrEmpty(resolved.Manifest.ProjectDir)
+            ? null
+            : resolved.Manifest.ProjectDir;
     }
 
     private string ResolveProjectDir(ApiRequestScope scope) =>

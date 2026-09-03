@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Globalization;
 using System.Text.RegularExpressions;
 using System.Xml;
 
@@ -129,12 +130,25 @@ internal static partial class XmlDocParser
         };
     }
 
+    /// <summary>
+    /// Builds the documentation ID for a method.
+    /// <para>
+    /// The parameter types come from <see cref="WinMdMemberInfo.DocParameterTypes"/>
+    /// rather than the displayed signature, because a documentation file spells types the
+    /// way the compiler emits them — <c>System.Double</c>, not <c>Double</c> — and a key
+    /// built from display names matches nothing for any method taking a primitive.
+    /// </para>
+    /// </summary>
     private static string BuildMethodDocKey(string typeFullName, WinMdMemberInfo member)
     {
         string key = "M:" + typeFullName + "." + member.Name;
-        if (member.Parameters != null && member.Parameters.Count > 0)
+        if (member.GenericParameterCount > 0)
         {
-            key += "(" + string.Join(",", member.Parameters.ConvertAll(p => p.Type)) + ")";
+            key += "``" + member.GenericParameterCount.ToString(CultureInfo.InvariantCulture);
+        }
+        if (member.DocParameterTypes is { Count: > 0 } docTypes)
+        {
+            key += "(" + string.Join(",", docTypes) + ")";
         }
         return key;
     }

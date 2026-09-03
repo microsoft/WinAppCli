@@ -258,13 +258,20 @@ internal static class WinMdParser
                 MethodSignature<string> sig = method.DecodeSignature(typeProvider, null);
                 List<WinMdParameterInfo> parameters = GetMethodParameters(reader, method, sig);
                 string paramText = string.Join(", ", parameters.Select(p => p.Type + " " + p.Name));
+                // A static method is called on the type, not on an instance, so a
+                // signature that omits it tells a caller to write the wrong thing.
+                string staticPrefix = (method.Attributes & MethodAttributes.Static) != 0 ? "static " : string.Empty;
+                MethodSignature<string> docSig = method.DecodeSignature(DocIdTypeProvider.Instance, null);
                 members.Add(new WinMdMemberInfo
                 {
                     Name = name,
                     Kind = MemberKind.Method,
-                    Signature = $"{sig.ReturnType} {name}({paramText})",
+                    Signature = $"{staticPrefix}{sig.ReturnType} {name}({paramText})",
                     ReturnType = sig.ReturnType,
                     Parameters = parameters,
+                    IsStatic = (method.Attributes & MethodAttributes.Static) != 0,
+                    DocParameterTypes = [.. docSig.ParameterTypes],
+                    GenericParameterCount = docSig.GenericParameterCount,
                     DeprecatedMessage = deprecated
                 });
             }
@@ -349,23 +356,64 @@ internal static class WinMdParser
         return members;
     }
 
+    /// <summary>
+    /// Pairs each signature parameter type with its metadata Parameter row.
+    /// <para>
+    /// Rows are matched by <see cref="Parameter.SequenceNumber"/> rather than by
+    /// enumeration order: a parameter with no row of its own is simply absent from the
+    /// table, so walking the rows in order would shift every name after the gap onto
+    /// the wrong parameter. SequenceNumber is 1-based, with 0 reserved for the return
+    /// value.
+    /// </para>
+    /// </summary>
     private static List<WinMdParameterInfo> GetMethodParameters(MetadataReader reader, MethodDefinition method, MethodSignature<string> sig)
     {
         var parameters = new List<WinMdParameterInfo>();
-        var names = method.GetParameters()
-            .Select(reader.GetParameter)
-            .Where(parameter => parameter.SequenceNumber > 0)
-            .Select(parameter => reader.GetString(parameter.Name))
-            .ToList();
+        var rows = new Dictionary<int, Parameter>();
+        foreach (ParameterHandle handle in method.GetParameters())
+        {
+            Parameter parameter = reader.GetParameter(handle);
+            if (parameter.SequenceNumber > 0)
+            {
+                rows[parameter.SequenceNumber] = parameter;
+            }
+        }
         for (int i = 0; i < sig.ParameterTypes.Length; i++)
         {
+            bool hasRow = rows.TryGetValue(i + 1, out Parameter row);
+            string? rowName = hasRow ? reader.GetString(row.Name) : null;
             parameters.Add(new WinMdParameterInfo
             {
-                Name = i < names.Count ? names[i] : $"arg{i}",
-                Type = sig.ParameterTypes[i]
+                Name = string.IsNullOrEmpty(rowName) ? $"arg{i}" : rowName,
+                Type = ApplyParameterDirection(sig.ParameterTypes[i], hasRow ? row.Attributes : default)
             });
         }
         return parameters;
+    }
+
+    /// <summary>
+    /// Renders a by-reference parameter with the keyword C# actually requires.
+    /// <para>
+    /// The signature blob only says "by reference"; whether that is <c>out</c>,
+    /// <c>in</c>, or <c>ref</c> lives in the Parameter row's attributes. Reporting every
+    /// one as <c>ref</c> means a caller copying the signature of a Try-pattern API such
+    /// as <c>Boolean TryGetValue(String key, out String value)</c> writes code that does
+    /// not compile.
+    /// </para>
+    /// </summary>
+    private static string ApplyParameterDirection(string signatureType, ParameterAttributes attributes)
+    {
+        const string ByRefPrefix = "ref ";
+        if (!signatureType.StartsWith(ByRefPrefix, StringComparison.Ordinal))
+        {
+            return signatureType;
+        }
+        string elementType = signatureType.Substring(ByRefPrefix.Length);
+        bool isOut = (attributes & ParameterAttributes.Out) != 0;
+        bool isIn = (attributes & ParameterAttributes.In) != 0;
+        // [in, out] together is a genuinely read-write reference, i.e. plain 'ref'.
+        string keyword = isOut && !isIn ? "out" : (isIn && !isOut ? "in" : "ref");
+        return keyword + " " + elementType;
     }
 
     internal static List<string> ParseEnumValues(MetadataReader reader, TypeDefinition typeDef)

@@ -1274,7 +1274,7 @@ A query from a directory with no project and no solution is *always* answered by
 **Commands:**
 - *(bare)* `find-api "<query>" ["<query>"...]` - Lexically search type and member names, grouped by namespace
 - `members <type> [<type>...] [--filter <text>]` - List a type's properties, events, and methods (declared members with signatures, inherited members summarized by declaring type)
-- `check-property <type> <property> [<property>...]` - Validate properties exist on a type (exits non-zero if any is missing). A **read-only** property is reported with ⚠️ and "read-only, cannot be assigned" rather than a plain ✅, so a property such as `ActualWidth` is not mistaken for something you can set.
+- `check-property <type> <property> [<property>...]` - Validate properties exist on a type (exits non-zero if any is missing). A **read-only** property is reported with ⚠️ and "read-only, cannot be assigned" rather than a plain ✅, so a property such as `ActualWidth` is not mistaken for something you can set. Property names are matched **case-sensitively**, because C# and XAML are: `check-property Button background` exits non-zero and offers `Background` as a near match rather than reporting a name you cannot actually write.
 - `enums <type> [<type>...] [--filter <text>]` - List an enum's values (exits non-zero when the type is not an enum)
 - `packages` - List the indexed metadata packages, with per-package type/member counts
 - `stats` - Show aggregate index statistics (packages, namespaces, types, members, `.winmd` files)
@@ -1290,6 +1290,8 @@ A query from a directory with no project and no solution is *always* answered by
 **Search ranking.** A query that exactly matches a type name is ranked ahead of partial matches, and when a short name is shared by several namespaces only the exact-name collisions are listed as ambiguous — a query like `NavigationView` reports the handful of namespaces that define that exact type rather than every namespace containing a similarly-named symbol. The ambiguity list obeys `--max`, and normal results are still printed underneath it.
 
 **Type names.** `members`, `check-property`, and `enums` accept a short name (`NavigationView`) or a fully-qualified one (`Microsoft.UI.Xaml.Controls.NavigationView`). When a short name is shared by a modern `Microsoft.*` type and its legacy `Windows.*` UWP twin, the `Microsoft.*` type answers — that is the projection a Windows App SDK app uses — and the resolved fully-qualified name is always shown. Any other collision exits non-zero and lists the candidates instead of guessing.
+
+**Method signatures.** A signature is printed the way you would write the call: a method you call on the type rather than on an instance is shown with `static`, and a by-reference parameter is shown with the keyword it actually needs — `out`, `in`, or `ref`. So `TryGetValue` reads `Boolean TryGetValue(String key, out String value)`, which compiles as written.
 
 **Options:**
 - `--max <n>` - Maximum number of namespace-grouped search results (default `5`; search only). Also caps the ambiguity list, so a short query that collides across many namespaces stays readable.

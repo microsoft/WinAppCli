@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Text.Json.Serialization;
+
 namespace WinApp.Cli.Services.ApiSearch;
 
 /// <summary>The kind of a type member surfaced by the API metadata index.</summary>
@@ -42,6 +44,25 @@ internal sealed class WinMdMemberInfo
     public string? ReturnType { get; init; }
 
     public List<WinMdParameterInfo>? Parameters { get; init; }
+
+    /// <summary>
+    /// True for a method called on the type rather than on an instance. Recorded
+    /// separately from <see cref="Signature"/> so a consumer can branch on it without
+    /// parsing the rendered text.
+    /// </summary>
+    public bool IsStatic { get; init; }
+
+    /// <summary>
+    /// Parameter types spelled the way an XML documentation ID spells them, used only to
+    /// look this member up in a documentation file. Not cached: descriptions are merged
+    /// during indexing, so this has served its purpose before anything is written out.
+    /// </summary>
+    [JsonIgnore]
+    public List<string>? DocParameterTypes { get; init; }
+
+    /// <summary>Generic arity, which a documentation ID appends to the method name as <c>``n</c>.</summary>
+    [JsonIgnore]
+    public int GenericParameterCount { get; init; }
 
     public string? Description { get; set; }
 

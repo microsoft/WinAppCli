@@ -225,8 +225,31 @@ internal static class ApiQueryEngine
             return ApiQueryResult<ApiMembersOutput>.InvalidInput("A type name is required.");
         }
 
-        List<string> packageCacheDirs = GetPackageCacheDirs(cacheDir, manifest);
-        var allTypes = LoadAllTypes(packageCacheDirs);
+        var allTypes = LoadAllTypes(GetPackageCacheDirs(cacheDir, manifest));
+        return MembersAgainst(typeName, filter, allTypes, cacheDir, manifest, includeAll);
+    }
+
+    /// <summary>
+    /// Lists members for several types against a single load of the index. See
+    /// <see cref="CheckProperties"/> for why the batch forms load once.
+    /// </summary>
+    public static List<(string Type, ApiQueryResult<ApiMembersOutput> Result)> MembersBatch(
+        IReadOnlyList<string> typeNames, string? filter, string cacheDir, ProjectManifest manifest, bool includeAll = false)
+    {
+        var allTypes = LoadAllTypes(GetPackageCacheDirs(cacheDir, manifest));
+        var results = new List<(string, ApiQueryResult<ApiMembersOutput>)>(typeNames.Count);
+        foreach (string typeName in typeNames)
+        {
+            results.Add((typeName, string.IsNullOrWhiteSpace(typeName)
+                ? ApiQueryResult<ApiMembersOutput>.InvalidInput("A type name is required.")
+                : MembersAgainst(typeName, filter, allTypes, cacheDir, manifest, includeAll)));
+        }
+        return results;
+    }
+
+    private static ApiQueryResult<ApiMembersOutput> MembersAgainst(
+        string typeName, string? filter, List<WinMdTypeInfo> allTypes, string cacheDir, ProjectManifest manifest, bool includeAll)
+    {
         var (type, ambiguous) = ResolveType(typeName, allTypes);
         if (ambiguous is not null)
         {
@@ -422,7 +445,31 @@ internal static class ApiQueryEngine
         {
             return ApiQueryResult<ApiEnumsOutput>.InvalidInput("A type name is required.");
         }
-        var (type, ambiguous) = ResolveType(typeName, LoadAllTypes(GetPackageCacheDirs(cacheDir, manifest)));
+        return EnumsAgainst(typeName, filter, LoadAllTypes(GetPackageCacheDirs(cacheDir, manifest)), cacheDir, manifest);
+    }
+
+    /// <summary>
+    /// Lists values for several enums against a single load of the index. See
+    /// <see cref="CheckProperties"/> for why the batch forms load once.
+    /// </summary>
+    public static List<(string Type, ApiQueryResult<ApiEnumsOutput> Result)> EnumsBatch(
+        IReadOnlyList<string> typeNames, string? filter, string cacheDir, ProjectManifest manifest)
+    {
+        var allTypes = LoadAllTypes(GetPackageCacheDirs(cacheDir, manifest));
+        var results = new List<(string, ApiQueryResult<ApiEnumsOutput>)>(typeNames.Count);
+        foreach (string typeName in typeNames)
+        {
+            results.Add((typeName, string.IsNullOrWhiteSpace(typeName)
+                ? ApiQueryResult<ApiEnumsOutput>.InvalidInput("A type name is required.")
+                : EnumsAgainst(typeName, filter, allTypes, cacheDir, manifest)));
+        }
+        return results;
+    }
+
+    private static ApiQueryResult<ApiEnumsOutput> EnumsAgainst(
+        string typeName, string? filter, List<WinMdTypeInfo> allTypes, string cacheDir, ProjectManifest manifest)
+    {
+        var (type, ambiguous) = ResolveType(typeName, allTypes);
         if (ambiguous is not null)
         {
             return ApiQueryResult<ApiEnumsOutput>.InvalidInput(AmbiguousTypeMessage(typeName, ambiguous));
@@ -585,9 +632,45 @@ internal static class ApiQueryEngine
             return ApiQueryResult<ApiCheckPropertyOutput>.InvalidInput("Usage: check-property <TypeName> <PropertyName>");
         }
 
-        List<string> packageCacheDirs = GetPackageCacheDirs(cacheDir, manifest);
-        var allTypes = LoadAllTypes(packageCacheDirs);
+        var allTypes = LoadAllTypes(GetPackageCacheDirs(cacheDir, manifest));
+        return CheckPropertyAgainst(typeName, propertyName, allTypes, cacheDir, manifest);
+    }
 
+    /// <summary>
+    /// Checks several properties of one type against a single load of the index.
+    /// <para>
+    /// Reading the index is the whole cost of a check — around a second for a WinUI
+    /// project — and it does not depend on which property is being asked about, so
+    /// calling <see cref="CheckProperty"/> once per name makes a batch scale linearly in
+    /// the very case the batch form exists to make cheap.
+    /// </para>
+    /// </summary>
+    public static List<(string Property, ApiQueryResult<ApiCheckPropertyOutput> Result)> CheckProperties(
+        string typeName, IReadOnlyList<string> propertyNames, string cacheDir, ProjectManifest manifest)
+    {
+        var results = new List<(string, ApiQueryResult<ApiCheckPropertyOutput>)>(propertyNames.Count);
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            foreach (string propertyName in propertyNames)
+            {
+                results.Add((propertyName, ApiQueryResult<ApiCheckPropertyOutput>.InvalidInput("Usage: check-property <TypeName> <PropertyName>")));
+            }
+            return results;
+        }
+
+        var allTypes = LoadAllTypes(GetPackageCacheDirs(cacheDir, manifest));
+        foreach (string propertyName in propertyNames)
+        {
+            results.Add((propertyName, string.IsNullOrWhiteSpace(propertyName)
+                ? ApiQueryResult<ApiCheckPropertyOutput>.InvalidInput("Usage: check-property <TypeName> <PropertyName>")
+                : CheckPropertyAgainst(typeName, propertyName, allTypes, cacheDir, manifest)));
+        }
+        return results;
+    }
+
+    private static ApiQueryResult<ApiCheckPropertyOutput> CheckPropertyAgainst(
+        string typeName, string propertyName, List<WinMdTypeInfo> allTypes, string cacheDir, ProjectManifest manifest)
+    {
         var (targetType, ambiguous) = ResolveType(typeName, allTypes);
         if (ambiguous is not null)
         {
@@ -602,9 +685,13 @@ internal static class ApiQueryEngine
 
         // 1. Direct or inherited member. Only a Property counts as "found" — a
         // method or event with the same name is not a settable property.
+        // The comparison is case-sensitive because XAML and C# both are: reporting
+        // "isEnabled" as found would send a caller off to write code that will not
+        // compile. A case-only miss still scores 100 in the suggestion pass below, so
+        // the correct spelling comes back as the top near match.
         var exact = members.FirstOrDefault(m =>
             m.Member.Kind == MemberKind.Property &&
-            m.Member.Name.Equals(propertyName, StringComparison.OrdinalIgnoreCase));
+            m.Member.Name.Equals(propertyName, StringComparison.Ordinal));
         if (exact.Member != null)
         {
             ApiMemberOutput match = ToMemberOutput(exact.Member, exact.DeclaringType, targetType.FullName);
@@ -1015,15 +1102,12 @@ internal static class ApiQueryEngine
 
     private static List<string> GetPackageCacheDirs(string cacheDir, ProjectManifest manifest)
     {
-        var dirs = new List<string>();
-        foreach (ProjectPackageRef package in manifest.Packages)
-        {
-            if (ApiCachePaths.TryPackageCacheDir(cacheDir, package, out string dir) && Directory.Exists(dir))
-            {
-                dirs.Add(dir);
-            }
-        }
-        return dirs;
+        // A package with no resolvable cache directory yields an empty path, which
+        // Directory.Exists rejects alongside any directory that was never written.
+        return manifest.Packages
+            .Select(package => ApiCachePaths.TryPackageCacheDir(cacheDir, package, out string dir) ? dir : string.Empty)
+            .Where(Directory.Exists)
+            .ToList();
     }
 
     private static T? Deserialize<T>(string path, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo)

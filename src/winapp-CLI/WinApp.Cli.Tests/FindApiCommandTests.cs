@@ -114,6 +114,55 @@ internal sealed class FakeApiMetadataService : IApiMetadataService
         });
     }
 
+    /// <summary>
+    /// Counts batch calls so a test can prove the command asks for the whole batch at
+    /// once. Checking one property at a time reloads the on-disk index per property,
+    /// which is the entire cost of the operation.
+    /// </summary>
+    public int CheckPropertiesCallCount { get; private set; }
+
+    /// <summary>Counts batch calls for <c>members</c>, as <see cref="CheckPropertiesCallCount"/> does for properties.</summary>
+    public int MembersBatchCallCount { get; private set; }
+
+    /// <summary>Counts batch calls for <c>enums</c>, as <see cref="CheckPropertiesCallCount"/> does for properties.</summary>
+    public int EnumsBatchCallCount { get; private set; }
+
+    public List<(string Type, ApiQueryResult<ApiMembersOutput> Result)> MembersBatch(
+        IReadOnlyList<string> fullNames, ApiRequestScope scope, string? filter = null, bool includeAll = false)
+    {
+        MembersBatchCallCount++;
+        var results = new List<(string, ApiQueryResult<ApiMembersOutput>)>(fullNames.Count);
+        foreach (string fullName in fullNames)
+        {
+            results.Add((fullName, Members(fullName, scope, filter, includeAll)));
+        }
+        return results;
+    }
+
+    public List<(string Type, ApiQueryResult<ApiEnumsOutput> Result)> EnumsBatch(
+        IReadOnlyList<string> fullNames, ApiRequestScope scope, string? filter = null)
+    {
+        EnumsBatchCallCount++;
+        var results = new List<(string, ApiQueryResult<ApiEnumsOutput>)>(fullNames.Count);
+        foreach (string fullName in fullNames)
+        {
+            results.Add((fullName, Enums(fullName, scope, filter)));
+        }
+        return results;
+    }
+
+    public List<(string Property, ApiQueryResult<ApiCheckPropertyOutput> Result)> CheckProperties(
+        string typeName, IReadOnlyList<string> propertyNames, ApiRequestScope scope)
+    {
+        CheckPropertiesCallCount++;
+        var results = new List<(string, ApiQueryResult<ApiCheckPropertyOutput>)>(propertyNames.Count);
+        foreach (string propertyName in propertyNames)
+        {
+            results.Add((propertyName, CheckProperty(typeName, propertyName, scope)));
+        }
+        return results;
+    }
+
     public ApiQueryResult<ApiTypesOutput> Types(string ns, ApiRequestScope scope)
     {
         LastScope = scope;
@@ -431,6 +480,18 @@ public sealed class FindApiCommandTests : BaseCommandTests
         Assert.AreEqual(0, exit);
         Assert.AreEqual("InfoBar", _fake.LastCheckType);
         CollectionAssert.AreEqual(ThreeCheckedProperties, _fake.CheckedProperties);
+    }
+
+    [TestMethod]
+    public async Task CheckProperty_Batch_ReadsTheIndexOnceForTheWholeBatch()
+    {
+        int exit = await ParseAndInvokeWithCaptureAsync(Command, ["check-property", "InfoBar", "Severity", "IsOpen", "Message"]);
+
+        Assert.AreEqual(0, exit);
+        Assert.AreEqual(3, _fake.CheckedProperties.Count);
+        // One batch call, not one per property: the per-call cost is loading the index,
+        // which does not depend on which property is asked about.
+        Assert.AreEqual(1, _fake.CheckPropertiesCallCount);
     }
 
     [TestMethod]

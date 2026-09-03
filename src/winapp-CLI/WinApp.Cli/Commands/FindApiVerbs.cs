@@ -72,7 +72,7 @@ internal sealed class FindApiMembersCommand : Command, IShortDescription
                     data => (0, data.Properties.Count + data.Events.Count + data.Methods.Count, true));
             }
 
-            var results = types.ConvertAll(t => (t, service.Members(t, scope, filter, all)));
+            var results = service.MembersBatch(types, scope, filter, all);
             return FindApiShared.EmitBatch(
                 console, json, "members", results,
                 (ok, errors) => new ApiMembersBatchOutput
@@ -140,7 +140,7 @@ internal sealed class FindApiCheckPropertyCommand : Command, IShortDescription
                     data => (data.Found ? 0 : 1, 0, data.Found));
             }
 
-            var results = properties.ConvertAll(p => (p, service.CheckProperty(type, p, scope)));
+            var results = service.CheckProperties(type, properties, scope);
             return FindApiShared.EmitBatch(
                 console, json, "check-property", results,
                 (ok, errors) => new ApiCheckPropertyBatchOutput
@@ -257,7 +257,7 @@ internal sealed class FindApiEnumsCommand : Command, IShortDescription
                     data => (0, data.Values.Count, true));
             }
 
-            var results = types.ConvertAll(t => (t, service.Enums(t, scope, filter)));
+            var results = service.EnumsBatch(types, scope, filter);
             return FindApiShared.EmitBatch(
                 console, json, "enums", results,
                 (ok, errors) => new ApiEnumsBatchOutput

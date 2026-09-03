@@ -988,6 +988,67 @@ public sealed class ApiQueryEngineTests
     }
 
     [TestMethod]
+    public void CheckProperty_WrongCase_IsNotFoundButSuggestsTheRealSpelling()
+    {
+        // C# and XAML are both case-sensitive, so answering "found" for "color" sends a
+        // caller off to write code that will not compile. The near-miss pass still has to
+        // surface the canonical spelling, or the answer is unhelpful rather than merely
+        // strict.
+        var result = ApiQueryEngine.CheckProperty("My.Ns.Widget", "color", _cacheDir, _manifest);
+
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        Assert.IsFalse(result.Data!.Found, "a case-only difference is not the same property");
+        Assert.IsNotNull(result.Data.SimilarOnType, "the correct spelling must still be offered");
+        CollectionAssert.Contains(result.Data.SimilarOnType!.ConvertAll(m => m.Name), "Color");
+    }
+
+    private static readonly string[] ThreeCheckedPropertyNames = ["Color", "Bogus", "DoThing"];
+
+    [TestMethod]
+    public void CheckProperties_ReturnsOneResultPerRequestedProperty()
+    {
+        var results = ApiQueryEngine.CheckProperties(
+            "My.Ns.Widget", ThreeCheckedPropertyNames, _cacheDir, _manifest);
+
+        CollectionAssert.AreEqual(ThreeCheckedPropertyNames, results.ConvertAll(r => r.Property));
+        Assert.IsTrue(results[0].Result.Data!.Found);
+        Assert.IsFalse(results[1].Result.Data!.Found);
+        Assert.IsFalse(results[2].Result.Data!.Found, "a method of the same name is not a property");
+    }
+
+    [TestMethod]
+    public void CheckProperties_MatchesWhatCheckPropertyReturnsOneAtATime()
+    {
+        // The batch path exists only to avoid reloading the index; it must not change
+        // any answer.
+        string[] names = ["Color", "color", "Bogus", "DoThing"];
+        var batch = ApiQueryEngine.CheckProperties("My.Ns.Widget", names, _cacheDir, _manifest);
+
+        foreach (string name in names)
+        {
+            var single = ApiQueryEngine.CheckProperty("My.Ns.Widget", name, _cacheDir, _manifest);
+            var fromBatch = batch.Single(r => r.Property == name).Result;
+            Assert.AreEqual(single.Outcome, fromBatch.Outcome, name);
+            Assert.AreEqual(single.Data?.Found, fromBatch.Data?.Found, name);
+        }
+    }
+
+    [TestMethod]
+    public void MembersBatch_MatchesWhatMembersReturnsOneAtATime()
+    {
+        string[] names = ["My.Ns.Widget", "My.Ns.Nope"];
+        var batch = ApiQueryEngine.MembersBatch(names, null, _cacheDir, _manifest);
+
+        foreach (string name in names)
+        {
+            var single = ApiQueryEngine.Members(name, null, _cacheDir, _manifest);
+            var fromBatch = batch.Single(r => r.Type == name).Result;
+            Assert.AreEqual(single.Outcome, fromBatch.Outcome, name);
+            Assert.AreEqual(single.Data?.FullName, fromBatch.Data?.FullName, name);
+        }
+    }
+
+    [TestMethod]
     public void CheckProperty_StillReportsMemberKind()
     {
         // check-property returns a single member that is not grouped by kind, so the
