@@ -108,8 +108,8 @@ internal sealed class OwnerCommandEntry
     /// <summary>
     /// Globally monotonic arrival ticket. Present for every <see cref="UiTurnMode.TurnShared"/> and
     /// <see cref="UiTurnMode.DesktopExclusive"/> command; <see langword="null"/> for
-    /// <see cref="UiTurnMode.Observe"/>, which never serializes as a barrier. An observation that
-    /// escalates is assigned a ticket at escalation time.
+    /// <see cref="UiTurnMode.Observe"/>, which never serializes as a barrier. A command's mode is fixed
+    /// before it registers, so a ticket is never assigned after the fact.
     /// </summary>
     public long? Ticket { get; set; }
 

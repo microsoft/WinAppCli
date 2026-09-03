@@ -13,7 +13,7 @@ Uses Windows UI Automation (UIA). Works with any Windows app — WPF, WinForms, 
 Most commands drive the app through UIA patterns (no input injection). The exceptions inject real input: `ui click`/`ui hover`/`ui drag` use mouse simulation, `ui touch`/`ui pen` synthesize touch and pen/stylus input, and `ui send-keys` synthesizes keyboard input — for controls and scenarios that UIA patterns can't drive.
 
 > [!IMPORTANT]
-> **Interactive-desktop requirement (input-injecting verbs).** `click`, `hover`, `drag`, `touch`, `pen`, `scroll --wheel`, and `send-keys --via send-input` synthesize OS-level input, so they need an **unlocked, interactive desktop** with the target window in the foreground. On a **locked workstation or secure desktop** (LogonUI/UAC) they can't inject and fail fast with **`no_interactive_desktop`** (distinct from the elevation/`foreground_not_target` cases). `touch`/`pen` additionally refuse when no window resolves (**`no_target`**); a coordinate outside the target window is a **non-fatal warning** (a `warnings[]` entry under `--json`, or a warning line in text mode) and injection still proceeds — consistent with the mouse verbs. Everything else — `inspect`, `search`, `get-property`, `get-value`, `wait-for`, `set-value`, `invoke`, `scroll --direction/--to`, `screenshot` — drives the app through UIA patterns and is **headless/locked-session friendly**. Prefer the UIA-pattern verbs in CI; reserve the injection verbs for scenarios that genuinely need real input. Before injecting, the gesture verbs also **re-resolve the target element** and refuse with **`target_moved`** if it's still animating/relocating, rather than landing input on empty space.
+> **Interactive-desktop requirement (input-injecting verbs).** `click`, `hover`, `drag`, `touch`, `pen`, `scroll --wheel`, and `send-keys --via send-input` synthesize OS-level input, so they need an **unlocked, interactive desktop** with the target window in the foreground. On a **locked workstation or secure desktop** (LogonUI/UAC) they can't inject and fail fast with **`no_interactive_desktop`** (distinct from the elevation/`foreground_not_target` cases). `touch`/`pen` additionally refuse when no window resolves (**`no_target`**); a coordinate outside the target window is a **non-fatal warning** (a `warnings[]` entry under `--json`, or a warning line in text mode) and injection still proceeds — consistent with the mouse verbs. Everything else — `inspect`, `search`, `get-property`, `get-value`, `wait-for`, `set-value`, `invoke`, `scroll --direction/--to` — drives the app through UIA patterns and is **headless/locked-session friendly**. `screenshot` is the exception among the non-injecting verbs: it takes an exclusive turn and its capture can need a usable interactive desktop, because the engine restores a minimized target and falls back to foregrounding it when frame capture is unavailable or `--capture-screen` is used. Prefer the UIA-pattern verbs in CI; reserve the injection verbs for scenarios that genuinely need real input. Before injecting, the gesture verbs also **re-resolve the target element** and refuse with **`target_moved`** if it's still animating/relocating, rather than landing input on empty space.
 
 ## Quick Start
 
@@ -87,11 +87,13 @@ Which commands wait for a turn:
 | Claims the turn, shares it with the same workflow | `record` |
 | Claims the turn and takes the desktop exclusively | `invoke`, `click`, `drag`, `hover`, `scroll --wheel`, `touch`, `pen`, `focus`, `send-keys`, `screenshot` |
 
-`screenshot` always queues for an exclusive turn. Every capture path restores minimized windows or
-takes the foreground, so it is desktop-sensitive whatever its arguments; when it composites several
-windows it captures them all under one exclusive turn, so the saved image is a single consistent
-moment rather than a mix of before and after. Encoding and writing the file happen after the desktop
-is released.
+`screenshot` always queues for an exclusive turn. Not every capture disturbs the desktop — an
+ordinary visible window captured through Windows Graphics Capture does not — but the engine restores
+the target if it is minimized, and falls back to foregrounding it when frame capture is unavailable
+or `--capture-screen` reads the live screen. Those needs only surface once capture is under way, so
+the command takes the turn up front rather than guessing. When it composites several windows it
+captures them all under one exclusive turn, so the saved image is a single consistent moment rather
+than a mix of before and after. Encoding and writing the file happen after the desktop is released.
 
 `record` shares its turn, so same-workflow input can interleave with the capture — that is how you
 record a workflow driving an app. Two caveats:

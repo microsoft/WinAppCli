@@ -49,12 +49,22 @@ internal class UiScreenshotCommand : Command, IShortDescription
         /// Always exclusive.
         /// </summary>
         /// <remarks>
-        /// Every capture path restores minimized windows and/or takes the foreground, and
-        /// <c>--capture-screen</c> reads the live screen, so a screenshot is desktop-sensitive whatever
-        /// its arguments. An earlier design started observationally and escalated on discovering it
-        /// needed the foreground, which cost an entire discard-and-recapture pass, a second scheduler
-        /// transition, and a mode that could change mid-command — all to avoid queueing for a command
-        /// that virtually always ended up queueing anyway.
+        /// Not because every capture foregrounds something — an ordinary visible window captured through
+        /// Windows Graphics Capture does not. It is because the engine may restore a minimized target, and
+        /// falls back to foregrounding it when frame capture is unavailable or <c>--capture-screen</c>
+        /// reads the live screen. Those needs surface only once capture is under way, and the package
+        /// deliberately exposes no coordination hook for the CLI to react to them, so the lean policy is
+        /// to classify the whole command exclusive rather than to guess per invocation.
+        /// <para>
+        /// An earlier design started observationally and escalated on discovering it needed the
+        /// foreground, which cost an entire discard-and-recapture pass, a second scheduler transition, and
+        /// a mode that could change mid-command — all to avoid queueing for a command that virtually
+        /// always ended up queueing anyway.
+        /// </para>
+        /// <para>
+        /// A multi-window capture runs every window inside the one section, so the composite is a single
+        /// consistent moment; encoding and writing the file happen after it is released.
+        /// </para>
         /// </remarks>
         protected override UiTurnMode ResolveMode(ParseResult parseResult) => UiTurnMode.DesktopExclusive;
 

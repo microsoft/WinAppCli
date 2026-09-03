@@ -594,7 +594,7 @@ public class InteractiveDesktopLockTests
         UiTurnMode mode, string operation, Func<IUiTurn, CancellationToken, Task<int>> body, CancellationToken token)
         => _coordinator.RunCoordinatedAsync(mode, operation, Parse(), body, token);
 
-    // ------------------------------------------------------ escalation must not swallow coordination
+    // ------------------------------------------ cancellation must not swallow coordination faults
 
     [TestMethod]
     public async Task AnActiveRecordingThatFinalizesOnCancellationStillRenewsTheGrace()

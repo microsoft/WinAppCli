@@ -147,9 +147,8 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
     }
 
     /// <summary>
-    /// One command's participation: registration, queue waiting, desktop sections, escalation and
-    /// teardown. Held as a separate object so <see cref="InteractiveDesktopLock"/> itself stays a
-    /// stateless singleton.
+    /// One command's participation: registration, queue waiting, desktop sections and teardown. Held as
+    /// a separate object so <see cref="InteractiveDesktopLock"/> itself stays a stateless singleton.
     /// </summary>
     private sealed class CoordinatedExecution(
         InteractiveDesktopLock coordinator,

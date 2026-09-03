@@ -15,8 +15,8 @@ namespace WinApp.Cli.Services.InteractiveDesktop;
 /// parsing stdout never has to skip progress lines.
 /// </param>
 /// <param name="Verbose">
-/// <c>--verbose</c> is in effect: include local diagnostics (parent PID, the active <c>winapp</c> PID,
-/// its operation, queue depth, commands ahead, elapsed wait).
+/// <c>--verbose</c> is in effect: include local diagnostics (the active <c>winapp</c> PID, its
+/// operation, queue depth, commands ahead, elapsed wait).
 /// </param>
 /// <param name="Quiet"><c>--quiet</c> is in effect: emit nothing while waiting.</param>
 internal readonly record struct UiCoordinationOutputMode(bool Json, bool Verbose, bool Quiet)

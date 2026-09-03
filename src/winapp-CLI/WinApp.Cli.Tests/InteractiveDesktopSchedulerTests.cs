@@ -688,8 +688,6 @@ public class InteractiveDesktopSchedulerTests
         Assert.AreEqual("cccc", state.Owner!.Key);
     }
 
-    // ---------------------------------------------------------------------------- escalation
-
     // -------------------------------------------------------------------------- ticket monotonicity
 
     [TestMethod]

@@ -142,7 +142,7 @@ additive `coordination` object:
 `waitedMs` is always present for a cancellation while queued.
 `queuePosition` is one-based among live waiters and is **omitted** when it
 cannot be computed reliably — including while a command waits behind its
-own workflow's earlier command. Owner identities are never exposed, in
+own workflow's earlier command. Workflow identities are never exposed, in
 raw or hashed form.
 
 Cancelling *after* the command acquired its turn keeps that command's

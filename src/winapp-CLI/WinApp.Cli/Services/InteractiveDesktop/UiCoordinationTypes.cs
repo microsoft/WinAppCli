@@ -76,7 +76,7 @@ internal enum UiCoordinationOutcome
     /// <summary>The command was cancelled while queued and never executed.</summary>
     Cancelled,
 
-    /// <summary>Coordination failed closed (unavailable, queue capacity, invalid owner id).</summary>
+    /// <summary>Coordination failed closed (unavailable, queue capacity, invalid workflow id).</summary>
     CoordinationFailure,
 
     /// <summary>Corrupt state was safely quarantined and rebuilt before the command proceeded.</summary>

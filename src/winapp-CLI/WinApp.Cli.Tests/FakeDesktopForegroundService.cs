@@ -18,12 +18,12 @@ internal sealed class FakeDesktopForegroundService : IDesktopForegroundService
     /// <summary>Window handles passed to <see cref="Restore"/>, in order.</summary>
     public List<long> RestoreRequests { get; } = [];
 
-    /// <summary>Handles this fake reports as minimized, to drive the screenshot escalation path.</summary>
+    /// <summary>Handles this fake reports as minimized, so a test can drive the restore path.</summary>
     public HashSet<long> MinimizedWindows { get; } = [];
 
     /// <summary>
-    /// Reports every window as minimized, so a test can force the screenshot escalation path without
-    /// having to know which handle the fake session happens to resolve to.
+    /// Reports every window as minimized, so a test can force the restore path without having to know
+    /// which handle the fake session happens to resolve to.
     /// </summary>
     public bool AllWindowsMinimized { get; set; }
 
