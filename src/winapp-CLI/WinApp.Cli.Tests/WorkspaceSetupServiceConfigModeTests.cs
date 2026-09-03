@@ -109,9 +109,9 @@ public class WorkspaceSetupServiceConfigModeTests : BaseCommandTests
         Assert.AreEqual(0, result);
         // A zero exit code alone would also be produced by the "nothing to restore" no-op branch, so assert the
         // delegation itself: exactly one dotnet restore, naming this project.
-        Assert.HasCount(1, _dotnet.InheritedCalls);
-        StringAssert.Contains(_dotnet.InheritedCalls[0], "restore", StringComparison.Ordinal);
-        StringAssert.Contains(_dotnet.InheritedCalls[0], csproj.FullName, StringComparison.Ordinal);
+        Assert.HasCount(1, _dotnet.StreamingCalls);
+        StringAssert.Contains(_dotnet.StreamingCalls[0], "restore", StringComparison.Ordinal);
+        StringAssert.Contains(_dotnet.StreamingCalls[0], csproj.FullName, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -137,7 +137,7 @@ public class WorkspaceSetupServiceConfigModeTests : BaseCommandTests
         var result = await service.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         Assert.AreNotEqual(0, result);
-        Assert.IsEmpty(_dotnet.InheritedCalls, "Nothing may be restored when the target project is ambiguous.");
+        Assert.IsEmpty(_dotnet.StreamingCalls, "Nothing may be restored when the target project is ambiguous.");
 
         var stderr = ConsoleStdErr.ToString();
         StringAssert.Contains(stderr, "AppOne.csproj", StringComparison.Ordinal);
@@ -171,9 +171,9 @@ public class WorkspaceSetupServiceConfigModeTests : BaseCommandTests
             var result = await service.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
             Assert.AreEqual(0, result);
-            Assert.HasCount(1, _dotnet.InheritedCalls);
+            Assert.HasCount(1, _dotnet.StreamingCalls);
             // Never --configfile: that would discard the user/machine levels of the hierarchy.
-            Assert.DoesNotContain("--configfile", _dotnet.InheritedCalls[0], StringComparison.Ordinal);
+            Assert.DoesNotContain("--configfile", _dotnet.StreamingCalls[0], StringComparison.Ordinal);
         }
         finally
         {
@@ -202,8 +202,8 @@ public class WorkspaceSetupServiceConfigModeTests : BaseCommandTests
         var result = await service.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         Assert.AreEqual(0, result);
-        Assert.HasCount(1, _dotnet.InheritedCalls);
-        Assert.DoesNotContain("--configfile", _dotnet.InheritedCalls[0], StringComparison.Ordinal);
+        Assert.HasCount(1, _dotnet.StreamingCalls);
+        Assert.DoesNotContain("--configfile", _dotnet.StreamingCalls[0], StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -213,7 +213,7 @@ public class WorkspaceSetupServiceConfigModeTests : BaseCommandTests
     public async Task Restore_DotNetProject_WhenDotnetRestoreFails_ReturnsError()
     {
         await CreateCsprojAsync(_tempDirectory, "App");
-        _dotnet.RunDotnetInheritedHandler = _ => 1;
+        _dotnet.RunDotnetStreamingHandler = (_, _, _) => 1;
 
         var options = new WorkspaceSetupOptions
         {

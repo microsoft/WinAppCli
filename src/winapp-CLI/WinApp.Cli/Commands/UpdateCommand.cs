@@ -59,7 +59,7 @@ internal class UpdateCommand : Command, IShortDescription
                             // resolve a latest version against; GetLatestVersionAsync rejects None outright. Skip
                             // the package loop and leave the pinned versions alone rather than asking for a
                             // version we then report as a lookup failure, which made the documented option always
-                            // exit non-zero on a non-empty config. Build tools and the runtime still run below.
+                            // exit non-zero on a non-empty config. Build tools and the runtime are skipped below.
                             taskContext.AddStatusMessage($"{UiSymbols.Skip} SDK updates skipped (--setup-sdks none); pinned versions in winapp.yaml are unchanged");
                         }
                         else
@@ -159,35 +159,47 @@ internal class UpdateCommand : Command, IShortDescription
                     }
 
                     // Step 2: Ensure build tools are installed/updated in cache
-                    taskContext.AddDebugMessage($"{UiSymbols.Wrench} Checking build tools in cache...");
-
-                    var buildToolsPath = await buildToolsService.EnsureBuildToolsAsync(taskContext, forceLatest: true, cancellationToken: cancellationToken);
-
-                    if (buildToolsPath != null)
+                    // `--setup-sdks none` means "skip SDK installation" (its documented meaning, and what
+                    // `init` does — WorkspaceSetupService skips both the SDK packages and the runtime under
+                    // None). Downloading build tools and installing the runtime MSIX are exactly that kind of
+                    // work, and the runtime install modifies the machine, so honor the option here too rather
+                    // than only skipping the version checks above.
+                    if (setupSdks == SdkInstallMode.None)
                     {
-                        taskContext.AddStatusMessage($"{UiSymbols.Check} Build tools are up to date");
-                        taskContext.AddDebugMessage($"{UiSymbols.Check} Build tools are available at: {buildToolsPath}");
+                        taskContext.AddStatusMessage($"{UiSymbols.Skip} Build tools and Windows App Runtime skipped (--setup-sdks none)");
                     }
                     else
                     {
-                        return (1, $"{UiSymbols.Error} Failed to install/update build tools");
-                    }
+                        taskContext.AddDebugMessage($"{UiSymbols.Wrench} Checking build tools in cache...");
 
-                    // Step 3: Install Windows App SDK runtime if available
-                    // Find MSIX directory using WindowsAppRuntimeService logic
-                    var msixDir = windowsAppRuntimeService.FindWindowsAppSdkMsixDirectory();
+                        var buildToolsPath = await buildToolsService.EnsureBuildToolsAsync(taskContext, forceLatest: true, cancellationToken: cancellationToken);
 
-                    if (msixDir != null)
-                    {
-                        taskContext.AddStatusMessage($"{UiSymbols.Wrench} Installing Windows App Runtime...");
+                        if (buildToolsPath != null)
+                        {
+                            taskContext.AddStatusMessage($"{UiSymbols.Check} Build tools are up to date");
+                            taskContext.AddDebugMessage($"{UiSymbols.Check} Build tools are available at: {buildToolsPath}");
+                        }
+                        else
+                        {
+                            return (1, $"{UiSymbols.Error} Failed to install/update build tools");
+                        }
 
-                        await windowsAppRuntimeService.InstallWindowsAppRuntimeAsync(msixDir, taskContext, cancellationToken);
+                        // Step 3: Install Windows App SDK runtime if available
+                        // Find MSIX directory using WindowsAppRuntimeService logic
+                        var msixDir = windowsAppRuntimeService.FindWindowsAppSdkMsixDirectory();
 
-                        taskContext.AddStatusMessage($"{UiSymbols.Check} Windows App Runtime installation complete");
-                    }
-                    else
-                    {
-                        taskContext.AddDebugMessage($"{UiSymbols.Note} Windows App SDK packages not found, skipping runtime installation");
+                        if (msixDir != null)
+                        {
+                            taskContext.AddStatusMessage($"{UiSymbols.Wrench} Installing Windows App Runtime...");
+
+                            await windowsAppRuntimeService.InstallWindowsAppRuntimeAsync(msixDir, taskContext, cancellationToken);
+
+                            taskContext.AddStatusMessage($"{UiSymbols.Check} Windows App Runtime installation complete");
+                        }
+                        else
+                        {
+                            taskContext.AddDebugMessage($"{UiSymbols.Note} Windows App SDK packages not found, skipping runtime installation");
+                        }
                     }
 
                     // A version lookup that failed closed (feed outage / auth failure) must fail the command:

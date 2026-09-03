@@ -470,7 +470,35 @@ internal partial class NugetService : INugetService
                     // Drop the earlier selection so the recursive install re-walks the upgraded version's own
                     // dependency graph rather than short-circuiting on the package id.
                     graph.Installed.Remove(depName);
-                    await InstallPackageRecursiveAsync(depName, candidate, graph, taskContext, cacheContext, cancellationToken);
+                    try
+                    {
+                        await InstallPackageRecursiveAsync(depName, candidate, graph, taskContext, cacheContext, cancellationToken);
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        // Without this the exception escaped to whichever ancestor happened to be inside the
+                        // fresh-install try below, where it was recorded against THAT package's dependency —
+                        // one which was installed and satisfied, so the failure was immediately retired and the
+                        // operation reported success. Meanwhile the selection was already removed above, so the
+                        // package vanished from the graph entirely.
+                        //
+                        // Restore the version that was working before the upgrade was attempted: it does not
+                        // satisfy this branch, which is exactly what the failure below records, but keeping it
+                        // leaves the graph describing what is actually on disk rather than silently short.
+                        graph.Installed[depName] = installedDepVersion;
+                        taskContext.AddStatusMessage($"{UiSymbols.Warning} Could not upgrade {depName} to {candidate} (required by {package} {version}): {NugetErrorMessage.Redact(ex.Message)}");
+                        graph.AddFailure(
+                            package,
+                            version,
+                            $"{depName} could not be upgraded to {candidate} (required by {package} {version}): {NugetErrorMessage.Redact(ex.Message)}",
+                            depName,
+                            depVersionRange);
+                    }
+
                     continue;
                 }
 

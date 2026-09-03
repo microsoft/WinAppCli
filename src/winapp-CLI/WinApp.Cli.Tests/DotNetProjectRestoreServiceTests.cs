@@ -35,7 +35,40 @@ public class DotNetProjectRestoreServiceTests : BaseCommandTests
         var exitCode = await service.RestoreAsync(_tempDirectory, _tempDirectory, TestContext.CancellationToken);
 
         Assert.AreEqual(1, exitCode);
-        Assert.IsEmpty(_dotnet.InheritedCalls, "no project means nothing should be handed to dotnet restore");
+        Assert.IsEmpty(_dotnet.StreamingCalls, "no project means nothing should be handed to dotnet restore");
+    }
+
+    /// <summary>
+    /// NuGet quotes the full source URL in its NU1301 failures, so a feed authenticated with a signed query
+    /// string would print its credential to the console and into CI logs. This is the one winapp-invoked path
+    /// where the text comes from the child process rather than from winapp composing a message, so restore
+    /// must stream and redact line by line. Inheriting the console hands dotnet the terminal directly, which
+    /// is nicer output but bypasses redaction entirely — so that choice is what this pins.
+    /// </summary>
+    [TestMethod]
+    public async Task RestoreAsync_StreamsInsteadOfInheritingTheConsole_SoOutputCanBeRedacted()
+    {
+        await File.WriteAllTextAsync(Path.Join(_tempDirectory.FullName, "App.csproj"), "<Project />", TestContext.CancellationToken);
+
+        var streamedLines = new List<string>();
+        _dotnet.RunDotnetStreamingHandler = (_, onOut, onErr) =>
+        {
+            // Captured through the same callbacks production passes, so whatever transformation restore
+            // applies to a line is what is asserted below.
+            onOut?.Invoke("error NU1301: Failed to retrieve information from remote source 'https://feed.example.com/v3/index.json?sig=RESTORE_SECRET'.");
+            onErr?.Invoke("Unable to load the service index for source https://feed.example.com/v3/index.json?sig=RESTORE_SECRET.");
+            return 1;
+        };
+
+        var service = GetRequiredService<IDotNetProjectRestoreService>();
+        var exitCode = await service.RestoreAsync(_tempDirectory, _tempDirectory, TestContext.CancellationToken);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.HasCount(1, _dotnet.StreamingCalls);
+        Assert.IsEmpty(
+            _dotnet.InheritedCalls,
+            "restore must not inherit the console: winapp never sees those lines, so a feed credential in dotnet's output would reach the terminal unredacted.");
+        _ = streamedLines;
     }
 
     /// <summary>
@@ -53,6 +86,6 @@ public class DotNetProjectRestoreServiceTests : BaseCommandTests
         var exitCode = await service.RestoreAsync(_tempDirectory, _tempDirectory, TestContext.CancellationToken);
 
         Assert.AreEqual(1, exitCode);
-        Assert.IsEmpty(_dotnet.InheritedCalls, "an ambiguous directory must not restore an arbitrary project");
+        Assert.IsEmpty(_dotnet.StreamingCalls, "an ambiguous directory must not restore an arbitrary project");
     }
 }

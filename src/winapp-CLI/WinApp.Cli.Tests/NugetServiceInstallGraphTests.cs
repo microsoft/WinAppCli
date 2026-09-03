@@ -457,6 +457,77 @@ public class NugetServiceInstallGraphTests : BaseCommandTests
         }
     }
 
+    /// <summary>
+    /// An upgrade that cannot be installed must fail the operation, not vanish. The upgrade path removes the
+    /// previously selected version before installing the replacement, and that install had no error handling
+    /// of its own — so a failed download propagated to whichever ancestor happened to be inside a try, was
+    /// recorded against that ancestor's own (satisfied) dependency, and was then retired as satisfied. The
+    /// package was left out of the graph entirely and the install reported success.
+    /// </summary>
+    [TestMethod]
+    public async Task InstallPackageAsync_UpgradeDownloadFails_FailsInsteadOfSilentlyDroppingThePackage()
+    {
+        // NUGET_PACKAGES takes precedence over the globalPackagesFolder written by WriteLocalFeedConfig.
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NUGET_PACKAGES")))
+        {
+            Assert.Inconclusive("NUGET_PACKAGES is set in the environment; it overrides the config's globalPackagesFolder, so the local feed would not be exercised.");
+        }
+
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            var feed = new DirectoryInfo(Path.Join(root.FullName, "feed"));
+            feed.Create();
+            var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
+
+            // Chained so the walk order is fixed: Root -> A -> Shared 1.0.0, then A -> B which requires
+            // Shared >= 2.0.0 and triggers the upgrade.
+            WriteNupkgToFeed(feed, "Drop.Root", "1.0.0", ("Drop.A", "[1.0.0, )"));
+            WriteNupkgToFeed(feed, "Drop.A", "1.0.0", ("Drop.Shared", "[1.0.0, )"), ("Drop.B", "[1.0.0, )"));
+            WriteNupkgToFeed(feed, "Drop.B", "1.0.0", ("Drop.Shared", "[2.0.0, )"));
+            WriteNupkgToFeed(feed, "Drop.Shared", "1.0.0");
+
+            // Shared 2.0.0 is a valid package, so version resolution selects it normally. Extraction is what
+            // fails: a FILE is planted where the global-packages folder for that version must be created, so
+            // the failure happens inside the upgrade's install rather than during version resolution.
+            WriteNupkgToFeed(feed, "Drop.Shared", "2.0.0");
+
+            WriteLocalFeedConfig(root, feed, packages);
+
+            var blockedDir = Path.Join(packages.FullName, "drop.shared");
+            Directory.CreateDirectory(blockedDir);
+            File.WriteAllText(Path.Join(blockedDir, "2.0.0"), "not a directory");
+
+            var service = CreateServiceRootedAt(root);
+
+            Dictionary<string, string>? installed = null;
+            InvalidOperationException? failure = null;
+            try
+            {
+                installed = await service.InstallPackageAsync("Drop.Root", "1.0.0", TestTaskContext, TestContext.CancellationToken);
+            }
+            catch (InvalidOperationException ex)
+            {
+                failure = ex;
+            }
+
+            if (failure is null)
+            {
+                // Reporting success is only acceptable if the graph is actually complete. Silently omitting the
+                // shared package is the bug under test.
+                Assert.Fail(
+                    "Install reported success after the upgrade failed. Installed: "
+                    + string.Join(", ", installed!.Select(kv => $"{kv.Key}={kv.Value}")));
+            }
+
+            StringAssert.Contains(failure.Message, "Drop.Shared", StringComparison.Ordinal);
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
     [TestMethod]
     public async Task InstallPackageAsync_CacheFolderExistsWithoutCompletionMarker_ReDownloadsInsteadOfTrustingIt()
     {

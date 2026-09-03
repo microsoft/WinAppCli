@@ -212,14 +212,19 @@ public class UpdateCommandTests : BaseCommandTests
     }
 
     /// <summary>
-    /// `--setup-sdks none` means "skip SDK package work". It previously passed None straight to
+    /// `--setup-sdks none` means "skip SDK installation". It previously passed None straight to
     /// GetLatestVersionAsync, which rejects None outright, so every package was recorded as a lookup failure
-    /// and the documented option always exited 1 on a non-empty config.
+    /// and the documented option always exited 1 on a non-empty config. Skipping the version checks alone was
+    /// not enough though: build tools were still downloaded and the Windows App Runtime still installed, so a
+    /// documented no-install option modified the machine. `init` already skips both under None.
     /// </summary>
     [TestMethod]
-    public async Task Update_SetupSdksNone_SkipsPackageUpdatesAndSucceeds()
+    public async Task Update_SetupSdksNone_SkipsAllSdkInstallationAndSucceeds()
     {
         WriteConfig((PackageName, "1.0.0"));
+        // Make the runtime discoverable, so "not installed" can only be the None gate rather than the
+        // absence of anything to install.
+        _fakeRuntime.MsixDirectory = _tempDirectory.CreateSubdirectory("msix");
         var command = GetRequiredService<UpdateCommand>();
 
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--setup-sdks", "none"]);
@@ -227,9 +232,29 @@ public class UpdateCommandTests : BaseCommandTests
         Assert.AreEqual(0, exitCode);
         Assert.IsEmpty(_fakeNuget.QueriedPackages, "None means no channel, so no latest-version lookup may be attempted.");
         Assert.IsEmpty(_fakeInstall.InstallPackagesCalls, "None must not reinstall SDK packages.");
+        Assert.IsEmpty(_fakeBuildTools.EnsureCalls, "None must not download or update build tools.");
+        Assert.IsEmpty(_fakeRuntime.InstallRuntimeCalls, "None must not install the Windows App Runtime — that modifies the machine.");
         // The pinned version must survive untouched.
         var persisted = _configService.Load().Packages.Single(p => p.Name == PackageName).Version;
         Assert.AreEqual("1.0.0", persisted);
+    }
+
+    /// <summary>
+    /// The companion to the test above: without `--setup-sdks none`, update must still do the build-tool and
+    /// runtime work, so the gate cannot be mistaken for "update never installs anything".
+    /// </summary>
+    [TestMethod]
+    public async Task Update_DefaultSetupSdks_StillUpdatesBuildToolsAndRuntime()
+    {
+        WriteConfig((PackageName, "1.0.0"));
+        _fakeRuntime.MsixDirectory = _tempDirectory.CreateSubdirectory("msix");
+        var command = GetRequiredService<UpdateCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, []);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.IsNotEmpty(_fakeBuildTools.EnsureCalls, "the default mode must still update build tools.");
+        Assert.IsNotEmpty(_fakeRuntime.InstallRuntimeCalls, "the default mode must still install the runtime when one is found.");
     }
 
     // ── Lookup / cancellation failure paths ─────────────────────────────

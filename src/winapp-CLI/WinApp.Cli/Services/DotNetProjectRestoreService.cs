@@ -76,9 +76,28 @@ internal sealed class DotNetProjectRestoreService(
                 projectToRestore.Name);
         }
 
-        var restoreExitCode = await dotNetService.RunDotnetInheritedAsync(
+        // Stream dotnet's output rather than inheriting the console, so each line passes through
+        // NugetErrorMessage.Redact before it is displayed. NuGet's NU1301 failures quote the full source
+        // URL, so a feed authenticated with a signed query string would otherwise print its credential
+        // straight to the terminal and into CI logs — the one winapp-invoked path still doing that after
+        // this PR's redaction work. The cost is dotnet's terminal logger being disabled because stdout is
+        // redirected; restore output is a few lines, so that is a fair trade for not leaking a token.
+        // Writes are serialized because the stdout/stderr callbacks arrive on background threads.
+        var writeLock = new object();
+        void WriteRedacted(string line)
+        {
+            var redacted = NugetErrorMessage.Redact(line);
+            lock (writeLock)
+            {
+                logger.LogInformation("{Line}", redacted);
+            }
+        }
+
+        var restoreExitCode = await dotNetService.RunDotnetStreamingAsync(
             projectToRestore.Directory!,
             $"restore \"{projectToRestore.FullName}\"",
+            WriteRedacted,
+            WriteRedacted,
             cancellationToken);
 
         if (restoreExitCode != 0)
