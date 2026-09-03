@@ -37,7 +37,7 @@ internal partial class RunCommand
         /// <see cref="RunUnpackagedProjectAsync"/> so both reject the exact same set (issue #676).
         /// </summary>
         private static List<string> CollectUnpackagedIncompatibleOptions(
-            bool noLaunch, bool withAlias, bool unregisterOnExit, bool clean, FileInfo? manifest, DirectoryInfo? outputAppXDirectory, string? executable)
+            bool noLaunch, bool withAlias, bool withoutAlias, bool unregisterOnExit, bool clean, FileInfo? manifest, DirectoryInfo? outputAppXDirectory, string? executable)
         {
             var rejected = new List<string>();
             if (noLaunch)
@@ -47,6 +47,13 @@ internal partial class RunCommand
             if (withAlias)
             {
                 rejected.Add("--with-alias");
+            }
+            // An unpackaged app launches its apphost directly and has no manifest to declare an alias in,
+            // so opting OUT of one is as meaningless as opting in — silently accepting it would make a
+            // packaging mistake look supported.
+            if (withoutAlias)
+            {
+                rejected.Add("--without-alias");
             }
             if (unregisterOnExit)
             {
@@ -189,7 +196,7 @@ internal partial class RunCommand
             // --no-build (no build cost to save).
             if (!noBuild)
             {
-                var incompatible = CollectUnpackagedIncompatibleOptions(noLaunch, withAlias, unregisterOnExit, clean, manifest, outputAppXDirectory, executable);
+                var incompatible = CollectUnpackagedIncompatibleOptions(noLaunch, withAlias, withoutAlias, unregisterOnExit, clean, manifest, outputAppXDirectory, executable);
                 if (incompatible.Count > 0
                     && await projectRunService.IsDefinitivelyUnpackagedAsync(csproj, buildOptions, cancellationToken))
                 {
@@ -227,7 +234,7 @@ internal partial class RunCommand
                     cancellationToken)
                 : await RunUnpackagedProjectAsync(
                     resolution, csproj, appArgs,
-                    noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, manifest, outputAppXDirectory, isJson,
+                    noLaunch, withAlias, withoutAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, manifest, outputAppXDirectory, isJson,
                     cancellationToken);
         }
 
@@ -273,10 +280,11 @@ internal partial class RunCommand
             }
 
             // A console project (OutputType=Exe) launches through its execution alias by default so its
-            // output reaches this terminal; --without-alias opts back into AUMID activation.
+            // output reaches this terminal; --without-alias opts back into AUMID activation, and the
+            // project's own WinAppRunUseExecutionAlias overrides the default in either direction.
             var aliasDecision = ResolveAliasLaunch(
                 withAlias, withoutAlias, noLaunch, detach, isJson,
-                resolution.OutputType);
+                resolution.OutputType, resolution.PreferExecutionAlias);
 
             return await ExecuteRunPipelineAsync(
                 targetDir, manifest, outputAppXDirectory, appArgs,
@@ -296,6 +304,7 @@ internal partial class RunCommand
             string? appArgs,
             bool noLaunch,
             bool withAlias,
+            bool withoutAlias,
             bool debugOutput,
             bool unregisterOnExit,
             bool detach,
@@ -310,7 +319,7 @@ internal partial class RunCommand
             // AUTHORITATIVE gate — rejects packaged-only options once packaging is definitively known.
             // RunProjectModeAsync fails fast on the definitively-unpackaged case before building (issue
             // #676); this still catches the indeterminate-then-unpackaged case that only resolves here.
-            var rejected = CollectUnpackagedIncompatibleOptions(noLaunch, withAlias, unregisterOnExit, clean, manifest, outputAppXDirectory, executable);
+            var rejected = CollectUnpackagedIncompatibleOptions(noLaunch, withAlias, withoutAlias, unregisterOnExit, clean, manifest, outputAppXDirectory, executable);
             if (rejected.Count > 0)
             {
                 return Fail(BuildUnpackagedIncompatibleMessage(rejected, csproj.Name), isJson);

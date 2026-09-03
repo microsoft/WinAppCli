@@ -84,6 +84,16 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
                 ProjectPackaging.Packaged, null, null, props), 0);
     }
 
+    /// <summary>Sets an UNPACKAGED outcome, so the shared unpackaged gate is exercised.</summary>
+    private void SetUnpackagedOutcome(FileInfo singleFile, DirectoryInfo outputDirectory)
+    {
+        _fakeProjectRunService.SingleFileBuildOutcome = new SingleFileBuildOutcome(
+            new SingleFileRunResolution(
+                singleFile, outputDirectory.FullName, "counter.exe", "x64", "net10.0-windows10.0.19041.0", false,
+                ProjectPackaging.Unpackaged, Path.Join(outputDirectory.FullName, "counter.exe"), null,
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)), 0);
+    }
+
     private static XDocument LoadGeneratedManifest(DirectoryInfo outputDirectory)
     {
         var path = Path.Join(outputDirectory.FullName, "Package.appxmanifest");
@@ -166,6 +176,24 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
 
         Assert.AreEqual(1, exitCode);
         Assert.AreEqual(0, _fakeMsixService.AddLooseLayoutCalls.Count);
+    }
+
+    [TestMethod]
+    [DataRow("--with-alias", DisplayName = "--with-alias")]
+    [DataRow("--without-alias", DisplayName = "--without-alias")]
+    public async Task SingleFileMode_UnpackagedApp_RejectsBothAliasOptions(string option)
+    {
+        // An unpackaged app launches its apphost directly and has no manifest to declare an alias in, so
+        // opting OUT of one is as meaningless as opting in. Silently accepting either would make a
+        // packaging mistake look supported.
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetUnpackagedOutcome(singleFile, outputDir);
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, option]);
+
+        Assert.AreEqual(1, exitCode, $"{option} must be rejected for an unpackaged app");
+        StringAssert.Contains(ConsoleStdErr.ToString(), option);
     }
 
     #endregion

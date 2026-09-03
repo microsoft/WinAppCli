@@ -245,15 +245,41 @@ public class AppxCapabilityCatalogTests
     }
 
     [TestMethod]
-    [DataRow("app:notARealCapability", DisplayName = "unknown app: name is rejected")]
-    [DataRow("app:broadFileSystemAccess", DisplayName = "restricted capability under app: is rejected")]
-    public void Parse_UnknownFoundationCapability_IsRejected(string value)
+    public void Parse_UnknownFoundationCapability_IsRejected()
     {
         // The foundation <Capability> set is closed by the schema, so an unknown name there is invalid
         // rather than merely uncatalogued. Accepting it would defer the failure to registration, which
         // reports only an opaque schema error naming no capability.
-        Assert.IsFalse(AppxCapabilityCatalog.TryParse(value, out _, out var error));
+        Assert.IsFalse(AppxCapabilityCatalog.TryParse("app:notARealCapability", out _, out var error));
         StringAssert.Contains(error, "closed at", "The error should name the closed foundation set");
+    }
+
+    [TestMethod]
+    [DataRow("rescap:systemAIModels", "systemai", DisplayName = "systemAIModels is not a rescap capability")]
+    [DataRow("rescap:microphone", "DeviceCapability", DisplayName = "microphone is a DeviceCapability")]
+    [DataRow("app:broadFileSystemAccess", "rescap", DisplayName = "a restricted capability is not a general one")]
+    [DataRow("uap:runFullTrust", "rescap", DisplayName = "runFullTrust is a rescap capability")]
+    [DataRow("device:internetClient", "Capability", DisplayName = "a general capability is not a DeviceCapability")]
+    public void Parse_KnownNameWithConflictingPrefix_IsRejected(string value, string expectedInError)
+    {
+        // The whole point of the catalog: a capability emitted in the wrong namespace or element makes
+        // Windows register the app and silently not grant it. Honoring an explicit-but-wrong prefix
+        // would reintroduce exactly that failure.
+        Assert.IsFalse(AppxCapabilityCatalog.TryParse(value, out var caps, out var error));
+        Assert.AreEqual(0, caps.Count);
+        StringAssert.Contains(error, expectedInError, "The error should name the correct declaration");
+    }
+
+    [TestMethod]
+    [DataRow("systemai:systemAIModels", DisplayName = "matching namespace prefix")]
+    [DataRow("device:microphone", DisplayName = "matching device prefix")]
+    [DataRow("app:internetClient", DisplayName = "matching foundation prefix")]
+    [DataRow("rescap:runFullTrust", DisplayName = "matching rescap prefix")]
+    public void Parse_KnownNameWithMatchingPrefix_IsAccepted(string value)
+    {
+        // Spelling out the correct prefix is redundant, not wrong — it must keep working.
+        Assert.IsTrue(AppxCapabilityCatalog.TryParse(value, out var caps, out _));
+        Assert.AreEqual(1, caps.Count);
     }
 
     [TestMethod]

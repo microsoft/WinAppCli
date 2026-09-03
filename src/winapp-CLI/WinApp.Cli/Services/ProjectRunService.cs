@@ -31,6 +31,10 @@ internal sealed partial class ProjectRunService(
         "EnableMsixTooling",
         "_WinAppRunSupportActive",
         "OutputType",
+        // The app's own launch preference. Read here so a .csproj run directly gets the same behavior as
+        // one launched through `dotnet run`, where the NuGet targets forward it — the same documented
+        // property must not mean different things depending on how the project was started.
+        "WinAppRunUseExecutionAlias",
     ];
 
     /// <summary>
@@ -406,7 +410,8 @@ internal sealed partial class ProjectRunService(
             options.Framework,
             options.NoRestore,
             string.IsNullOrEmpty(runArguments) ? null : runArguments,
-            string.IsNullOrEmpty(outputType) ? null : outputType);
+            string.IsNullOrEmpty(outputType) ? null : outputType,
+            ParseOptionalBoolean(GetProp(props, "WinAppRunUseExecutionAlias")));
 
         return new ProjectBuildOutcome(resolution, 0);
     }
@@ -795,6 +800,15 @@ internal sealed partial class ProjectRunService(
 
     private static string GetProp(IReadOnlyDictionary<string, string> props, string name)
         => props.TryGetValue(name, out var value) ? value.Trim() : string.Empty;
+
+    /// <summary>
+    /// Reads an MSBuild boolean that may be undeclared. An unset property evaluates to an empty string,
+    /// which means "no preference" rather than false — the caller then applies its own default.
+    /// </summary>
+    private static bool? ParseOptionalBoolean(string value)
+        => string.IsNullOrWhiteSpace(value)
+            ? null
+            : string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// F1 pre-build probe: runs the side-effect-free evaluate (no <c>-t:Build</c>, no restore) purely to

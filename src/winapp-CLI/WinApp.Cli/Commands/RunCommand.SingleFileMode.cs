@@ -148,7 +148,7 @@ internal partial class RunCommand
 
                 return await RunUnpackagedProjectAsync(
                     unpackaged, singleFile, appArgs,
-                    noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols,
+                    noLaunch, withAlias, withoutAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols,
                     executable, manifest, outputAppXDirectory, isJson,
                     cancellationToken);
             }

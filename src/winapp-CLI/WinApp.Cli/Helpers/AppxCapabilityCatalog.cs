@@ -154,6 +154,37 @@ internal static partial class AppxCapabilityCatalog
         new(name, CapabilityElementName, prefix, Namespaces[prefix]);
 
     /// <summary>
+    /// Reports whether an explicitly written prefix agrees with the catalogued declaration for that name.
+    /// </summary>
+    private static bool MatchesCataloguedDeclaration(AppxCapability catalogued, string prefix)
+    {
+        if (catalogued.IsDeviceCapability)
+        {
+            return string.Equals(prefix, "device", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return catalogued.Prefix is { Length: > 0 } cataloguedPrefix
+            ? string.Equals(prefix, cataloguedPrefix, StringComparison.OrdinalIgnoreCase)
+            : string.Equals(prefix, DefaultPrefixToken, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Names the element a catalogued capability belongs in, for an error message.</summary>
+    private static string DescribeDeclaration(AppxCapability catalogued) => catalogued switch
+    {
+        { IsDeviceCapability: true } => "<DeviceCapability>",
+        { Prefix: { Length: > 0 } prefix } => $"<{prefix}:Capability>",
+        _ => "<Capability>",
+    };
+
+    /// <summary>The value a user should write to get the catalogued declaration.</summary>
+    private static string DescribeUsage(AppxCapability catalogued) => catalogued switch
+    {
+        { IsDeviceCapability: true } => $"device:{catalogued.Name}",
+        { Prefix: { Length: > 0 } prefix } => $"{prefix}:{catalogued.Name}",
+        _ => catalogued.Name,
+    };
+
+    /// <summary>
     /// Reports whether a capability needs nested child elements this property cannot carry, and if so
     /// produces a message pointing at the authored-manifest escape hatch.
     /// </summary>
@@ -256,6 +287,18 @@ internal static partial class AppxCapabilityCatalog
             return false;
         }
 
+        // A catalogued name has exactly one correct element and namespace. Honoring a conflicting prefix
+        // would recreate the failure this catalog exists to prevent: 'rescap:systemAIModels' registers
+        // successfully and grants nothing, and 'rescap:microphone' emits a Capability where the schema
+        // wants a DeviceCapability. Checked before every prefix branch, including 'device:'.
+        if (Known.TryGetValue(name, out var catalogued) && !MatchesCataloguedDeclaration(catalogued, prefix))
+        {
+            error = $"'{entry}' declares the wrong namespace for '{catalogued.Name}', which belongs in " +
+                    $"{DescribeDeclaration(catalogued)}. Windows would register the app and silently not grant it, " +
+                    $"so declare it as '{DescribeUsage(catalogued)}' instead.";
+            return false;
+        }
+
         // 'device:' selects the DeviceCapability ELEMENT rather than a namespace, and 'app:' spells the
         // default foundation namespace so a general capability can be forced explicitly.
         if (string.Equals(prefix, "device", StringComparison.OrdinalIgnoreCase))
@@ -296,9 +339,8 @@ internal static partial class AppxCapabilityCatalog
         }
 
         // A known name carries its documented floor (e.g. systemAIModels), so keep that even when the
-        // user spelled the namespace out.
-        var floor = Known.TryGetValue(name, out var catalogued) ? catalogued.MinimumMaxVersionTested : null;
-        capability = new AppxCapability(name, CapabilityElementName, prefix, ns, floor);
+        // user spelled the namespace out. The prefix is known to agree with the catalog by this point.
+        capability = new AppxCapability(name, CapabilityElementName, prefix, ns, catalogued?.MinimumMaxVersionTested);
         return true;
     }
 

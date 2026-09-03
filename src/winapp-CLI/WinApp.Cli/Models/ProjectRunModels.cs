@@ -80,7 +80,8 @@ internal sealed record ProjectRunResolution(
     string? Framework = null,
     bool NoRestore = false,
     string? RunArguments = null,
-    string? OutputType = null);
+    string? OutputType = null,
+    bool? PreferExecutionAlias = null);
 
 /// <summary>
 /// User-provided build inputs for project mode, forwarded to <c>dotnet build</c> / <c>dotnet msbuild</c>.
