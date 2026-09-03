@@ -209,6 +209,9 @@ function Invoke-WithRetry {
 
     .PARAMETER ScriptBlock
     The command to run. Must set $LASTEXITCODE, i.e. call a native executable.
+    Anything it writes is sent straight to the host, so a caller can invoke a
+    native command bare without its stdout ending up in this function's return
+    value.
 
     .PARAMETER MaxAttempts
     How many times to run it before giving up.
@@ -233,10 +236,16 @@ function Invoke-WithRetry {
         if ($attempt -gt 1) {
             $delay = 5 * ($attempt - 1)
             Write-Host "$OperationName failed (attempt $($attempt - 1) of $MaxAttempts). Retrying in ${delay}s..."
-            if ($OnRetry) { & $OnRetry }
+            # Out-Host for the same reason as below: cleanup here often shells out
+            # (npm cache clean), and its stdout must not become part of the result.
+            if ($OnRetry) { & $OnRetry | Out-Host }
             Start-Sleep -Seconds $delay
         }
-        & $ScriptBlock
+        # Out-Host, not a bare call: a PowerShell function returns everything written
+        # to the output stream, so a bare 'npx ...' inside the block would make this
+        # return @('...npx output...', $true) instead of $true, and the caller's
+        # 'Should -Be $true' would fail on a command that actually succeeded.
+        & $ScriptBlock | Out-Host
         if ($LASTEXITCODE -eq 0) {
             return $true
         }
