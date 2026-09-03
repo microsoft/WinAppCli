@@ -213,34 +213,6 @@ internal sealed class InteractiveDesktopScheduler(IMonotonicClock clock)
     }
 
     /// <summary>
-    /// Section 6.5: converts this process's existing <see cref="UiTurnMode.Observe"/> entry into a
-    /// <see cref="UiTurnMode.DesktopExclusive"/> command in place — same lease, new arrival ticket,
-    /// status <see cref="UiCommandStatus.Waiting"/> — so a screenshot that discovers it must restore or
-    /// foreground a target never publishes an intermediate state with no entry for itself.
-    /// </summary>
-    /// <returns><see langword="true"/> when an entry was converted.</returns>
-    public bool EscalateObserveToExclusive(
-        InteractiveDesktopState state,
-        ICoordinationLivenessProbe probe,
-        UiParticipantIdentity participant)
-    {
-        Normalize(state, probe);
-
-        var entry = FindOwnerCommand(state, participant);
-        if (entry is null || entry.Mode != UiTurnMode.Observe)
-        {
-            return false;
-        }
-
-        // Priority starts at escalation time — the observational pass earns no head start.
-        entry.Ticket = state.AllocateTicket();
-        entry.Mode = UiTurnMode.DesktopExclusive;
-        entry.Status = UiCommandStatus.Waiting;
-        ApplyOwnerLocalEligibility(state);
-        return true;
-    }
-
-    /// <summary>
     /// Section 10.6: removes this process's command and sets the idle deadline. A non-cancelled
     /// completion renews the grace; an anonymous owner gets none and hands off immediately;
     /// cancellation never renews.

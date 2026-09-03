@@ -96,6 +96,18 @@ internal sealed partial class UiRecordingService(
         {
             global::Windows.Win32.PInvoke.SetForegroundWindow(hwnd);
             await Task.Delay(150, ct).ConfigureAwait(false);
+
+            // SetForegroundWindow is advisory. If it was refused, every screen-DC frame would record
+            // whichever window is really in front and the caller would get a perfectly playable MP4 of
+            // the wrong app. Verify after the activation delay and before any frame is captured. Capture
+            // safety, not coordination: it says nothing about who else may be driving the desktop.
+            if (!ForegroundGuard.ForegroundBelongsTo((long)rootHwnd))
+            {
+                throw new ForegroundLostException(
+                    "The target window is not in the foreground, so a screen recording would capture " +
+                    "whatever window is actually in front. Bring the window to the foreground and retry, " +
+                    "or record the window directly instead of the screen.");
+            }
         }
 
         global::Windows.Win32.PInvoke.GetWindowRect(hwnd, out var rect);

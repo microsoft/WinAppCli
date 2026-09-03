@@ -92,6 +92,19 @@ internal sealed partial class UiAutomationService
 
         if (captureScreen)
         {
+            // SetForegroundWindow above is advisory. If it was refused, a screen-DC BitBlt reads whatever
+            // window is really in front and returns a picture of the wrong app while reporting success —
+            // worse than failing, because the caller cannot tell. Verify after the activation delay and
+            // immediately before the capture. This is capture safety, not coordination: it says nothing
+            // about who else may be driving the desktop, only that these pixels would be the wrong ones.
+            if (!ForegroundGuard.ForegroundBelongsTo((long)(nint)hwnd))
+            {
+                throw new ForegroundLostException(
+                    "The target window is not in the foreground, so a screen capture would record whatever " +
+                    "window is actually in front. Bring the window to the foreground and retry, or capture " +
+                    "the window directly instead of the screen.");
+            }
+
             // Screen capture mode: BitBlt from screen DC — captures popups and overlays.
             pixelData = CaptureFromScreen(rect.left, rect.top, width, height);
         }

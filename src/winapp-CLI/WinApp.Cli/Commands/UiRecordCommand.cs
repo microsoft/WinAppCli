@@ -44,8 +44,10 @@ internal class UiRecordCommand : Command, IShortDescription
     public class Handler(
         IUiTargetResolver targetResolver,
         IUiRecordingService recordingService,
+        IWindowCapture windowCapture,
         IAnsiConsole ansiConsole,
-        ILogger<UiRecordCommand> logger) : AsynchronousCommandLineAction
+        IInteractiveDesktopLock desktopLock,
+        ILogger<UiRecordCommand> logger) : UiCoordinatedAction(desktopLock, logger)
     {
         // Test seams: override Console.IsInputRedirected and Console.In without process-level side effects.
         internal static Func<bool>? s_isInputRedirectedOverride;
@@ -54,19 +56,28 @@ internal class UiRecordCommand : Command, IShortDescription
         // Prevents the stdin monitor from racing disposal of its cancellation source.
         private volatile bool _stdinMonitorStopped;
 
-        public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
+        protected override string Operation => "ui record";
+
+        /// <summary>
+        /// Recording shares the turn: it pins its owner for the whole capture, but same-workflow input
+        /// may interleave so a workflow can record itself driving the app.
+        /// </summary>
+        /// <remarks>
+        /// With no <c>WINAPP_UI_WORKFLOW_ID</c> the recording is an anonymous one-command owner, so it
+        /// blocks every other owner for its full duration — to record and click concurrently, both
+        /// commands must name the same workflow.
+        /// </remarks>
+        protected override UiTurnMode ResolveMode(ParseResult parseResult) => UiTurnMode.TurnShared;
+
+        protected override int? Preflight(ParseResult parseResult)
         {
             var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
-            var quiet = parseResult.GetValue(WinAppRootCommand.QuietOption);
-            var selector = parseResult.GetValue(SharedUiOptions.SelectorArgument);
             var app = parseResult.GetValue(SharedUiOptions.AppOption);
             var window = parseResult.GetValue(SharedUiOptions.WindowOption);
             var durationSec = parseResult.GetValue(SharedUiOptions.DurationSecOption);
             var fps = parseResult.GetValue(SharedUiOptions.FpsOption);
             var maxEdge = parseResult.GetValue(SharedUiOptions.MaxEdgeOption);
             var maxEdgeExplicit = parseResult.GetResult(SharedUiOptions.MaxEdgeOption)?.Implicit == false;
-            var captureScreen = parseResult.GetValue(SharedUiOptions.CaptureScreenOption);
-            var output = parseResult.GetValue(SharedUiOptions.OutputOption);
             var frames = parseResult.GetValue(FramesOption);
 
             // Validate options before resolving the target.
@@ -109,17 +120,36 @@ internal class UiRecordCommand : Command, IShortDescription
                     logger.LogError("{Symbol} {Message}", UiSymbols.Error, message);
                     return 1;
                 }
-
-                if (!maxEdgeExplicit)
-                {
-                    maxEdge = DefaultFrameArtifactMaxEdge;
-                }
             }
 
             if (string.IsNullOrWhiteSpace(app) && window is null)
             {
                 UiErrors.MissingApp(logger, json);
                 return 1;
+            }
+
+            return null;
+        }
+
+        protected override async Task<int> ExecuteAsync(ParseResult parseResult, IUiTurn turn, CancellationToken cancellationToken)
+        {
+            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
+            var quiet = parseResult.GetValue(WinAppRootCommand.QuietOption);
+            var selector = parseResult.GetValue(SharedUiOptions.SelectorArgument);
+            var app = parseResult.GetValue(SharedUiOptions.AppOption);
+            var window = parseResult.GetValue(SharedUiOptions.WindowOption);
+            var durationSec = parseResult.GetValue(SharedUiOptions.DurationSecOption);
+            var fps = parseResult.GetValue(SharedUiOptions.FpsOption);
+            var maxEdge = parseResult.GetValue(SharedUiOptions.MaxEdgeOption);
+            var maxEdgeExplicit = parseResult.GetResult(SharedUiOptions.MaxEdgeOption)?.Implicit == false;
+            var captureScreen = parseResult.GetValue(SharedUiOptions.CaptureScreenOption);
+            var output = parseResult.GetValue(SharedUiOptions.OutputOption);
+            var frames = parseResult.GetValue(FramesOption);
+
+            // Preflight already validated every option above; only the default-derivation remains.
+            if (frames && !maxEdgeExplicit)
+            {
+                maxEdge = DefaultFrameArtifactMaxEdge;
             }
 
             // Set _stdinMonitorStopped before disposing this source.
@@ -231,7 +261,15 @@ internal class UiRecordCommand : Command, IShortDescription
                     FramesDirectory = framesDirectory,
                 };
 
-                var result = await recordingService.RecordAsync(uiTarget, selector, options, linkedCts.Token, OnRecordingStarted);
+                var (result, coordinationWarning) = await RecordUnderTurnAsync(
+                    turn, uiTarget, selector, options, captureScreen, json, quiet,
+                    OnRecordingStarted, linkedCts.Token).ConfigureAwait(false);
+
+                // Merged here rather than inside the helper because RecordCaptureResult is engine-owned
+                // and immutable; the coordination note is a CLI concern layered on top of it.
+                var allWarnings = coordinationWarning is null
+                    ? result.Warnings
+                    : [.. result.Warnings ?? [], coordinationWarning];
 
                 if (json)
                 {
@@ -251,7 +289,7 @@ internal class UiRecordCommand : Command, IShortDescription
                         CadenceRatio = result.CadenceRatio,
                         StopReason = result.StopReason,
                         FrameArtifacts = result.FrameArtifacts,
-                        Warnings = result.Warnings,
+                        Warnings = allWarnings,
                     };
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(payload, UiJsonContext.Default.UiRecordResult));
@@ -260,7 +298,7 @@ internal class UiRecordCommand : Command, IShortDescription
                 logger.LogInformation(
                     "Recorded {Frames} frames ({Width}x{Height}, h264) to {Path} ({Size}KB)",
                     result.Frames, result.Width, result.Height, filePath, result.FileSize / 1024);
-                foreach (var warning in result.Warnings ?? [])
+                foreach (var warning in allWarnings ?? [])
                 {
                     logger.LogWarning("{Symbol} {Warning}", UiSymbols.Warning, warning);
                 }
@@ -331,10 +369,32 @@ internal class UiRecordCommand : Command, IShortDescription
                 UiErrors.ElementNotFound(logger, notFoundEx.Selector, json);
                 return 1;
             }
+            catch (ForegroundLostException foregroundEx)
+            {
+                // The engine refused to record because the target never reached the foreground, so every
+                // screen frame would have been of the wrong window. Same precise contract as the
+                // pre-injection foreground guard, and no MP4 is produced.
+                logger.LogError("{Symbol} {Message}", UiSymbols.Error, foregroundEx.Message);
+                UiJsonError.Emit(json, UiJsonError.CodeForegroundNotTarget, foregroundEx.Message,
+                    errorOut: parseResult.InvocationConfiguration.Error);
+                return 1;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Native Ctrl+C / coordinator cancellation before capture started. There is no finalized
+                // MP4 to preserve, so this is NOT a completed command: swallowing it would make the
+                // coordinator see a normal body return and renew the owner's idle grace for a command that
+                // produced nothing. An ACTIVE recording that observes cancellation instead finalizes its
+                // MP4 and RETURNS success, so it never reaches this catch and still renews.
+                logger.LogDebug("Recording cancelled before capture started; propagating to coordination.");
+                throw;
+            }
             catch (OperationCanceledException) when (linkedCts.IsCancellationRequested)
             {
-                // In-loop cancellation returns a finalized recording instead.
-                logger.LogDebug("Recording cancelled before capture started.");
+                // Defensive: the stdin stop-monitor only arms after encoder readiness, so this is the
+                // narrow race where it fires between readiness and the first frame. The workflow asked its
+                // own recording to stop rather than abandoning the command, so it keeps its turn.
+                logger.LogDebug("Recording stopped via stdin before capture started.");
                 return 1;
             }
             catch (System.Runtime.InteropServices.COMException comEx)
@@ -343,7 +403,7 @@ internal class UiRecordCommand : Command, IShortDescription
                 UiErrors.GenericError(logger, comEx, json);
                 return 1;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!UiCoordinatedAction.IsCoordinationFault(ex))
             {
                 UiErrors.GenericError(logger, ex, json);
                 return 1;
@@ -352,6 +412,135 @@ internal class UiRecordCommand : Command, IShortDescription
             {
                 _stdinMonitorStopped = true;
                 linkedCts.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Runs the recording, holding <c>active.lock</c> only for as long as the capture mode actually
+        /// needs the desktop to itself.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// WGC and screen-DC recording touch the desktop only while starting up — restoring a minimized
+        /// window and taking the foreground — so the section is released as soon as the first frame is
+        /// committed. That is what lets a workflow record itself typing: the recording keeps the turn
+        /// (<see cref="UiTurnMode.TurnShared"/>) while same-workflow input takes the section between
+        /// frames.
+        /// </para>
+        /// <para>
+        /// PrintWindow is different. When the host has no frame-capture support, <em>any</em> frame can
+        /// hit the engine's blank-frame retry, which foregrounds the window to recover — mid-recording,
+        /// with no warning. Releasing the section there would let that retry fight another command for
+        /// the foreground, so the section is held for the whole recording and the caller is told plainly
+        /// that input cannot interleave on this host.
+        /// </para>
+        /// </remarks>
+        private async Task<(RecordCaptureResult Result, string? CoordinationWarning)> RecordUnderTurnAsync(
+            IUiTurn turn,
+            UiTarget uiTarget,
+            string? selector,
+            RecordOptions options,
+            bool captureScreen,
+            bool json,
+            bool quiet,
+            Action<bool> onRecordingStarted,
+            CancellationToken ct)
+        {
+            // Mirrors the engine's own selection in UiRecordingService: screen DC when asked for, else WGC
+            // when the host supports frame capture, else PrintWindow. Asserted against the result below so
+            // this prediction cannot silently drift away from the engine.
+            var predictedMode = captureScreen
+                ? "screen"
+                : windowCapture.IsFrameCaptureSupported ? "wgc" : "printwindow";
+            var holdForWholeRecording = predictedMode == "printwindow";
+
+            if (holdForWholeRecording)
+            {
+                const string warning =
+                    "This host has no frame-capture support, so recording falls back to PrintWindow, whose " +
+                    "blank-frame recovery can foreground the window at any point. The desktop is therefore " +
+                    "held for the whole recording and other winapp ui commands — including ones sharing this " +
+                    "workflow id — will wait until it finishes.";
+                if (!json && !quiet)
+                {
+                    logger.LogWarning("{Symbol} {Message}", UiSymbols.Warning, warning);
+                }
+
+                RecordCaptureResult heldResult;
+                await using (await turn.EnterAsync(ct).ConfigureAwait(false))
+                {
+                    heldResult = await recordingService
+                        .RecordAsync(uiTarget, selector, options, ct, onRecordingStarted).ConfigureAwait(false);
+                }
+
+                AssertPredictedMode(predictedMode, heldResult);
+                return (heldResult, warning);
+            }
+
+            // RunContinuationsAsynchronously is mandatory: without it, TrySetResult below would run this
+            // method's continuation ON the engine's capture thread, inside its first-frame callback, and
+            // the section disposal would happen there too.
+            var startedTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            void OnStarted(bool frameArtifactsActive)
+            {
+                // The callback only signals. It never disposes the section: disposal is async and belongs
+                // to this method, and doing it here would block the engine's capture loop on a file lock.
+                onRecordingStarted(frameArtifactsActive);
+                startedTcs.TrySetResult();
+            }
+
+            var section = await turn.EnterAsync(ct).ConfigureAwait(false);
+            var released = false;
+
+            async Task ReleaseOnceAsync()
+            {
+                // Exactly once, whichever of the two outcomes below happens first — and again from the
+                // finally, in case neither did (a synchronous throw before any frame).
+                if (released)
+                {
+                    return;
+                }
+
+                released = true;
+                await section.DisposeAsync().ConfigureAwait(false);
+            }
+
+            try
+            {
+                var recordTask = recordingService.RecordAsync(uiTarget, selector, options, ct, OnStarted);
+
+                // Race the two ways the desktop stops being needed: the first frame landed, or the
+                // recording ended before producing one (fault, cancellation, or a zero-frame run). Waiting
+                // only on the started signal would hang forever on the second case.
+                await Task.WhenAny(startedTcs.Task, recordTask).ConfigureAwait(false);
+                await ReleaseOnceAsync().ConfigureAwait(false);
+
+                var result = await recordTask.ConfigureAwait(false);
+                AssertPredictedMode(predictedMode, result);
+                return (result, null);
+            }
+            finally
+            {
+                await ReleaseOnceAsync().ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>
+        /// Fails loudly when the engine chose a different capture mode than this command predicted.
+        /// </summary>
+        /// <remarks>
+        /// The section-holding decision above is derived from a prediction, so a future engine change that
+        /// altered mode selection would silently release the desktop mid-PrintWindow recording. Comparing
+        /// against the reported mode turns that into a visible failure instead.
+        /// </remarks>
+        private void AssertPredictedMode(string predictedMode, RecordCaptureResult result)
+        {
+            if (result.Mode is { } actual && !string.Equals(actual, predictedMode, StringComparison.Ordinal))
+            {
+                logger.LogWarning(
+                    "{Symbol} Recording used capture mode '{Actual}' but coordination planned for '{Predicted}'. Desktop coordination for this recording may have been wider or narrower than needed.",
+                    UiSymbols.Warning, actual, predictedMode);
             }
         }
 

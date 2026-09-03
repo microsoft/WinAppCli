@@ -181,7 +181,7 @@ internal class UiListWindowsCommand : Command, IShortDescription
                 logger.LogInformation("Found {Count} windows", displayedCount);
                 return 0;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!UiCoordinatedAction.IsCoordinationFault(ex))
             {
                 UiErrors.GenericError(logger, ex, json);
                 return 1;

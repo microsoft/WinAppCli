@@ -502,56 +502,6 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
             return new SectionScope(this);
         }
 
-        public async Task EscalateToDesktopExclusiveAsync(CancellationToken cancellationToken)
-        {
-            if (Mode == UiTurnMode.DesktopExclusive)
-            {
-                return;
-            }
-
-            using (var stateLock = coordinator._store.AcquireStateLock(cancellationToken))
-            {
-                var read = coordinator._store.Read();
-                if (read.UnknownNewerVersion)
-                {
-                    throw new UiCoordinationException(
-                        UiCoordinationErrorCodes.Unavailable,
-                        "UI turn coordination state was written by a newer version of winapp, so this screenshot cannot escalate safely.",
-                        "Update winapp so every process on this desktop uses a compatible version, then retry.");
-                }
-
-                var state = read.State!;
-
-                if (_lease is not null
-                    && coordinator._scheduler.EscalateObserveToExclusive(state, _probe, participant))
-                {
-                    // Spec §6.5: the same lease and the same entry are reused, so no intermediate state
-                    // is ever published in which this process has no command.
-                    _ticket = InteractiveDesktopScheduler.FindOwnerCommand(state, participant)?.Ticket;
-                }
-                else
-                {
-                    // A detached non-owner observation registers a brand-new DesktopExclusive command.
-                    _lease ??= coordinator._participants.OpenLease(
-                        participant.ProcessId, participant.StartTicksUtc);
-                    var admission = coordinator._scheduler.BeginParticipating(
-                        state, _probe, owner, participant, UiTurnMode.DesktopExclusive);
-                    _ticket = admission.Ticket;
-                    _turnAction = admission.TurnAction;
-                    _turnStartedTick64 = admission.Admission == UiAdmission.GlobalWaiter
-                        ? null
-                        : TurnStartTick(state);
-                    _detached = false;
-                }
-
-                coordinator._store.Publish(state);
-            }
-
-            Mode = UiTurnMode.DesktopExclusive;
-            _waitWatch.Restart();
-            await WaitUntilRunnableAsync(cancellationToken).ConfigureAwait(false);
-        }
-
         private async Task ReleaseAllSectionsAsync()
         {
             // Safety net for a body that returned or threw without disposing its scope. Releasing the

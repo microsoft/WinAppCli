@@ -40,19 +40,11 @@ internal interface IDesktopSection
 /// <summary>The workflow turn a coordinated command is executing under.</summary>
 internal interface IUiTurn : IDesktopSection
 {
-    /// <summary>The mode this command was admitted with, after any escalation.</summary>
+    /// <summary>The mode this command was admitted with.</summary>
     UiTurnMode Mode { get; }
 
     /// <summary>Milliseconds spent queued before execution began. Zero when the turn was free.</summary>
     long WaitedMs { get; }
-
-    /// <summary>
-    /// Converts an in-flight <see cref="UiTurnMode.Observe"/> command into a
-    /// <see cref="UiTurnMode.DesktopExclusive"/> one and waits for the barrier (spec §6.5). Used by
-    /// <c>ui screenshot</c> when a target turns out to need restore or foreground: the invocation
-    /// discards its buffered captures, escalates as a whole, and recaptures from the beginning.
-    /// </summary>
-    Task EscalateToDesktopExclusiveAsync(CancellationToken cancellationToken);
 }
 
 /// <summary>

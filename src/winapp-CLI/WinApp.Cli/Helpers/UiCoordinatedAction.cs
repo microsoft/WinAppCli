@@ -52,8 +52,8 @@ internal abstract class UiCoordinatedAction(IInteractiveDesktopLock coordinator,
     /// Whether <paramref name="ex"/> belongs to coordination and must escape a handler's catch-all.
     /// </summary>
     /// <remarks>
-    /// Handler bodies call into coordination — <see cref="IDesktopSection.EnterAsync"/> and
-    /// <see cref="IUiTurn.EscalateToDesktopExclusiveAsync"/> — from inside their broad
+    /// Handler bodies call into coordination — <see cref="IDesktopSection.EnterAsync"/> — from inside
+    /// their broad
     /// <c>catch (Exception)</c>. Letting that catch win would be doubly wrong: the user would see
     /// <c>internal_error</c> instead of <c>cancelled</c> or the real coordination code, and the
     /// coordinator would see a normal body completion and renew the owner's idle grace on a command
