@@ -333,7 +333,8 @@ internal static partial class SingleFileManifestPlanner
     }
 
     /// <summary>
-    /// Infers <c>Identity/@Name</c> from <c>WinAppPackageName</c>, else the file stem.
+    /// Infers <c>Identity/@Name</c>: the declared <c>WinAppPackageName</c>, else the file stem with a
+    /// short hash of its full path appended.
     /// </summary>
     /// <remarks>
     /// Split out from <see cref="Plan"/> so the identity can be resolved on its own. Deciding WHICH
@@ -341,26 +342,19 @@ internal static partial class SingleFileManifestPlanner
     /// CONTAINS — otherwise an invalid version or publisher would make an already-registered app
     /// impossible to unregister.
     /// <para>
-    /// <c>Identity/@Name</c> must match <c>[-.A-Za-z0-9]+</c>, so a stem like <c>my counter</c> needs
-    /// sanitizing. A declared <c>WinAppPackageName</c> is sanitized identically — a value that cannot be
-    /// an Identity name is corrected exactly as <c>manifest generate</c> does, rather than silently
-    /// producing an unpackable manifest.
-    /// </para>
-    /// </remarks>
-    /// <summary>
-    /// Resolves the package identity: the declared <c>WinAppPackageName</c>, or the file's own name with
-    /// a short hash of its full path appended.
-    /// </summary>
-    /// <remarks>
     /// The path hash is what keeps two same-named files apart. Without it, every <c>counter.cs</c> on the
     /// machine shares the identity <c>counter</c> under the default publisher, so running one replaces
     /// another's registration AND hands it the first app's <c>LocalState</c> — an app silently reading and
     /// overwriting an unrelated app's saved data. The execution alias is derived from this identity, so it
-    /// becomes unique here too.
+    /// becomes unique here too. It is hashed from the full path, so it is stable across runs,
+    /// configurations and machines with the same layout, and changes only if the file moves.
+    /// </para>
     /// <para>
-    /// Hashed from the full path, so it is stable across runs, configurations and machines with the same
-    /// layout, and changes only if the file moves. A declared <c>WinAppPackageName</c> is used verbatim:
-    /// naming the package is how a user opts into a stable identity they control.
+    /// <c>Identity/@Name</c> must match <c>[-.A-Za-z0-9]+</c>, so a stem like <c>my counter</c> needs
+    /// sanitizing. A declared <c>WinAppPackageName</c> is used verbatim apart from that same sanitizing —
+    /// naming the package is how a user opts into a stable identity they control, and a value that cannot
+    /// be an Identity name is corrected exactly as <c>manifest generate</c> does rather than silently
+    /// producing an unpackable manifest.
     /// </para>
     /// </remarks>
     private static string InferPackageName(FileInfo singleFile, IReadOnlyDictionary<string, string> properties)

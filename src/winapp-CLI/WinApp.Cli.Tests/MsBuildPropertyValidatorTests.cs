@@ -56,8 +56,8 @@ public class MsBuildPropertyValidatorTests
     [TestMethod]
     [DataRow("NoEqualsSign", "'NoEqualsSign'", DisplayName = "missing '='")]
     [DataRow("=Value", "(empty)", DisplayName = "missing name")]
-    [DataRow(" =Value", "' '", DisplayName = "whitespace-only name")]
-    [DataRow("", "''", DisplayName = "empty token")]
+    [DataRow(" =Value", "(empty)", DisplayName = "whitespace-only name")]
+    [DataRow("", "(empty)", DisplayName = "empty token")]
     public void Validate_MalformedProperty_IsRejectedNamingIt(string property, string expectedInError)
     {
         var error = MsBuildPropertyValidator.Validate([property]);
@@ -65,6 +65,20 @@ public class MsBuildPropertyValidatorTests
         Assert.IsNotNull(error);
         StringAssert.Contains(error, expectedInError);
         StringAssert.Contains(error, "Name=Value", "The message should show the expected shape");
+    }
+
+    [TestMethod]
+    [DataRow(";B=2", DisplayName = "leading ';'")]
+    [DataRow("=1;B=2", DisplayName = "leading '='")]
+    public void Validate_PackedPropertyWithNoLeadingName_SaysEmptyRatherThanNothing(string property)
+    {
+        // "Invalid --property ''" gives the user nothing to act on.
+        var error = MsBuildPropertyValidator.Validate([property]);
+
+        Assert.IsNotNull(error);
+        StringAssert.Contains(error, "(empty)");
+        Assert.IsFalse(error.Contains("--property ''", StringComparison.Ordinal),
+            "An empty name must render as a sentinel, not as empty quotes");
     }
 
     [TestMethod]

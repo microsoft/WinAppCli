@@ -32,19 +32,31 @@ internal static class MsBuildPropertyValidator
             // literal ';' in a value.
             if (property.Contains(';'))
             {
-                var name = property[..property.IndexOfAny(['=', ';'])];
-                return $"Invalid --property '{name}'. A single -p cannot pack multiple properties with ';'. " +
+                var name = Describe(property[..property.IndexOfAny(['=', ';'])]);
+                return $"Invalid --property {name}. A single -p cannot pack multiple properties with ';'. " +
                        "Pass one property per repeatable -p (for example: -p A=1 -p B=2), or escape a literal ';' in a value as '%3B'.";
             }
 
             var separator = property.IndexOf('=');
             if (separator <= 0 || string.IsNullOrWhiteSpace(property[..separator]))
             {
-                var shown = separator > 0 ? property[..separator] : (separator == 0 ? "(empty)" : property);
-                return $"Invalid --property '{shown}'. Expected Name=Value (for example: -p WindowsPackageType=None).";
+                // No '=' at all: echo what was typed, which is the whole token. Otherwise show the name
+                // part, which Describe renders as a sentinel when it is blank.
+                var shown = separator >= 0 ? property[..separator] : property;
+                return $"Invalid --property {Describe(shown)}. Expected Name=Value (for example: -p WindowsPackageType=None).";
             }
         }
 
         return null;
     }
+
+    /// <summary>
+    /// Renders a property name for an error message, as <c>(empty)</c> when there is nothing to show.
+    /// </summary>
+    /// <remarks>
+    /// A leading <c>;</c> or <c>=</c> leaves the name empty, and <c>Invalid --property ''</c> gives the
+    /// user nothing to act on.
+    /// </remarks>
+    private static string Describe(string name) =>
+        string.IsNullOrWhiteSpace(name) ? "(empty)" : $"'{name}'";
 }
