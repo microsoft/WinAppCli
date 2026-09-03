@@ -1095,16 +1095,31 @@ internal class NewCommand : Command, IShortDescription
             // templates we don't own and carry names truncated mid-word ("Reactor NavigationView App
             // (Experim..."). Reconcile them against `dotnet new uninstall` — the authoritative,
             // unformatted per-package Templates block — to drop foreign templates and restore real
-            // display names. If that output can't be parsed, the unfiltered list is used as before.
+            // names. Ownership must be *established*, never assumed: if that command fails or its
+            // output can't be parsed we cannot tell an official template from a third-party one that
+            // borrowed an official alias, so fail the enumeration instead of offering rows of unknown
+            // provenance under the "official Windows App SDK template" banner.
             var (packExit, packOutput, packStderr) = await dotNetService.RunDotnetCommandAsync(contextDir, ListTemplatePacksArgs, EnglishUiEnvironment, cancellationToken: cancellationToken);
             LogDotnetOutput(ListTemplatePacksArgs, packExit, packOutput, packStderr);
-            if (packExit == 0)
+            if (packExit != 0)
             {
-                var packRows = WinUiTemplateCatalog.ParsePackTemplates(packOutput, TemplatePackageId);
-                parsed = WinUiTemplateCatalog.RestrictToPack(parsed, packRows);
+                var packDetail = !string.IsNullOrWhiteSpace(packStderr) ? packStderr.Trim() : packOutput.Trim();
+                var packFailure = $"Could not verify which templates '{TemplatePackageId}' owns: dotnet new uninstall failed (exit code {packExit})";
+                if (!string.IsNullOrWhiteSpace(packDetail))
+                {
+                    packFailure += $": {packDetail}";
+                }
+
+                return ([], packFailure);
             }
 
-            return (parsed, null);
+            var packRows = WinUiTemplateCatalog.ParsePackTemplates(packOutput, TemplatePackageId);
+            if (packRows.Count == 0)
+            {
+                return ([], $"Could not verify which templates '{TemplatePackageId}' owns: no template list for it in 'dotnet new uninstall' output. Re-run with --verbose to see that output.");
+            }
+
+            return (WinUiTemplateCatalog.RestrictToPack(parsed, packRows), null);
         }
 
         private async Task<WinUiTemplateEntry> PromptTemplateAsync(IReadOnlyList<WinUiTemplateEntry> templates, CancellationToken cancellationToken)
@@ -1468,7 +1483,7 @@ internal class NewCommand : Command, IShortDescription
             return (null, unparseable);
         }
 
-        private void PrintJson(bool created, string? templateShortName, string name, string path, string? error, bool experimental = false, string? templateVersion = null)
+        private void PrintJson(bool created, string? templateShortName, string name, string path, string? error, bool? experimental = null, string? templateVersion = null)
         {
             var result = new NewCommandResult
             {
@@ -1516,8 +1531,12 @@ internal sealed class NewCommandResult
     public bool Created { get; set; }
     public string? Template { get; set; }
 
-    /// <summary>True when the template is prerelease (e.g. the Reactor templates).</summary>
-    public bool Experimental { get; set; }
+    /// <summary>
+    /// True when the template is prerelease (e.g. the Reactor templates). Omitted entirely when the
+    /// run failed before a template was resolved against the catalog, since <see cref="Template"/> is
+    /// then only the raw requested value and reporting <c>false</c> would claim it is stable.
+    /// </summary>
+    public bool? Experimental { get; set; }
     public string? Name { get; set; }
     public string? Path { get; set; }
     public string? TemplateVersion { get; set; }

@@ -337,18 +337,13 @@ internal static class WinUiTemplateCatalog
     /// <c>evil,winui</c> shares <c>winui</c>, so it would be offered as an official template and
     /// scaffolded as <c>dotnet new evil</c>.
     /// </para>
-    /// Returns <paramref name="listed"/> unchanged when <paramref name="packRows"/> is empty, so an
-    /// unexpected <c>dotnet new uninstall</c> format degrades to the previous unfiltered behaviour
-    /// rather than hiding every template.
+    /// This fails closed. Empty <paramref name="packRows"/> means no template's ownership could be
+    /// established, so nothing is returned; the caller reports that as an enumeration failure rather
+    /// than offering rows of unknown provenance.
     /// </summary>
     internal static IReadOnlyList<WinUiTemplateEntry> RestrictToPack(
         IReadOnlyList<WinUiTemplateEntry> listed, IReadOnlyList<PackTemplateRow> packRows)
     {
-        if (packRows.Count == 0)
-        {
-            return listed;
-        }
-
         var kept = new List<WinUiTemplateEntry>();
         foreach (var entry in listed)
         {

@@ -355,13 +355,13 @@ public class WinUiTemplateCatalogTests
     }
 
     [TestMethod]
-    public void RestrictToPack_NoPackRows_KeepsEveryListedTemplate()
+    public void RestrictToPack_NoPackRows_KeepsNothing()
     {
-        // An unexpected `dotnet new uninstall` format must degrade to the unfiltered list rather than
-        // hiding every template and leaving the user with nothing to scaffold.
+        // Ownership could not be established, so no template may be presented as official. The caller
+        // turns the empty result into an enumeration failure rather than offering unverified rows.
         var listed = new List<WinUiTemplateEntry> { Entry("WinUI Blank App", "winui") };
 
-        Assert.AreSame(listed, WinUiTemplateCatalog.RestrictToPack(listed, []));
+        Assert.AreEqual(0, WinUiTemplateCatalog.RestrictToPack(listed, []).Count);
     }
 
     [TestMethod]
