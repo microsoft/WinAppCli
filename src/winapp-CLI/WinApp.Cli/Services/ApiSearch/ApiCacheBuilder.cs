@@ -143,7 +143,8 @@ internal static class ApiCacheBuilder
         foreach (PackageWithWinMd package in packages)
         {
             string sourceStamp = ComputeSourceStamp(package);
-            if (!ApiCachePaths.TryPackageCacheDir(cacheDir, package.Id, package.Version, sourceStamp, out string packageCacheDir))
+            string assetPathKey = ComputeAssetPathKey(package);
+            if (!ApiCachePaths.TryPackageCacheDir(cacheDir, package.Id, package.Version, assetPathKey, out string packageCacheDir))
             {
                 // Untrusted Id/Version would escape the cache dir — skip it.
                 report?.Invoke($"Skipping package with unsafe path: {package.Id} {package.Version}");
@@ -171,9 +172,70 @@ internal static class ApiCacheBuilder
                 Id = package.Id,
                 Version = package.Version,
                 SourceStamp = sourceStamp,
+                AssetPathKey = assetPathKey,
             });
+            PruneStalePackageCaches(packageCacheDir);
         }
         return packageRefs;
+    }
+
+    /// <summary>
+    /// Deletes cache directories left beside <paramref name="keptPackageCacheDir"/> by an
+    /// older cache layout, so upgrading does not strand exports nothing will ever read
+    /// again.
+    /// <para>
+    /// Only siblings whose <c>meta.json</c> is missing or records a different
+    /// <see cref="ApiCachePaths.CacheFormatVersion"/> are removed. A sibling written by
+    /// this layout is left alone: it is another project's genuinely different asset
+    /// selection for the same package version, and deleting it would make two projects
+    /// evict each other on every refresh.
+    /// </para>
+    /// </summary>
+    private static void PruneStalePackageCaches(string keptPackageCacheDir)
+    {
+        string? versionDir = Path.GetDirectoryName(keptPackageCacheDir);
+        if (versionDir is null)
+        {
+            return;
+        }
+        try
+        {
+            foreach (string sibling in Directory.EnumerateDirectories(versionDir))
+            {
+                if (string.Equals(sibling, keptPackageCacheDir, StringComparison.OrdinalIgnoreCase)
+                    || CacheFormatOf(sibling) == ApiCachePaths.CacheFormatVersion)
+                {
+                    continue;
+                }
+                Directory.Delete(sibling, recursive: true);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Cleanup is opportunistic: a locked or unreadable leftover directory costs
+            // disk space, not correctness, so it must never fail the refresh.
+        }
+    }
+
+    /// <summary>
+    /// The <see cref="ApiCachePaths.CacheFormatVersion"/> recorded in a package cache
+    /// directory, or <see langword="null"/> when it has no readable <c>meta.json</c>.
+    /// </summary>
+    private static int? CacheFormatOf(string packageCacheDir)
+    {
+        string metaPath = Path.Combine(packageCacheDir, "meta.json");
+        if (!File.Exists(metaPath))
+        {
+            return null;
+        }
+        try
+        {
+            return JsonSerializer.Deserialize(File.ReadAllText(metaPath), ApiSearchJsonContext.Default.PackageMeta)?.Format;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -208,18 +270,45 @@ internal static class ApiCacheBuilder
     }
 
     /// <summary>
+    /// A short fingerprint of *which* metadata files a package resolved to — their paths
+    /// only, hashed. This names the cache directory.
+    /// <para>
+    /// Paths and not write times, deliberately. A package id and version alone do not
+    /// identify what is cached: two projects on different target frameworks select
+    /// different assets from the same package version, and with one shared directory
+    /// whichever indexed last silently answers for both. Including write times would
+    /// separate those correctly too, but it would also mint a fresh directory every time
+    /// a referenced project is rebuilt, orphaning the previous one forever. Asset paths
+    /// are stable across rebuilds, so the common case reuses one directory and only a
+    /// genuinely different asset selection gets its own.
+    /// </para>
+    /// <para>
+    /// Content changes at the same paths are caught by <see cref="ComputeSourceStamp"/>,
+    /// which re-exports into this same directory rather than beside it.
+    /// </para>
+    /// </summary>
+    private static string ComputeAssetPathKey(PackageWithWinMd package)
+    {
+        var builder = new StringBuilder();
+        foreach (string file in SortedAssetFiles(package))
+        {
+            builder.Append(file).Append(';');
+        }
+        return ApiCachePaths.ShortHash(builder.ToString());
+    }
+
+    /// <summary>
     /// A short fingerprint of the metadata files a package actually resolved to — their
     /// paths, sizes, and write times, hashed to roughly twenty characters so the cache
-    /// does not grow a per-file record. A package id and version alone do not identify
-    /// what is cached: rebuilding a referenced project rewrites its <c>.winmd</c> in
-    /// place, and two projects on different target frameworks select different assets
-    /// from the same package version while sharing one cache directory. Comparing the
-    /// fingerprint re-exports in those cases instead of answering from stale metadata.
+    /// does not grow a per-file record. Recorded in <c>meta.json</c> and compared on
+    /// reuse: rebuilding a referenced project rewrites its <c>.winmd</c> in place at the
+    /// same path, and comparing the fingerprint re-exports it instead of answering from
+    /// stale metadata.
     /// </summary>
     private static string ComputeSourceStamp(PackageWithWinMd package)
     {
         var builder = new StringBuilder();
-        foreach (string file in package.WinMdFiles.Concat(package.XmlDocFiles).OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+        foreach (string file in SortedAssetFiles(package))
         {
             builder.Append(file);
             try
@@ -237,6 +326,10 @@ internal static class ApiCacheBuilder
         }
         return ApiCachePaths.ShortHash(builder.ToString());
     }
+
+    /// <summary>Every metadata file a package resolved to, in a stable order.</summary>
+    private static IEnumerable<string> SortedAssetFiles(PackageWithWinMd package) =>
+        package.WinMdFiles.Concat(package.XmlDocFiles).OrderBy(f => f, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Builds the machine-wide SDK scope from <paramref name="sdkPackages"/> (the

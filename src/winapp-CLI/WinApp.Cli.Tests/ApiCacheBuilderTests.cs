@@ -91,6 +91,82 @@ public sealed class ApiCacheBuilderTests
         Assert.AreEqual(first.Single().SourceStamp, second.Single().SourceStamp);
     }
 
+    [TestMethod]
+    public void ResolvePackageExports_SameFilesRebuilt_ReusesOneDirectory()
+    {
+        // Rebuilding a referenced project rewrites its .winmd at the same path. That has
+        // to re-export into the same directory: keyed on the write time instead, every
+        // build would mint a new directory and orphan the previous one forever.
+        string cacheDir = Path.Combine(_dir, "cache");
+        PackageWithWinMd before = WritePackage("proj", "Contoso.Sdk", "1.0.0", "v1");
+
+        var pendingExports = new Dictionary<string, PackageWithWinMd>(StringComparer.OrdinalIgnoreCase);
+        var seenPackageDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        int reused = 0;
+        List<ProjectPackageRef> first = ApiCacheBuilder.ResolvePackageExports(
+            [before], cacheDir, force: false, pendingExports, seenPackageDirs, ref reused, report: null);
+        string exportedFirstTo = pendingExports.Keys.Single();
+
+        // Same package, same paths, different bytes and a later write time.
+        PackageWithWinMd after = WritePackage("proj", "Contoso.Sdk", "1.0.0", "v2-different-bytes");
+
+        pendingExports.Clear();
+        seenPackageDirs.Clear();
+        reused = 0;
+        List<ProjectPackageRef> second = ApiCacheBuilder.ResolvePackageExports(
+            [after], cacheDir, force: false, pendingExports, seenPackageDirs, ref reused, report: null);
+        string exportedSecondTo = pendingExports.Keys.Single();
+
+        // The rebuild must re-export — but into the directory it already used, not a new
+        // one beside it.
+        Assert.AreEqual(0, reused);
+        Assert.AreEqual(exportedFirstTo, exportedSecondTo, "a rebuild must reuse the directory, not orphan it");
+        Assert.AreNotEqual(first.Single().SourceStamp, second.Single().SourceStamp);
+
+        // And each project's manifest entry has to resolve to that same directory.
+        Assert.IsTrue(ApiCachePaths.TryPackageCacheDir(cacheDir, second.Single(), out string dirFromManifest));
+        Assert.AreEqual(exportedSecondTo, dirFromManifest, "the export must be written where the manifest reads it");
+    }
+
+    [TestMethod]
+    public void ResolvePackageExports_OlderLayoutLeftovers_AreDeleted()
+    {
+        // Caches written by an older layout can never be read again, so upgrading must
+        // not strand them on disk.
+        string cacheDir = Path.Combine(_dir, "cache");
+        PackageWithWinMd package = WritePackage("proj", "Contoso.Sdk", "1.0.0", "v1");
+
+        string versionDir = Path.Combine(cacheDir, "packages", "Contoso.Sdk", "1.0.0");
+        string oldLayoutTypes = Path.Combine(versionDir, "types");
+        string oldFormatDir = Path.Combine(versionDir, "deadbeefdeadbeef");
+        string otherSelection = Path.Combine(versionDir, "cafecafecafecafe");
+        Directory.CreateDirectory(oldLayoutTypes);
+        Directory.CreateDirectory(oldFormatDir);
+        Directory.CreateDirectory(otherSelection);
+        File.WriteAllText(Path.Combine(oldFormatDir, "meta.json"), MetaJson(ApiCachePaths.CacheFormatVersion - 1));
+        File.WriteAllText(Path.Combine(otherSelection, "meta.json"), MetaJson(ApiCachePaths.CacheFormatVersion));
+
+        var pendingExports = new Dictionary<string, PackageWithWinMd>(StringComparer.OrdinalIgnoreCase);
+        var seenPackageDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        int reused = 0;
+        ApiCacheBuilder.ResolvePackageExports(
+            [package], cacheDir, force: false, pendingExports, seenPackageDirs, ref reused, report: null);
+
+        Assert.IsFalse(Directory.Exists(oldLayoutTypes), "pre-hash layout leftover should be removed");
+        Assert.IsFalse(Directory.Exists(oldFormatDir), "older-format cache should be removed");
+
+        // Another project's genuinely different asset selection is still current, and
+        // deleting it would make the two projects evict each other on every refresh.
+        Assert.IsTrue(Directory.Exists(otherSelection), "current-format sibling must be kept");
+    }
+
+    /// <summary>A complete <c>meta.json</c> body recording <paramref name="format"/>.</summary>
+    private static string MetaJson(int format) =>
+        $$"""
+        {"format":{{format}},"packageId":"Contoso.Sdk","version":"1.0.0","winMdFiles":[],
+         "totalTypes":0,"totalMembers":0,"totalNamespaces":0,"generatedAt":"2026-01-01T00:00:00Z"}
+        """;
+
     /// <summary>
     /// Writes a .winmd whose bytes and path are unique to <paramref name="folder"/>, so
     /// the fingerprint the builder derives from it is distinguishable.

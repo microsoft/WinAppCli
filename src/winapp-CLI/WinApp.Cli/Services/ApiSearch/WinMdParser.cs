@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Collections.Immutable;
 using System.Reflection;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
@@ -255,9 +256,20 @@ internal static class WinMdParser
             string? deprecated = GetDeprecatedMessage(reader, method.GetCustomAttributes());
             try
             {
-                MethodSignature<string> sig = method.DecodeSignature(typeProvider, null);
+                // Decode with the declared generic parameter names in scope so a generic
+                // method renders as callers write it, not with invented placeholders.
+                var genericNames = new GenericNameContext(
+                    GenericParameterNames(reader, typeDef.GetGenericParameters()),
+                    GenericParameterNames(reader, method.GetGenericParameters()));
+                MethodSignature<string> sig = method.DecodeSignature(typeProvider, genericNames);
                 List<WinMdParameterInfo> parameters = GetMethodParameters(reader, method, sig);
                 string paramText = string.Join(", ", parameters.Select(p => p.Type + " " + p.Name));
+                // A generic method is called with its type arguments, so the name has to
+                // carry them: `ToTensor` alone tells a caller to write a call that will
+                // not bind.
+                string genericSuffix = genericNames.MethodParameters.Length > 0
+                    ? "<" + string.Join(", ", genericNames.MethodParameters) + ">"
+                    : string.Empty;
                 // A static method is called on the type, not on an instance, so a
                 // signature that omits it tells a caller to write the wrong thing.
                 string staticPrefix = (method.Attributes & MethodAttributes.Static) != 0 ? "static " : string.Empty;
@@ -266,7 +278,7 @@ internal static class WinMdParser
                 {
                     Name = name,
                     Kind = MemberKind.Method,
-                    Signature = $"{staticPrefix}{sig.ReturnType} {name}({paramText})",
+                    Signature = $"{staticPrefix}{sig.ReturnType} {name}{genericSuffix}({paramText})",
                     ReturnType = sig.ReturnType,
                     Parameters = parameters,
                     IsStatic = (method.Attributes & MethodAttributes.Static) != 0,
@@ -296,7 +308,7 @@ internal static class WinMdParser
             string? deprecated = GetDeprecatedMessage(reader, property.GetCustomAttributes());
             try
             {
-                string returnType = property.DecodeSignature(typeProvider, null).ReturnType;
+                string returnType = property.DecodeSignature(typeProvider, new GenericNameContext(GenericParameterNames(reader, typeDef.GetGenericParameters()), [])).ReturnType;
                 PropertyAccessors accessors = property.GetAccessors();
                 bool hasPublicGetter = !accessors.Getter.IsNil && (reader.GetMethodDefinition(accessors.Getter).Attributes & MethodAttributes.MemberAccessMask) == MethodAttributes.Public;
                 bool hasPublicSetter = !accessors.Setter.IsNil && (reader.GetMethodDefinition(accessors.Setter).Attributes & MethodAttributes.MemberAccessMask) == MethodAttributes.Public;
@@ -366,6 +378,25 @@ internal static class WinMdParser
     /// value.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// The declared names of a GenericParam row collection, in signature order.
+    /// Feeds <see cref="GenericNameContext"/> so a decoded signature can print
+    /// <c>T</c> rather than a positional placeholder.
+    /// </summary>
+    private static ImmutableArray<string> GenericParameterNames(MetadataReader reader, GenericParameterHandleCollection handles)
+    {
+        if (handles.Count == 0)
+        {
+            return [];
+        }
+        var builder = ImmutableArray.CreateBuilder<string>(handles.Count);
+        foreach (GenericParameterHandle handle in handles)
+        {
+            builder.Add(reader.GetString(reader.GetGenericParameter(handle).Name));
+        }
+        return builder.MoveToImmutable();
+    }
+
     private static List<WinMdParameterInfo> GetMethodParameters(MetadataReader reader, MethodDefinition method, MethodSignature<string> sig)
     {
         var parameters = new List<WinMdParameterInfo>();

@@ -87,7 +87,7 @@ public sealed class ApiCachePathsTests
                 ProjectName = "TestApp",
                 ProjectDir = cacheDir,
                 ProjectFile = "TestApp.csproj",
-                Packages = [new ProjectPackageRef { Id = "Test.Pkg", Version = "1.0.0", SourceStamp = "0a1b2c3d" }],
+                Packages = [new ProjectPackageRef { Id = "Test.Pkg", Version = "1.0.0", SourceStamp = "0a1b2c3d", AssetPathKey = "0a1b2c3d" }],
                 GeneratedAt = DateTime.UtcNow.ToString("o"),
             };
 

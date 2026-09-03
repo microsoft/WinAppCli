@@ -71,7 +71,7 @@ public sealed class ApiMetadataServiceTests
             ProjectName = ApiCachePaths.SdkScopeName,
             ProjectDir = string.Empty,
             ProjectFile = string.Empty,
-            Packages = [new ProjectPackageRef { Id = "WindowsSDK", Version = "10.0.0.0", SourceStamp = "0a1b2c3d" }],
+            Packages = [new ProjectPackageRef { Id = "WindowsSDK", Version = "10.0.0.0", SourceStamp = "0a1b2c3d", AssetPathKey = "0a1b2c3d" }],
             GeneratedAt = DateTime.UtcNow.ToString("o"),
         };
         File.WriteAllText(
@@ -94,7 +94,7 @@ public sealed class ApiMetadataServiceTests
             ProjectName = name,
             ProjectDir = projectDir ?? Path.Combine(_currentDir, name),
             ProjectFile = name + ".csproj",
-            Packages = [new ProjectPackageRef { Id = "Some.Pkg", Version = "1.0.0", SourceStamp = "0a1b2c3d" }],
+            Packages = [new ProjectPackageRef { Id = "Some.Pkg", Version = "1.0.0", SourceStamp = "0a1b2c3d", AssetPathKey = "0a1b2c3d" }],
             GeneratedAt = DateTime.UtcNow.ToString("o"),
         };
         File.WriteAllText(Path.Combine(_projectsDir, (fileName ?? name) + ".json"), JsonSerializer.Serialize(manifest, ApiSearchJsonContext.Default.ProjectManifest));
@@ -203,7 +203,7 @@ public sealed class ApiMetadataServiceTests
         Directory.CreateDirectory(cacheDir);
         WriteProjectFile(_currentDir, "App");
         WriteManifest("App", _currentDir, "App_11111111");
-        WritePackageCache(cacheDir, new ProjectPackageRef { Id = "Some.Pkg", Version = "1.0.0", SourceStamp = "0a1b2c3d" });
+        WritePackageCache(cacheDir, new ProjectPackageRef { Id = "Some.Pkg", Version = "1.0.0", SourceStamp = "0a1b2c3d", AssetPathKey = "0a1b2c3d" });
 
         Assert.IsNull(CreateService().LockTimedOutResult(_currentDir, cacheDir));
     }

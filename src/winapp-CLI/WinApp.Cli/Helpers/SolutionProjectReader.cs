@@ -59,13 +59,29 @@ internal static partial class SolutionProjectReader
     /// Normalizes a solution-relative project path (either slash flavor) and resolves it to
     /// an absolute path under <paramref name="solutionDir"/>. Returns <c>null</c> when the
     /// path is malformed so callers skip it.
+    /// <para>
+    /// A rooted path in the solution discards <paramref name="solutionDir"/> entirely
+    /// (that is how <see cref="Path.Combine(string, string)"/> is defined), so a crafted
+    /// solution can name any location it likes. Network paths are rejected here, before
+    /// any filesystem call: callers probe the result with <c>File.Exists</c>, and probing
+    /// a UNC path opens an SMB connection that authenticates to whoever answers. Cloning
+    /// an untrusted repository and running <c>find-api</c> must not leak credentials.
+    /// </para>
     /// </summary>
     internal static string? TryResolveRelativePath(string solutionDir, string relative)
     {
+        if (PathSafety.IsNetworkPath(relative))
+        {
+            return null;
+        }
+
         try
         {
             string normalized = relative.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
-            return Path.GetFullPath(Path.Combine(solutionDir, normalized));
+            string full = Path.GetFullPath(Path.Combine(solutionDir, normalized));
+            // Re-check after resolution: a relative path can still land on a network
+            // location through a mapped or substituted parent directory.
+            return PathSafety.IsNetworkPath(full) ? null : full;
         }
         catch (Exception ex) when (ex is ArgumentException or PathTooLongException or NotSupportedException)
         {

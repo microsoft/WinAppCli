@@ -50,8 +50,15 @@ public class WinMdParserSignatureTests
     private sealed record ParamSpec(string Name, bool ByRef = false, ParameterAttributes Attributes = ParameterAttributes.None, bool EmitRow = true);
 
     /// <summary>One method to emit. Every parameter and the return value are String/Boolean
-    /// so the test never depends on how an unrelated type resolves.</summary>
-    private sealed record MethodSpec(string Name, bool IsStatic, params ParamSpec[] Parameters);
+    /// so the test never depends on how an unrelated type resolves, unless the method
+    /// declares generic parameters — then each parameter is that method's own type
+    /// parameter, which is how a real generic API like <c>ToTensor&lt;T&gt;(T[])</c> is
+    /// encoded.</summary>
+    private sealed record MethodSpec(string Name, bool IsStatic, params ParamSpec[] Parameters)
+    {
+        /// <summary>Names of the method's own generic parameters, if any.</summary>
+        public string[]? GenericParameters { get; init; }
+    }
 
     /// <summary>
     /// Writes a minimal but valid .winmd holding a single public type with the given
@@ -83,16 +90,35 @@ public class WinMdParserSignatureTests
         foreach (MethodSpec method in methods)
         {
             var signature = new BlobBuilder();
+            int genericCount = method.GenericParameters?.Length ?? 0;
             new BlobEncoder(signature)
-                .MethodSignature(isInstanceMethod: !method.IsStatic)
+                .MethodSignature(isInstanceMethod: !method.IsStatic, genericParameterCount: genericCount)
                 .Parameters(
                     method.Parameters.Length,
-                    returnType => returnType.Type().Boolean(),
+                    returnType =>
+                    {
+                        if (genericCount > 0)
+                        {
+                            returnType.Type().GenericMethodTypeParameter(0);
+                        }
+                        else
+                        {
+                            returnType.Type().Boolean();
+                        }
+                    },
                     parameters =>
                     {
                         foreach (ParamSpec parameter in method.Parameters)
                         {
-                            parameters.AddParameter().Type(isByRef: parameter.ByRef).String();
+                            SignatureTypeEncoder encoder = parameters.AddParameter().Type(isByRef: parameter.ByRef);
+                            if (genericCount > 0)
+                            {
+                                encoder.GenericMethodTypeParameter(0);
+                            }
+                            else
+                            {
+                                encoder.String();
+                            }
                         }
                     });
 
@@ -105,6 +131,13 @@ public class WinMdParserSignatureTests
                 bodyOffset: -1,
                 parameterList: firstParam);
             methodStarts.Add(handle);
+
+            for (int i = 0; i < genericCount; i++)
+            {
+                metadata.AddGenericParameter(
+                    handle, GenericParameterAttributes.None,
+                    metadata.GetOrAddString(method.GenericParameters![i]), i);
+            }
 
             int sequence = 1;
             foreach (ParamSpec parameter in method.Parameters)
@@ -164,6 +197,26 @@ public class WinMdParserSignatureTests
 
         Assert.IsTrue(member.IsStatic);
         StringAssert.StartsWith(member.Signature, "static ");
+    }
+
+    [TestMethod]
+    public void ParseFile_GenericMethod_RendersItsOwnTypeParameterName()
+    {
+        // A real API like 'DenseTensor<T> ToTensor<T>(T[] array)' encodes T as a generic
+        // method parameter. Decoded without the method's own generic parameters, the
+        // decoder has no name to print and invents one, so the reported signature reads
+        // 'static TMethod0 ToTensor(TMethod0[] array)' — a caller who types that gets a
+        // compile error on a type that does not exist, and the '<T>' they must actually
+        // write is missing.
+        var member = ParseSingleMethod(
+            "Generic.winmd",
+            new MethodSpec("ToTensor", IsStatic: true, new ParamSpec("array")) { GenericParameters = ["T"] });
+
+        Assert.IsFalse(
+            member.Signature.Contains("TMethod", StringComparison.Ordinal),
+            $"invented type-parameter name in: {member.Signature}");
+        StringAssert.Contains(member.Signature, "ToTensor<T>(");
+        StringAssert.Contains(member.Signature, "T array");
     }
 
     [TestMethod]

@@ -999,8 +999,10 @@ internal static class ApiQueryEngine
         string getName = "Get" + propertyName;
         string setName = "Set" + propertyName;
 
-        var getter = type.Members.FirstOrDefault(m => m.Kind == MemberKind.Method && m.Name.Equals(getName, StringComparison.OrdinalIgnoreCase));
-        var setter = type.Members.FirstOrDefault(m => m.Kind == MemberKind.Method && m.Name.Equals(setName, StringComparison.OrdinalIgnoreCase));
+        // Ordinal, like the direct-property match: XAML is case-sensitive, so answering
+        // "found" for Grid.row sends a caller off to write markup that will not load.
+        var getter = type.Members.FirstOrDefault(m => m.Kind == MemberKind.Method && m.Name.Equals(getName, StringComparison.Ordinal));
+        var setter = type.Members.FirstOrDefault(m => m.Kind == MemberKind.Method && m.Name.Equals(setName, StringComparison.Ordinal));
 
         if (getter != null && getter.Parameters != null && getter.Parameters.Count >= 1)
         {
@@ -1008,9 +1010,10 @@ internal static class ApiQueryEngine
             if (paramType.Contains("DependencyObject") || paramType.Contains("UIElement") || paramType.Contains("FrameworkElement"))
             {
                 string returnType = getter.ReturnType ?? "unknown";
+                // Report the accessors as metadata spells them, never as the caller typed them.
                 string accessors = setter != null
-                    ? $"via {type.Name}.{getName}() / {type.Name}.{setName}()"
-                    : $"via {type.Name}.{getName}() (read-only)";
+                    ? $"via {type.Name}.{getter.Name}() / {type.Name}.{setter.Name}()"
+                    : $"via {type.Name}.{getter.Name}() (read-only)";
                 return $"{returnType} — {accessors}";
             }
         }

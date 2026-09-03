@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml;
@@ -54,8 +55,14 @@ internal static partial class NuGetResolver
         // unconditionally answers a plain .NET or Win32 project from WinAppSDK metadata
         // it does not build against, and pins it to whatever runtime happens to be
         // installed rather than anything the project declares.
-        bool referencesWinAppSdk = packages.Any(package => IsWinAppSdkPackage(package.Id));
-        packages.AddRange(CollectSdkPackages(winAppSdkRuntimePath, targetPlatformVersion, referencesWinAppSdk, warn));
+        string? referencedWinAppSdkVersion = packages
+            .FirstOrDefault(package => IsWinAppSdkPackage(package.Id))?.Version;
+        packages.AddRange(CollectSdkPackages(
+            winAppSdkRuntimePath,
+            targetPlatformVersion,
+            referencedWinAppSdkVersion is not null,
+            warn,
+            referencedWinAppSdkVersion));
 
         return Deduplicate(packages);
     }
@@ -135,7 +142,8 @@ internal static partial class NuGetResolver
         string? winAppSdkRuntimePath,
         string? preferredSdkVersion = null,
         bool includeWinAppSdkRuntime = true,
-        Action<string>? warn = null)
+        Action<string>? warn = null,
+        string? requiredRuntimeRelease = null)
     {
         var packages = new List<PackageWithWinMd>();
 
@@ -148,7 +156,17 @@ internal static partial class NuGetResolver
         if (includeWinAppSdkRuntime)
         {
             (List<string> Files, string Version) runtime = FindWinAppSdkRuntimeWinMd(winAppSdkRuntimePath);
-            if (runtime.Files.Count > 0)
+            // The installed runtime is machine-wide and detection picks the newest one,
+            // but a project compiles against the release it references. Indexing a 2.4
+            // runtime for a project on WinAppSDK 1.8 makes the index confirm types that
+            // release does not have, and an agent then writes code that will not build.
+            if (runtime.Files.Count > 0 && !RuntimeMatchesRelease(runtime.Version, requiredRuntimeRelease))
+            {
+                warn?.Invoke(
+                    $"Installed Windows App Runtime {runtime.Version} does not match the referenced " +
+                    $"Windows App SDK {requiredRuntimeRelease}; its metadata is excluded from this project's API surface.");
+            }
+            else if (runtime.Files.Count > 0)
             {
                 packages.Add(new PackageWithWinMd("WinAppSdkRuntime", runtime.Version, runtime.Files, new List<string>()));
             }
@@ -156,6 +174,42 @@ internal static partial class NuGetResolver
 
         DiscoverSdkXmlDocs(packages);
         return packages;
+    }
+
+    /// <summary>
+    /// Whether an installed runtime's release label (<c>2.4</c>, <c>1.8</c>) belongs to the
+    /// same <c>major.minor</c> release as the Windows App SDK version a project references
+    /// (<c>1.8.260222000</c>). A null requirement means the caller is building the
+    /// machine-wide SDK scope, which is not tied to any project and takes the runtime as-is.
+    /// An unrecognizable label on either side is accepted rather than silently dropping
+    /// metadata a project may well need.
+    /// </summary>
+    internal static bool RuntimeMatchesRelease(string runtimeRelease, string? referencedSdkVersion)
+    {
+        if (referencedSdkVersion is null)
+        {
+            return true;
+        }
+        string? runtime = MajorMinor(runtimeRelease);
+        string? referenced = MajorMinor(referencedSdkVersion);
+        if (runtime is null || referenced is null)
+        {
+            return true;
+        }
+        return string.Equals(runtime, referenced, StringComparison.Ordinal);
+    }
+
+    /// <summary>The leading <c>major.minor</c> of a version-like string, or null.</summary>
+    private static string? MajorMinor(string value)
+    {
+        string[] parts = value.Split('.');
+        if (parts.Length < 2
+            || !int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out int major)
+            || !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out int minor))
+        {
+            return null;
+        }
+        return major.ToString(CultureInfo.InvariantCulture) + "." + minor.ToString(CultureInfo.InvariantCulture);
     }
 
     /// <summary>
@@ -613,7 +667,9 @@ internal static partial class NuGetResolver
         var packages = new List<PackageWithWinMd>();
         string winappDir = Path.Combine(projectDir, ".winapp");
         string lockfilePath = Path.Combine(winappDir, WinmdsLockfileService.LockfileName);
-        if (!File.Exists(lockfilePath) || !IsProbeablePath(lockfilePath))
+        // Network check first: `||` short-circuits, so probing before the guard would
+        // open an SMB connection to a UNC project directory and defeat the guard.
+        if (!IsProbeablePath(lockfilePath) || !File.Exists(lockfilePath))
         {
             return packages;
         }

@@ -8,6 +8,22 @@ using System.Reflection.Metadata;
 namespace WinApp.Cli.Services.ApiSearch;
 
 /// <summary>
+/// The generic parameter names in scope while a signature is decoded, passed as the
+/// <c>genericContext</c> to <see cref="SimpleTypeProvider"/>.
+/// <para>
+/// A signature blob records a generic parameter positionally (<c>!0</c>, <c>!!0</c>), not
+/// by name, so without this a decoder can only invent one. Inventing it renders a real API
+/// as <c>DenseTensor&lt;TMethod0&gt; ToTensor(TMethod0[] array)</c> — an identifier that
+/// exists nowhere in the SDK and does not compile. The declared names live in the
+/// GenericParam rows of the method and its declaring type.
+/// </para>
+/// </summary>
+internal sealed record GenericNameContext(ImmutableArray<string> TypeParameters, ImmutableArray<string> MethodParameters)
+{
+    internal static readonly GenericNameContext Empty = new([], []);
+}
+
+/// <summary>
 /// Decodes IL metadata signatures into readable type-name strings for the
 /// <see cref="WinMdParser"/>. AOT-safe: pure metadata reads, no reflection.
 /// </summary>
@@ -89,9 +105,15 @@ internal sealed class SimpleTypeProvider : ISignatureTypeProvider<string, object
         return text + "<" + string.Join(", ", typeArguments) + ">";
     }
 
-    public string GetGenericMethodParameter(object? genericContext, int index) => $"TMethod{index}";
+    public string GetGenericMethodParameter(object? genericContext, int index) =>
+            genericContext is GenericNameContext ctx && index < ctx.MethodParameters.Length
+                ? ctx.MethodParameters[index]
+                : $"TMethod{index}";
 
-    public string GetGenericTypeParameter(object? genericContext, int index) => $"T{index}";
+        public string GetGenericTypeParameter(object? genericContext, int index) =>
+            genericContext is GenericNameContext ctx && index < ctx.TypeParameters.Length
+                ? ctx.TypeParameters[index]
+                : $"T{index}";
 
     public string GetModifiedType(string modifier, string unmodifiedType, bool isRequired) => unmodifiedType;
 

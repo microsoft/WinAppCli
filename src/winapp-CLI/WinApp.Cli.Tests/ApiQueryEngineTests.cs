@@ -488,8 +488,31 @@ public sealed class ApiQueryEngineTests
             },
             new()
             {
+                // Mirrors a XAML attached property: static Get/Set accessors taking a
+                // DependencyObject, with no property of that name on the type itself.
                 Namespace = "My.Ns", Name = "Gadget", FullName = "My.Ns.Gadget", Kind = TypeKind.Class,
-                SourceFile = "test.winmd", Members = [],
+                SourceFile = "test.winmd",
+                Members =
+                [
+                    new WinMdMemberInfo
+                    {
+                        Name = "GetRow", Kind = MemberKind.Method, IsStatic = true,
+                        Signature = "static Int32 GetRow(My.Ns.DependencyObject element)",
+                        ReturnType = "Int32",
+                        Parameters = [new WinMdParameterInfo { Name = "element", Type = "My.Ns.DependencyObject" }],
+                    },
+                    new WinMdMemberInfo
+                    {
+                        Name = "SetRow", Kind = MemberKind.Method, IsStatic = true,
+                        Signature = "static void SetRow(My.Ns.DependencyObject element, Int32 value)",
+                        ReturnType = "void",
+                        Parameters =
+                        [
+                            new WinMdParameterInfo { Name = "element", Type = "My.Ns.DependencyObject" },
+                            new WinMdParameterInfo { Name = "value", Type = "Int32" },
+                        ],
+                    },
+                ],
             },
             new()
             {
@@ -551,7 +574,7 @@ public sealed class ApiQueryEngineTests
             ProjectName = "TestApp",
             ProjectDir = Path.Combine(cacheDir, "src"),
             ProjectFile = "TestApp.csproj",
-            Packages = [new ProjectPackageRef { Id = packageId, Version = version, SourceStamp = TestSourceStamp }],
+            Packages = [new ProjectPackageRef { Id = packageId, Version = version, SourceStamp = TestSourceStamp, AssetPathKey = TestSourceStamp }],
             GeneratedAt = DateTime.UtcNow.ToString("o"),
         };
         string projectsDir = Path.Combine(cacheDir, "projects");
@@ -856,7 +879,7 @@ public sealed class ApiQueryEngineTests
             ProjectName = "InhApp",
             ProjectDir = Path.Combine(cacheDir, "src"),
             ProjectFile = "InhApp.csproj",
-            Packages = [new ProjectPackageRef { Id = "Inh.Pkg", Version = "1.0.0", SourceStamp = TestSourceStamp }],
+            Packages = [new ProjectPackageRef { Id = "Inh.Pkg", Version = "1.0.0", SourceStamp = TestSourceStamp, AssetPathKey = TestSourceStamp }],
             GeneratedAt = DateTime.UtcNow.ToString("o"),
         };
         string projectsDir = Path.Combine(cacheDir, "projects");
@@ -1002,6 +1025,31 @@ public sealed class ApiQueryEngineTests
         CollectionAssert.Contains(result.Data.SimilarOnType!.ConvertAll(m => m.Name), "Color");
     }
 
+    [TestMethod]
+    public void CheckProperty_AttachedProperty_IsFound()
+    {
+        // Grid.Row and friends have no property of that name on the type — only static
+        // Get/Set accessors taking a DependencyObject.
+        var result = ApiQueryEngine.CheckProperty("My.Ns.Gadget", "Row", _cacheDir, _manifest);
+
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        Assert.IsTrue(result.Data!.Found, "an attached property is a real property");
+        Assert.IsTrue(result.Data.Attached);
+        StringAssert.Contains(result.Data.AttachedInfo ?? string.Empty, "Gadget.GetRow()");
+    }
+
+    [TestMethod]
+    public void CheckProperty_AttachedPropertyWrongCase_IsNotFound()
+    {
+        // XAML is case-sensitive: 'Grid.row' does not load. Matching the Get/Set
+        // accessors case-insensitively answers "found" for a spelling that fails at
+        // runtime, and the direct-property path already rejects the same mistake.
+        var result = ApiQueryEngine.CheckProperty("My.Ns.Gadget", "row", _cacheDir, _manifest);
+
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        Assert.IsFalse(result.Data!.Found, "a case-only difference is not the same attached property");
+    }
+
     private static readonly string[] ThreeCheckedPropertyNames = ["Color", "Bogus", "DoThing"];
 
     [TestMethod]
@@ -1087,7 +1135,7 @@ public sealed class ApiQueryEngineTests
             ProjectName = "GenApp",
             ProjectDir = Path.Combine(cacheDir, "src"),
             ProjectFile = "GenApp.csproj",
-            Packages = [new ProjectPackageRef { Id = "Gen.Pkg", Version = "1.0.0", SourceStamp = TestSourceStamp }],
+            Packages = [new ProjectPackageRef { Id = "Gen.Pkg", Version = "1.0.0", SourceStamp = TestSourceStamp, AssetPathKey = TestSourceStamp }],
             GeneratedAt = DateTime.UtcNow.ToString("o"),
         };
         string projectsDir = Path.Combine(cacheDir, "projects");
@@ -1248,7 +1296,7 @@ public sealed class ApiQueryEngineTests
         foreach (string packageId in DuplicatePackageIds)
         {
             WriteSyntheticPackage(cacheDir, packageId, namespaces);
-            packages.Add(new ProjectPackageRef { Id = packageId, Version = "1.0.0", SourceStamp = TestSourceStamp });
+            packages.Add(new ProjectPackageRef { Id = packageId, Version = "1.0.0", SourceStamp = TestSourceStamp, AssetPathKey = TestSourceStamp });
         }
 
         var manifest = new ProjectManifest
