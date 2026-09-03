@@ -1,9 +1,8 @@
 <!--
-  Scoped to src/tools/winui-analyzer/ only. Sets warning-as-error and
+  Scoped to src/winapp-Analyzer/ only. Sets warning-as-error and
   deterministic-build flags for the analyzer + tests; intentionally NOT
   placed at the repo root because TreatWarningsAsErrors would break
-  unrelated C# projects (winui-search, winmd-cli) that have their own
-  warning baselines.
+  unrelated C# projects in the repo that have their own warning baselines.
 -->
 <Project>
   <PropertyGroup>

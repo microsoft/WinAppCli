@@ -9,25 +9,24 @@ regressions, and interop bugs. Every diagnostic ships at `Warning` severity
 ## Layout
 
 ```
-src/tools/winui-analyzer/
+src/winapp-Analyzer/
 ├── Microsoft.WindowsAppSDK.Analyzers/         # the analyzer assembly (netstandard2.0)
 │   ├── DiagnosticIds.cs / DiagnosticCategories.cs / HelpLinks.cs
 │   ├── ProjectContext.cs                      # UWP-vs-greenfield project gate
 │   ├── Allowlists.cs                          # declarative per-rule carve-outs
 │   ├── ApiMappings.g.cs / FeatureMappings.g.cs # data-driven from Microsoft Learn
+│   ├── Microsoft.WindowsAppSDK.Analyzers.targets # XAML AdditionalFiles + stand-down contract
 │   └── Rules/                                 # 9 DiagnosticAnalyzers
 ├── Microsoft.WindowsAppSDK.Analyzers.Tests/   # xUnit test project (net10.0)
-├── docs/ROADMAP.md                            # what's planned next
+├── tests/Test-StandDownContract.ps1           # MSBuild .targets stand-down regression test
 ├── RULES.md                                   # full rule catalog + ID methodology
 ├── CHANGELOG.md                               # analyzer-scoped changelog
-├── Directory.Build.props                      # scoped — TWaE only inside this subtree
-├── global.json                                # pins .NET 10 SDK
-└── Microsoft.WindowsAppSDK.Analyzers.slnx     # solution file
+└── Directory.Build.props                      # scoped — TWaE only inside this subtree
 ```
 
-The `Directory.Build.props` and `global.json` are intentionally scoped to this
-subtree (not at repo root) so `TreatWarningsAsErrors=true` doesn't break
-unrelated C# projects (`winui-search`, `winmd-cli`).
+The projects build as part of `src/winapp-CLI/winapp.sln`. `Directory.Build.props`
+is intentionally scoped to this subtree so `TreatWarningsAsErrors=true` doesn't
+break unrelated C# projects in the repo.
 
 ## Rule categories
 
