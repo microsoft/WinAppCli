@@ -77,6 +77,11 @@ dotnet build src/winapp-CLI/winapp.sln -c Debug
 # Run native CLI in-tree
 dotnet run --project src/winapp-CLI/WinApp.Cli/WinApp.Cli.csproj -- <args>
 
+# Build the NuGet packages. -SkipCliPackage builds only the UI Automation libraries, which need
+# no published CLI and so pack in seconds; without it the CLI tools package is built too and
+# artifacts/cli must already hold an x64 + arm64 publish.
+.\scripts\package-nuget.ps1 -SkipCliPackage
+
 # Update npm package after CLI changes
 cd src/winapp-npm && npm run build              # builds C# CLI + copies to npm bin
 cd src/winapp-npm && npm run build-copy-only    # copies already-built Release binaries
