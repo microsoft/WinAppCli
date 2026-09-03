@@ -27,6 +27,21 @@ internal static class AtomicFile
         }
     }
 
+    /// <summary>Writes <paramref name="content"/> to <paramref name="destinationPath"/> atomically.</summary>
+    public static void WriteAllText(string destinationPath, string content)
+    {
+        var tempPath = MakeTempPath(destinationPath);
+        try
+        {
+            File.WriteAllText(tempPath, content);
+            File.Move(tempPath, destinationPath, overwrite: true);
+        }
+        finally
+        {
+            TryDeleteLeftoverTemp(tempPath);
+        }
+    }
+
     /// <summary>Copies <paramref name="sourcePath"/> to <paramref name="destinationPath"/> atomically.</summary>
     public static void Copy(string sourcePath, string destinationPath)
     {

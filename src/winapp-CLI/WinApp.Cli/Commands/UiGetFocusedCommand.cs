@@ -26,8 +26,8 @@ internal class UiGetFocusedCommand : Command, IShortDescription
     }
 
     public class Handler(
-        IUiSessionService sessionService,
-        IUiAutomationService uiAutomation,
+        IUiTargetResolver targetResolver,
+        IUiAutomation uiAutomation,
         IAnsiConsole ansiConsole,
         IInteractiveDesktopLock desktopLock,
         ILogger<UiGetFocusedCommand> logger) : UiCoordinatedAction(desktopLock, logger)
@@ -60,8 +60,8 @@ internal class UiGetFocusedCommand : Command, IShortDescription
 
             try
             {
-                var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
-                var element = await uiAutomation.GetFocusedElementAsync(session, cancellationToken);
+                var uiTarget = await targetResolver.ResolveAsync(app, window, cancellationToken);
+                var element = await uiAutomation.GetFocusedElementAsync(uiTarget, cancellationToken);
 
                 if (json)
                 {

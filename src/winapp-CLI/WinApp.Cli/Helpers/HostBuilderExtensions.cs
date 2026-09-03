@@ -9,7 +9,6 @@ using System.Diagnostics.CodeAnalysis;
 using WinApp.Cli.Commands;
 using WinApp.Cli.Services;
 using WinApp.Cli.Services.Controls;
-using WinApp.Cli.Services.InteractiveDesktop;
 
 namespace WinApp.Cli.Helpers;
 
@@ -43,6 +42,7 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<ICsWinRTMetadataShimService, CsWinRTMetadataShimService>()
             .AddSingleton<IProjectRunService, ProjectRunService>()
             .AddSingleton<ITemplateCacheReader, TemplateCacheReader>()
+            .AddSingleton<ITemplateUpdateCheckThrottle, TemplateUpdateCheckThrottle>()
             .AddSingleton<IWorkspaceSetupService, WorkspaceSetupService>()
             .AddSingleton<IWindowsAppRuntimeService, WindowsAppRuntimeService>()
             .AddSingleton<IGitignoreService, GitignoreService>()
@@ -62,26 +62,9 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IAzureAuthService, AzureAuthService>()
             .AddSingleton<IAzureSigningService, AzureSigningService>()
             .AddSingleton<IAzureSignToolService, AzureSignToolService>()
-            // UI Automation services
-            .AddSingleton<IMouseInput, RealMouseInput>()
-            .AddSingleton<IPointerInput, RealPointerInput>()
-            .AddSingleton<IKeyboardInput, RealKeyboardInput>()
-            .AddSingleton<IForegroundGuard, RealForegroundGuard>()
-            .AddSingleton<IOwnedWindowFinder, RealOwnedWindowFinder>()
-            .AddSingleton<IPollDelay, RealPollDelay>()
-            .AddSingleton<ISelectorService, SelectorService>()
-            .AddSingleton<ISystemUiQuery, SystemUiQuery>()
-            .AddSingleton<IUiSessionService, UiSessionService>()
-            .AddSingleton<IUiAutomationService, UiAutomationService>()
-            // Cooperative desktop turn coordination (issue #764)
-            .AddSingleton<IMonotonicClock, TickCountClock>()
-            .AddSingleton<IProcessInspector, ProcessInspector>()
-            .AddSingleton<IInteractiveDesktopPaths, InteractiveDesktopPaths>()
-            .AddSingleton<IParticipantRegistry, ParticipantRegistry>()
-            .AddSingleton<IInteractiveDesktopStateStore, InteractiveDesktopStateStore>()
-            .AddSingleton<IUiOwnerResolver, UiOwnerResolver>()
-            .AddSingleton<IInteractiveDesktopLock, InteractiveDesktopLock>()
-            .AddSingleton<IDesktopForegroundService, DesktopForegroundService>()
+            // UI Automation services (from the Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation package)
+            .AddWinAppUiAutomation()
+            .AddWinAppUiRecording()
             .AddSingleton<IControlsSearchService, ControlsSearchService>();
     }
 

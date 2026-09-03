@@ -12,10 +12,9 @@ internal static class PointerCommandSupport
     public readonly record struct ResolvedPoint(bool Ok, PointerPoint Point, long TargetHwnd, string? TargetLabel);
 
     public static async Task<ResolvedPoint> ResolvePointAsync(
-        IUiAutomationService uiAutomation,
-        ISelectorService selectorService,
-        IDesktopForegroundService desktopForeground,
-        UiSessionInfo session,
+        IUiAutomation uiAutomation,
+        IUiSelectorParser selectorParser,
+        UiTarget uiTarget,
         string? selectorStr,
         PointerPoint? explicitPoint,
         string? explicitLabel,
@@ -27,11 +26,11 @@ internal static class PointerCommandSupport
     {
         if (explicitPoint is not null)
         {
-            return new ResolvedPoint(true, explicitPoint.Value, session.WindowHandle, explicitLabel);
+            return new ResolvedPoint(true, explicitPoint.Value, uiTarget.WindowHandle, explicitLabel);
         }
 
-        var selector = selectorService.Parse(selectorStr!);
-        var element = await uiAutomation.FindSingleElementAsync(session, selector, cancellationToken);
+        var selector = selectorParser.Parse(selectorStr!);
+        var element = await uiAutomation.FindSingleElementAsync(uiTarget, selector, cancellationToken);
         if (element is null)
         {
             UiErrors.ElementNotFound(logger, selectorStr!, json);
@@ -47,18 +46,18 @@ internal static class PointerCommandSupport
             return default;
         }
 
-        long targetHwnd = element.WindowHandle ?? session.WindowHandle;
+        long targetHwnd = element.WindowHandle ?? uiTarget.WindowHandle;
 
         if (targetHwnd != 0)
         {
-            desktopForeground.RequestForeground(targetHwnd);
+            Windows.Win32.PInvoke.SetForegroundWindow(new Windows.Win32.Foundation.HWND((nint)targetHwnd));
             await Task.Delay(100, cancellationToken);
         }
 
         var stable = await GestureTargeting.ResolveStableAsync(
-            uiAutomation, session, selector, element,
+            uiAutomation, uiTarget, selector, element,
             GestureTargeting.DefaultMaxReads, GestureTargeting.DefaultReadDelayMs, null, cancellationToken);
-        if (!GestureTargeting.TryReport(stable, logger, json, selectorStr!, action))
+        if (!UiInjectionReporting.TryReport(stable, logger, json, selectorStr!, action))
         {
             return default;
         }
@@ -66,12 +65,11 @@ internal static class PointerCommandSupport
         return new ResolvedPoint(true, new PointerPoint(stable.CenterX, stable.CenterY), targetHwnd, selectorStr);
     }
 
-    public static async Task SetForegroundAsync(
-        IDesktopForegroundService desktopForeground, long targetHwnd, CancellationToken cancellationToken)
+    public static async Task SetForegroundAsync(long targetHwnd, CancellationToken cancellationToken)
     {
         if (targetHwnd != 0)
         {
-            desktopForeground.RequestForeground(targetHwnd);
+            Windows.Win32.PInvoke.SetForegroundWindow(new Windows.Win32.Foundation.HWND((nint)targetHwnd));
             await Task.Delay(100, cancellationToken);
         }
     }
@@ -87,7 +85,7 @@ internal static class PointerCommandSupport
     public readonly record struct InjectionPreparation(bool Ok, string? OutOfWindowWarning);
 
     public static InjectionPreparation TryPrepareInjection(
-        IUiAutomationService uiAutomation,
+        IUiAutomation uiAutomation,
         IForegroundGuard foregroundGuard,
         long targetHwnd,
         IEnumerable<PointerPoint> points,

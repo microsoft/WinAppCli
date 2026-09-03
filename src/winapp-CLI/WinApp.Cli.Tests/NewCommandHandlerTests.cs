@@ -531,6 +531,94 @@ public class NewCommandHandlerTests : BaseCommandTests
     }
 
     [TestMethod]
+    [DoNotParallelize] // InvokeWithAmbientConsoleCaptureAsync swaps the process-wide AnsiConsole.
+    public async Task Handler_Verbose_StreamsScaffoldPostActionOutput()
+    {
+        // BaseCommandTests wires logging at Debug (i.e. --verbose). The scaffold's dotnet new output —
+        // including its post-creation actions (restore, package add, etc.) — must be surfaced live so a
+        // failing post action can be diagnosed (#753). Script a scaffold whose stdout carries the
+        // post-action markers dotnet new emits.
+        const string postActionOutput =
+            "The template \"WinUI 3 App\" was created successfully.\n" +
+            "Processing post-creation actions...\n" +
+            "Restoring packages for C:\\proj\\VerboseApp.csproj...";
+        _dotnet.RunDotnetArgumentListHandler = args =>
+        {
+            if (args.Count >= 1 && args[0] == "--version")
+            {
+                return (0, "9.0.100\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "uninstall")
+            {
+                return (0, string.Empty, string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "install")
+            {
+                return (0, "Success: installed.", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "list")
+            {
+                return (0, SampleListOutput, string.Empty);
+            }
+            return (0, postActionOutput, string.Empty); // scaffold + post actions
+        };
+        var command = GetRequiredService<NewCommand>();
+
+        var (exitCode, ambientOutput) = await InvokeWithAmbientConsoleCaptureAsync(
+            command, ["--use-defaults", "--name", "VerboseApp"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        StringAssert.Contains(ambientOutput, "Processing post-creation actions",
+            $"Verbose scaffolding must surface dotnet new's post-creation action output. Output:\n{ambientOutput}");
+        StringAssert.Contains(ambientOutput, "Restoring packages",
+            $"Verbose scaffolding must surface post-action restore output so failures are diagnosable. Output:\n{ambientOutput}");
+    }
+
+    [TestMethod]
+    [DoNotParallelize] // InvokeWithAmbientConsoleCaptureAsync swaps the process-wide AnsiConsole.
+    public async Task Handler_ScaffoldFails_SurfacesPostActionErrorDetail()
+    {
+        // A post action can fail while dotnet new writes the reason to stdout (not stderr) and returns
+        // a non-zero exit. The failure detail must still capture that stdout so the error is actionable.
+        const string failedPostAction =
+            "Processing post-creation actions...\n" +
+            "Restore failed: unable to resolve Microsoft.WindowsAppSDK.";
+        _dotnet.RunDotnetArgumentListHandler = args =>
+        {
+            if (args.Count >= 1 && args[0] == "--version")
+            {
+                return (0, "9.0.100\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "uninstall")
+            {
+                return (0, string.Empty, string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "install")
+            {
+                return (0, "Success: installed.", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "list")
+            {
+                return (0, SampleListOutput, string.Empty);
+            }
+            return (1, failedPostAction, string.Empty); // scaffold post action fails, detail on stdout
+        };
+        var command = GetRequiredService<NewCommand>();
+
+        var (exitCode, ambientOutput) = await InvokeWithAmbientConsoleCaptureAsync(
+            command, ["--use-defaults", "--name", "FailApp"]);
+
+        Assert.AreEqual(NewCommand.ExitScaffoldFailed, exitCode);
+        // The error detail (logged at Error level) routes to stderr; it must carry the stdout-borne
+        // post-action reason so the failure is actionable rather than a bare exit code.
+        StringAssert.Contains(ConsoleStdErr.ToString(), "Restore failed",
+            $"A post-action failure written to stdout must surface in the error detail. Stderr:\n{ConsoleStdErr}");
+        // Under --verbose the same output is also streamed live as it is produced.
+        StringAssert.Contains(ambientOutput, "Restore failed",
+            $"Verbose scaffolding must stream the failing post-action output live. Output:\n{ambientOutput}");
+    }
+
+    [TestMethod]
     public async Task Handler_NameEscapingCurrentDirectory_ReturnsInvalidArgs()
     {
         ScriptHappyPath();
@@ -1344,6 +1432,131 @@ public class NewCommandHandlerTests : BaseCommandTests
         Assert.IsFalse(
             _dotnet.ArgumentListInvocations.Any(a => a.Count >= 2 && a[0] == "new" && a[1] == "install"),
             "A non-interactive (--use-defaults) run must keep the installed pack rather than performing a machine-wide update.");
+    }
+
+    /// <summary>
+    /// Writes the throttle's <c>.template-update-check</c> cache into the isolated global winapp dir so
+    /// the handler treats the staleness check as already performed (stamped now).
+    /// </summary>
+    private void SeedTemplateUpdateCache(string installedVersion, string latestVersion)
+    {
+        var globalDir = GetRequiredService<IWinappDirectoryService>().GetGlobalWinappDirectory();
+        globalDir.Create();
+        var content = $"{DateTimeOffset.UtcNow:O}\n{installedVersion}\n{latestVersion}";
+        File.WriteAllText(Path.Join(globalDir.FullName, ".template-update-check"), content);
+    }
+
+    [TestMethod]
+    public async Task Handler_StalePackInteractive_RecentCache_SkipsFeedCheckButStillUpdates()
+    {
+        // A check ran within the day and found 0.0.6-alpha; the handler must reuse that instead of
+        // re-hitting the feed, yet still offer the update.
+        SeedTemplateUpdateCache("0.0.5-alpha", "0.0.6-alpha");
+        _dotnet.RunDotnetArgumentListHandler = args =>
+        {
+            if (args.Count >= 1 && args[0] == "--version")
+            {
+                return (0, "9.0.100\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "uninstall")
+            {
+                return (0, "Microsoft.WindowsAppSDK.WinUI.CSharp.Templates\n   Version: 0.0.5-alpha\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "install")
+            {
+                return (0, "Success", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "list")
+            {
+                return (0, SampleListOutput, string.Empty);
+            }
+            return (0, "created", string.Empty);
+        };
+        TestAnsiConsole.Input.PushTextWithEnter("y"); // update prompt
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--template", "winui", "--name", "MyApp"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        Assert.IsFalse(
+            _dotnet.ArgumentListInvocations.Any(a => a.Count >= 2 && a[0] == "new" && a[1] == "update"),
+            "A check performed within the last day must not re-run the NuGet feed staleness check.");
+        var install = _dotnet.ArgumentListInvocations
+            .FirstOrDefault(a => a.Count >= 3 && a[0] == "new" && a[1] == "install");
+        Assert.IsNotNull(install, "Accepting the update prompt must install the newer pack.");
+        Assert.AreEqual($"{NewCommand.TemplatePackageId}::0.0.6-alpha", install[2],
+            "The update must use the latest version from the cached check.");
+    }
+
+    [TestMethod]
+    public async Task Handler_UpToDatePack_RecentCache_SkipsFeedCheck()
+    {
+        // The last check (within the day) found the pack up-to-date (empty latest): no feed call, no install.
+        SeedTemplateUpdateCache("0.0.6-alpha", "");
+        _dotnet.RunDotnetArgumentListHandler = args =>
+        {
+            if (args.Count >= 1 && args[0] == "--version")
+            {
+                return (0, "9.0.100\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "uninstall")
+            {
+                return (0, "Microsoft.WindowsAppSDK.WinUI.CSharp.Templates\n   Version: 0.0.6-alpha\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "list")
+            {
+                return (0, SampleListOutput, string.Empty);
+            }
+            return (0, "created", string.Empty);
+        };
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--template", "winui", "--name", "MyApp"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        Assert.IsFalse(
+            _dotnet.ArgumentListInvocations.Any(a => a.Count >= 2 && a[0] == "new" && a[1] == "update"),
+            "A recent up-to-date check must be reused rather than re-querying the feed.");
+        Assert.IsFalse(
+            _dotnet.ArgumentListInvocations.Any(a => a.Count >= 2 && a[0] == "new" && a[1] == "install"),
+            "An up-to-date pack must not be reinstalled.");
+    }
+
+    [TestMethod]
+    public async Task Handler_UpdateCheckFails_DoesNotCacheResult()
+    {
+        // The feed check fails (non-zero exit). The failure must NOT be cached as "up-to-date",
+        // otherwise the next run within the day would wrongly skip the retry.
+        _dotnet.RunDotnetArgumentListHandler = args =>
+        {
+            if (args.Count >= 1 && args[0] == "--version")
+            {
+                return (0, "9.0.100\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "uninstall")
+            {
+                return (0, "Microsoft.WindowsAppSDK.WinUI.CSharp.Templates\n   Version: 0.0.5-alpha\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "update")
+            {
+                return (1, string.Empty, "Unable to reach the feed."); // transient failure
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "list")
+            {
+                return (0, SampleListOutput, string.Empty);
+            }
+            return (0, "created", string.Empty);
+        };
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--json", "--name", "MyApp"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        var globalDir = GetRequiredService<IWinappDirectoryService>().GetGlobalWinappDirectory();
+        var cacheFile = new FileInfo(Path.Join(globalDir.FullName, ".template-update-check"));
+        cacheFile.Refresh();
+        Assert.IsFalse(cacheFile.Exists,
+            "A failed feed check must not be cached, so the next run retries instead of skipping for a day.");
     }
 
     [TestMethod]

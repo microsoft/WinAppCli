@@ -10,7 +10,6 @@ using Spectre.Console;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
-using WinApp.Cli.Services.InteractiveDesktop;
 
 namespace WinApp.Cli.Commands;
 
@@ -30,24 +29,13 @@ internal class UiInvokeCommand : Command, IShortDescription
     }
 
     public class Handler(
-        IUiSessionService sessionService,
-        IUiAutomationService uiAutomation,
-        ISelectorService selectorService,
-        ISystemUiQuery systemQuery,
+        IUiTargetResolver targetResolver,
+        IUiAutomation uiAutomation,
+        IUiSelectorParser selectorParser,
         IAnsiConsole ansiConsole,
-        IInteractiveDesktopLock desktopLock,
-        ILogger<UiInvokeCommand> logger) : UiCoordinatedAction(desktopLock, logger)
+        ILogger<UiInvokeCommand> logger) : AsynchronousCommandLineAction
     {
-        protected override string Operation => "ui invoke";
-
-        /// <remarks>
-        /// Spec §6.4: the call itself is a UIA pattern, but an invoked control may synchronously
-        /// activate, focus, toggle, select, expand, or open transient UI, so it is treated as
-        /// desktop-exclusive and holds <c>active.lock</c> across the pattern call.
-        /// </remarks>
-        protected override UiTurnMode ResolveMode(ParseResult parseResult) => UiTurnMode.DesktopExclusive;
-
-        protected override int? Preflight(ParseResult parseResult)
+        public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
             var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
             var selectorStr = parseResult.GetValue(SharedUiOptions.SelectorArgument);
@@ -66,82 +54,44 @@ internal class UiInvokeCommand : Command, IShortDescription
                 return 1;
             }
 
-            return null;
-        }
-
-        protected override async Task<int> ExecuteAsync(ParseResult parseResult, IUiTurn turn, CancellationToken cancellationToken)
-        {
-            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
-            // Preflight rejected a missing selector, so this is non-null by construction.
-            var selectorStr = parseResult.GetValue(SharedUiOptions.SelectorArgument)!;
-            var app = parseResult.GetValue(SharedUiOptions.AppOption);
-            var window = parseResult.GetValue(SharedUiOptions.WindowOption);
-
             try
             {
-                // Resolution before the section is advisory only: it produces a clear element_not_found
-                // without holding the desktop. The element actually invoked is re-resolved inside.
-                var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
-                var selector = selectorService.Parse(selectorStr);
-                var advisory = await uiAutomation.FindSingleElementAsync(session, selector, cancellationToken);
+                var uiTarget = await targetResolver.ResolveAsync(app, window, cancellationToken);
+                var selector = selectorParser.Parse(selectorStr);
+                var element = await uiAutomation.FindSingleElementAsync(uiTarget, selector, cancellationToken);
 
-                if (advisory is null)
+                if (element is null)
                 {
                     UiErrors.ElementNotFound(logger, selectorStr, json);
                     return 1;
                 }
 
                 string pattern;
-                UiElement element;
-                UiElement invoked;
-
-                // The pattern call is the desktop-sensitive moment; output formatting below is not.
-                await using (await turn.EnterAsync(cancellationToken).ConfigureAwait(false))
+                try
                 {
-                    // Spec §10.5: never invoke an element resolved before the queue wait. Another
-                    // workflow may have navigated, closed, or rebuilt the tree in the meantime.
-                    element = await uiAutomation.FindSingleElementAsync(session, selector, cancellationToken)
-                        ?? throw new UiElementNotFoundException(selectorStr);
-
-                    if (!DesktopTargetValidation.TryConfirmTargetWindow(
-                            systemQuery, element.WindowHandle ?? session.WindowHandle, session.ProcessId,
-                            logger, json, "invoke", parseResult.InvocationConfiguration.Error))
-                    {
-                        return 1;
-                    }
-
-                    invoked = element;
-                    try
-                    {
-                        pattern = await uiAutomation.InvokeAsync(session, element, cancellationToken);
-                    }
-                    catch (InvalidOperationException) when (element.InvokableAncestor is { } ancestor)
-                    {
-                        // Element isn't invokable but has an invokable ancestor — invoke that instead
-                        pattern = await uiAutomation.InvokeAsync(session, ancestor, cancellationToken);
-                        invoked = ancestor;
-                    }
+                    pattern = await uiAutomation.InvokeAsync(uiTarget, element, cancellationToken);
                 }
-
-                if (!ReferenceEquals(invoked, element))
+                catch (InvalidOperationException) when (element.InvokableAncestor is { } ancestor)
                 {
+                    // Element isn't invokable but has an invokable ancestor — invoke that instead
+                    pattern = await uiAutomation.InvokeAsync(uiTarget, ancestor, cancellationToken);
                     if (json)
                     {
-                        var ancestorResult = new UiInvokeResult { ElementId = invoked.Selector ?? invoked.Id ?? "", Pattern = pattern, Hwnd = session.WindowHandle };
+                        var result = new UiInvokeResult { ElementId = ancestor.Selector ?? ancestor.Id ?? "", Pattern = pattern, Hwnd = uiTarget.WindowHandle };
                         ansiConsole.Profile.Out.Writer.WriteLine(
-                            JsonSerializer.Serialize(ancestorResult, UiJsonContext.Default.UiInvokeResult));
+                            JsonSerializer.Serialize(result, UiJsonContext.Default.UiInvokeResult));
                     }
                     else
                     {
                         logger.LogInformation("Invoked ancestor {Selector} \"{Name}\" via {Pattern} (matched text element was not invokable)",
-                            invoked.Selector ?? invoked.Id, invoked.Name, pattern);
+                            ancestor.Selector ?? ancestor.Id, ancestor.Name, pattern);
                     }
                     return 0;
                 }
 
                 if (json)
                 {
-                    var result = new UiInvokeResult { ElementId = (element.Selector ?? element.Id ?? ""), Pattern = pattern, Hwnd = session.WindowHandle };
+                    var result = new UiInvokeResult { ElementId = (element.Selector ?? element.Id ?? ""), Pattern = pattern, Hwnd = uiTarget.WindowHandle };
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(result, UiJsonContext.Default.UiInvokeResult));
                 }
@@ -158,7 +108,7 @@ internal class UiInvokeCommand : Command, IShortDescription
                 UiErrors.StaleElement(logger, json);
                 return 1;
             }
-            catch (Exception ex) when (!UiCoordinatedAction.IsCoordinationFault(ex))
+            catch (Exception ex)
             {
                 UiErrors.GenericError(logger, ex, json);
                 return 1;

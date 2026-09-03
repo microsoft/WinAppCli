@@ -170,6 +170,8 @@ Each template's canonical short name is the first alias `dotnet new` lists for i
 
 `winapp new` no longer pins a specific template pack version. If no pack is installed it installs the **latest**. If an older pack is already installed it checks the feed and, when a newer one exists, **prompts** whether to update — except in non-interactive/`--use-defaults` runs, which keep the installed pack. Use `--template-version latest` to always take the newest without prompting, or `--template-version installed` to always use the downloaded pack without a network check. Passing an **explicit** version (e.g. `--template-version 1.2.3`) always installs exactly that version — reinstalling even when a newer pack is already present — so scaffolding is reproducible across machines.
 
+> **A first run may take longer:** Installing or updating the template pack, or restoring missing Windows App SDK NuGet packages used by the selected template, can require additional downloads. This can also happen after a new Windows App SDK version is published. If scaffolding is still running after 10 seconds, `winapp new` updates its status message to indicate that packages may be downloading or restoring.
+
 **What it does:**
 
 - Verifies the .NET SDK is installed (fails fast with guidance if missing — `winapp` does not install toolchains)
@@ -1201,7 +1203,9 @@ Search **WinUI** controls and samples for a working code example. WinUI-only: th
 winapp find-ui "<query>" [options]
 ```
 
-The corpus is fetched from GitHub on first use and cached per-user under `<global .winapp>/cache/find-ui`, so the **first run requires network access**. Subsequent runs are served from the local cache (refreshed at most every 7 days, or on demand with `--refresh`).
+The Gallery, Toolkit, and Reactor corpora ship **inside the CLI**, so `find-ui` works with no network access — including on a first run in an agent sandbox or behind a corporate proxy that blocks `raw.githubusercontent.com`. When GitHub *is* reachable the CLI refreshes from it and caches the result per-user under `<global .winapp>/cache/find-ui`; the built-in corpus is only a floor, never a ceiling. Cached data is refreshed at most every 24 hours, or on demand with `--refresh`.
+
+The built-in corpus is re-fetched from GitHub every time a stable release is built, and a refresh that fails **stops the release build** rather than quietly shipping older data — the baker fetches through the same code path `--refresh` uses, so a failure there means the live refresh is broken too and is worth investigating before shipping. A release can still be cut against the previously committed corpus, but only as an explicit override. When results are served from the built-in copy, `find-ui` says so on stderr and `--json` output carries `"corpus": "embedded"` (other values: `"network"` for a fresh fetch, `"cache"` for the local cache).
 
 **Options:**
 

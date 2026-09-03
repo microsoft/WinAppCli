@@ -22,6 +22,9 @@ internal sealed class FakeControlsSearchService : IControlsSearchService
     public Action<string>? LastOnFetchStarting { get; private set; }
     public int ClearCacheCalls { get; private set; }
 
+    /// <summary>Settable so tests can drive the embedded-corpus notice and JSON provenance.</summary>
+    public CorpusOrigin LoadedOrigin { get; set; } = CorpusOrigin.Network;
+
     private FakeControlsSearchService(SearchEngine? engine, Exception? toThrow)
     {
         _engine = engine;

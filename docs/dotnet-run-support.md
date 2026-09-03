@@ -163,12 +163,18 @@ This gating ensures the package is safe to consume transitively (e.g. when re-ex
 
 ### package-nuget.ps1
 
-Creates both NuGet packages:
+Creates all three NuGet packages — the `Microsoft.Windows.SDK.BuildTools.WinApp` tools package
+described above, plus the two UI Automation library packages:
 
 ```powershell
 .\scripts\package-nuget.ps1                    # Prerelease version
 .\scripts\package-nuget.ps1 -Version 1.0.0 -Stable  # Stable version
+.\scripts\package-nuget.ps1 -SkipCliPackage    # Only the UI Automation libraries
 ```
+
+The tools package wraps the published CLI, so it needs `artifacts/cli` to hold an x64 and an arm64
+build. The library packages build from source, so `-SkipCliPackage` produces them in seconds
+without a full publish.
 
 ### Integration with build-cli.ps1
 

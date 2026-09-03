@@ -33,6 +33,8 @@ extends:
     - stage: Build
       jobs:
       - job: Build
+        # Same build as the release pipeline, which has already exceeded the 60-minute default.
+        timeoutInMinutes: 120
         pool:
           name: Azure-Pipelines-1ESPT-ExDShared
           image: windows-latest
@@ -40,25 +42,7 @@ extends:
           hostArchitecture: amd64
         steps:
           - checkout: self
-          - task: UseDotNet@2
-            displayName: Setup .NET 10
-            inputs:
-              version: 10.0.x
-          - task: UseNode@1
-            displayName: Setup Node.js 24
-            inputs:
-              version: '24.x'
-          - script: |
-              if not exist "%APPDATA%\NuGet" mkdir "%APPDATA%\NuGet"
-              copy /Y $(Build.SourcesDirectory)\.pipelines\release-nuget.config "%APPDATA%\NuGet\NuGet.Config"
-              move /Y $(Build.SourcesDirectory)\.pipelines\release-nuget.config $(Build.SourcesDirectory)\nuget.config
-            displayName: Add release package source
-          - task: NuGetAuthenticate@1
-          - script: move /Y $(Build.SourcesDirectory)\.pipelines\release-npmrc $(Build.SourcesDirectory)\.npmrc
-            displayName: Add release npm source
-          - task: npmAuthenticate@0
-            inputs:
-              workingFile: $(Build.SourcesDirectory)\.npmrc
+          - template: ./.pipelines/templates/build-env.yaml@self
           - template: ./.pipelines/templates/build.yaml@self
             parameters:
               stable: 'false'

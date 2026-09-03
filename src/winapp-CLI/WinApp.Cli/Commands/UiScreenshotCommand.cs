@@ -11,7 +11,6 @@ using Spectre.Console;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
-using WinApp.Cli.Services.InteractiveDesktop;
 
 namespace WinApp.Cli.Commands;
 
@@ -35,100 +34,98 @@ internal class UiScreenshotCommand : Command, IShortDescription
     }
 
     public class Handler(
-        IUiSessionService sessionService,
-        IUiAutomationService uiAutomation,
+        IUiTargetResolver targetResolver,
+        IUiAutomation uiAutomation,
         IOwnedWindowFinder ownedWindowFinder,
         ISystemUiQuery systemQuery,
         IAnsiConsole ansiConsole,
-        IInteractiveDesktopLock desktopLock,
-        ILogger<UiScreenshotCommand> logger) : UiCoordinatedAction(desktopLock, logger)
+        ILogger<UiScreenshotCommand> logger) : AsynchronousCommandLineAction
     {
-        protected override string Operation => "ui screenshot";
-
-        /// <remarks>
-        /// Spec §6.1/§6.5: a plain screenshot is a background capture and stays an observation.
-        /// <c>--focus</c> and <c>--capture-screen</c> need the foreground, so they are desktop-exclusive
-        /// from the start. An observation that turns out to need restore or foreground escalates the
-        /// whole invocation at run time.
-        /// </remarks>
-        protected override UiTurnMode ResolveMode(ParseResult parseResult)
-            => parseResult.GetValue(SharedUiOptions.FocusOption) || parseResult.GetValue(SharedUiOptions.CaptureScreenOption)
-                ? UiTurnMode.DesktopExclusive
-                : UiTurnMode.Observe;
-
-        protected override int? Preflight(ParseResult parseResult)
+        public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
             var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
+            var selector = parseResult.GetValue(SharedUiOptions.SelectorArgument);
             var app = parseResult.GetValue(SharedUiOptions.AppOption);
             var window = parseResult.GetValue(SharedUiOptions.WindowOption);
-            var output = parseResult.GetValue(SharedUiOptions.OutputOption);
 
             if (string.IsNullOrWhiteSpace(app) && window is null)
             {
                 UiErrors.MissingApp(logger, json);
                 return 1;
             }
-
-            if (output is not null)
-            {
-                try
-                {
-                    _ = Path.GetFullPath(output);
-                }
-                catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
-                {
-                    UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, $"Invalid output path: {ex.Message}");
-                    logger.LogError("{Symbol} Invalid output path: {Message}", UiSymbols.Error, ex.Message);
-                    return 1;
-                }
-            }
-
-            return null;
-        }
-
-        protected override async Task<int> ExecuteAsync(ParseResult parseResult, IUiTurn turn, CancellationToken cancellationToken)
-        {
-            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
-            var selector = parseResult.GetValue(SharedUiOptions.SelectorArgument);
-            var app = parseResult.GetValue(SharedUiOptions.AppOption);
-            var window = parseResult.GetValue(SharedUiOptions.WindowOption);
             var output = parseResult.GetValue(SharedUiOptions.OutputOption);
             var captureScreen = parseResult.GetValue(SharedUiOptions.CaptureScreenOption);
             var focus = parseResult.GetValue(SharedUiOptions.FocusOption);
 
             try
             {
-                // Spec §6.5: the invocation runs its capture pass observationally first. If ANY target
-                // turns out to need restore or foreground, every buffered capture is discarded, the whole
-                // invocation escalates to DesktopExclusive, and the pass runs again from the beginning —
-                // rediscovering windows and revalidating each one — so the published image never mixes
-                // pre- and post-escalation pixels.
-                var observeOnly = turn.Mode == UiTurnMode.Observe;
-                while (true)
+                // Screenshot handles multi-window discovery itself (avoids duplicate warning from session resolution)
+                if (selector is null)
                 {
-                    try
+                    var allWindows = DiscoverAllWindows(app, window);
+                    if (allWindows is not null && allWindows.Count > 1)
                     {
-                        return await CapturePassAsync(
-                            parseResult, turn, selector, app, window, output, json, captureScreen, focus,
-                            observeOnly, cancellationToken).ConfigureAwait(false);
-                    }
-                    catch (DesktopEscalationRequiredException escalation) when (observeOnly)
-                    {
-                        logger.LogDebug(
-                            "Screenshot escalating to an exclusive desktop turn: {Reason}", escalation.Reason);
-                        await turn.EscalateToDesktopExclusiveAsync(cancellationToken).ConfigureAwait(false);
-                        observeOnly = false;
+                        // Resolve session using the largest window's HWND (suppresses session multi-window warning)
+                        var main = allWindows.OrderByDescending(w =>
+                        {
+                            var info = UiTargetResolver.GetWindowInfo(w.Hwnd);
+                            return (long)info.Width * info.Height;
+                        }).First();
+                        var uiTarget = await targetResolver.ResolveAsync(null, main.Hwnd, cancellationToken);
+                        return await CaptureMultipleWindows(allWindows, uiTarget, output, json, captureScreen, focus, cancellationToken);
                     }
                 }
-            }
-            catch (CaptureForegroundNotTargetException foregroundEx)
-            {
-                // Same contract as the pre-injection foreground guard: a precise foreground_not_target
-                // refusal, never internal_error, and no image is written.
-                logger.LogError("{Symbol} {Message}", UiSymbols.Error, foregroundEx.Message);
-                UiJsonError.Emit(json, UiJsonError.CodeForegroundNotTarget, foregroundEx.Message,
-                    errorOut: parseResult.InvocationConfiguration.Error);
-                return 1;
+
+                // Single window capture (or element crop)
+                var singleSession = await targetResolver.ResolveAsync(app, window, cancellationToken);
+
+                // Even for single-window session, check for owned dialogs
+                if (selector is null)
+                {
+                    var targetWindowHwnd = (nint)singleSession.WindowHandle;
+                    var ownedWindows = ownedWindowFinder.FindOwnedWindows([(targetWindowHwnd, singleSession.ProcessId, singleSession.WindowTitle ?? "")]);
+                    if (ownedWindows.Count > 0)
+                    {
+                        var allWindows = new List<(nint Hwnd, int Pid, string Title)>
+                        {
+                            (targetWindowHwnd, singleSession.ProcessId, singleSession.WindowTitle ?? "")
+                        };
+                        allWindows.AddRange(ownedWindows);
+                        return await CaptureMultipleWindows(allWindows, singleSession, output, json, captureScreen, focus, cancellationToken);
+                    }
+                }
+
+                var (pixels, w, h) = await uiAutomation.ScreenshotAsync(singleSession, selector, captureScreen, focus, cancellationToken);
+                var pngBytes = EncodePng(pixels, w, h);
+
+                var filePath = output ?? "screenshot.png";
+                var dir = Path.GetDirectoryName(Path.GetFullPath(filePath));
+                if (dir is not null)
+                {
+                    Directory.CreateDirectory(dir);
+                }
+                await File.WriteAllBytesAsync(filePath, pngBytes, cancellationToken);
+                var absolutePath = Path.GetFullPath(filePath);
+
+                if (json)
+                {
+                    var result = new UiScreenshotResult
+                    {
+                        ElementId = selector,
+                        FilePath = absolutePath,
+                        Width = w,
+                        Height = h,
+                        ProcessId = singleSession.ProcessId,
+                        WindowTitle = singleSession.WindowTitle,
+                        Hwnd = singleSession.WindowHandle
+                    };
+                    ansiConsole.Profile.Out.Writer.WriteLine(
+                        JsonSerializer.Serialize(result, UiJsonContext.Default.UiScreenshotResult));
+                    return 0;
+                }
+
+                logger.LogInformation("Screenshot of \"{WindowTitle}\" (PID {ProcessId}) saved to {Path} ({Width}x{Height}, {Size}KB)", singleSession.WindowTitle, singleSession.ProcessId, absolutePath, w, h, pngBytes.Length / 1024);
+                return 0;
             }
             catch (System.Runtime.InteropServices.COMException comEx)
             {
@@ -136,103 +133,20 @@ internal class UiScreenshotCommand : Command, IShortDescription
                 UiErrors.StaleElement(logger, json);
                 return 1;
             }
-            catch (Exception ex) when (!UiCoordinatedAction.IsCoordinationFault(ex))
+            catch (Exception ex)
             {
                 UiErrors.GenericError(logger, ex, json);
                 return 1;
             }
         }
 
-        /// <summary>
-        /// One complete capture pass. Buffers pixels and human progress and writes nothing until every
-        /// target succeeded, so an escalation partway through discards a consistent set.
-        /// </summary>
-        private async Task<int> CapturePassAsync(
-            ParseResult parseResult, IUiTurn turn, string? selector, string? app, long? window,
-            string? output, bool json, bool captureScreen, bool focus, bool observeOnly,
-            CancellationToken cancellationToken)
-        {
-            // Screenshot handles multi-window discovery itself (avoids duplicate warning from session resolution)
-            if (selector is null)
-            {
-                var allWindows = DiscoverAllWindows(app, window);
-                if (allWindows is not null && allWindows.Count > 1)
-                {
-                    // Resolve session using the largest window's HWND (suppresses session multi-window warning)
-                    var main = allWindows.OrderByDescending(w =>
-                    {
-                        var info = UiSessionService.GetWindowInfo(w.Hwnd);
-                        return (long)info.Width * info.Height;
-                    }).First();
-                    var multiSession = await sessionService.ResolveSessionAsync(null, main.Hwnd, cancellationToken);
-                    return await CaptureMultipleWindows(
-                        allWindows, multiSession, turn, output, json, captureScreen, focus, observeOnly, cancellationToken);
-                }
-            }
-
-            // Single window capture (or element crop)
-            var singleSession = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
-
-            // Even for single-window session, check for owned dialogs
-            if (selector is null)
-            {
-                var sessionHwnd = (nint)singleSession.WindowHandle;
-                var ownedWindows = ownedWindowFinder.FindOwnedWindows([(sessionHwnd, singleSession.ProcessId, singleSession.WindowTitle ?? "")]);
-                if (ownedWindows.Count > 0)
-                {
-                    var allWindows = new List<(nint Hwnd, int Pid, string Title)>
-                    {
-                        (sessionHwnd, singleSession.ProcessId, singleSession.WindowTitle ?? "")
-                    };
-                    allWindows.AddRange(ownedWindows);
-                    return await CaptureMultipleWindows(
-                        allWindows, singleSession, turn, output, json, captureScreen, focus, observeOnly, cancellationToken);
-                }
-            }
-
-            var (pixels, w, h) = await uiAutomation.ScreenshotAsync(
-                singleSession, selector, captureScreen, focus, turn, observeOnly, cancellationToken);
-            var pngBytes = EncodePng(pixels, w, h);
-
-            var filePath = output ?? "screenshot.png";
-            var dir = Path.GetDirectoryName(Path.GetFullPath(filePath));
-            if (dir is not null)
-            {
-                Directory.CreateDirectory(dir);
-            }
-            await File.WriteAllBytesAsync(filePath, pngBytes, cancellationToken);
-            var absolutePath = Path.GetFullPath(filePath);
-
-            if (json)
-            {
-                var result = new UiScreenshotResult
-                {
-                    ElementId = selector,
-                    FilePath = absolutePath,
-                    Width = w,
-                    Height = h,
-                    ProcessId = singleSession.ProcessId,
-                    WindowTitle = singleSession.WindowTitle,
-                    Hwnd = singleSession.WindowHandle
-                };
-                ansiConsole.Profile.Out.Writer.WriteLine(
-                    JsonSerializer.Serialize(result, UiJsonContext.Default.UiScreenshotResult));
-                return 0;
-            }
-
-            logger.LogInformation("Screenshot of \"{WindowTitle}\" (PID {ProcessId}) saved to {Path} ({Width}x{Height}, {Size}KB)", singleSession.WindowTitle, singleSession.ProcessId, absolutePath, w, h, pngBytes.Length / 1024);
-            return 0;
-        }
-
         private async Task<int> CaptureMultipleWindows(
             List<(nint Hwnd, int Pid, string Title)> windows,
-            UiSessionInfo session,
-            IUiTurn turn,
+            UiTarget uiTarget,
             string? output,
             bool json,
             bool captureScreen,
             bool focus,
-            bool observeOnly,
             CancellationToken ct)
         {
             var filePath = output ?? "screenshot.png";
@@ -240,35 +154,32 @@ internal class UiScreenshotCommand : Command, IShortDescription
             // Sort: main window first (largest), then others
             var sorted = windows.OrderByDescending(w =>
             {
-                var info = UiSessionService.GetWindowInfo(w.Hwnd);
+                var info = UiTargetResolver.GetWindowInfo(w.Hwnd);
                 return (long)info.Width * info.Height;
             }).ToList();
 
-            // Buffered so an escalation partway through this loop discards everything rather than
-            // publishing a composite of pre- and post-escalation captures (spec §6.5).
-            var progress = new List<string>
+            if (!json)
             {
-                $"[yellow]⚠  {windows.Count} windows detected. Compositing into single image.[/]"
-            };
+                ansiConsole.MarkupLine($"[yellow]⚠  {windows.Count} windows detected. Compositing into single image.[/]");
+            }
 
             // Capture each window
             var captures = new List<(byte[] Pixels, int Width, int Height, nint Hwnd, string Title, string Label)>();
             var windowDetails = new List<UiScreenshotWindowInfo>();
             foreach (var w in sorted)
             {
-                var info = UiSessionService.GetWindowInfo(w.Hwnd);
+                var info = UiTargetResolver.GetWindowInfo(w.Hwnd);
                 var title = string.IsNullOrEmpty(w.Title) ? "(no title)" : w.Title;
                 try
                 {
-                    var windowSession = new UiSessionInfo
+                    var windowSession = new UiTarget
                     {
                         ProcessId = w.Pid,
-                        ProcessName = session.ProcessName,
+                        ProcessName = uiTarget.ProcessName,
                         WindowTitle = title,
                         WindowHandle = w.Hwnd
                     };
-                    var (pixels, width, height) = await uiAutomation.ScreenshotAsync(
-                        windowSession, null, captureScreen, focus, turn, observeOnly, ct);
+                    var (pixels, width, height) = await uiAutomation.ScreenshotAsync(windowSession, null, captureScreen, focus, ct);
                     captures.Add((pixels, width, height, w.Hwnd, title, info.Label));
                     windowDetails.Add(new UiScreenshotWindowInfo
                     {
@@ -280,24 +191,13 @@ internal class UiScreenshotCommand : Command, IShortDescription
                         Captured = true,
                     });
 
-                    var owner = info.OwnerHwnd != 0 ? $", owner: HWND {info.OwnerHwnd}" : "";
-                    progress.Add($"  [green]✓[/] HWND [cyan]{w.Hwnd}[/]: \"{Markup.Escape(title)}\" [grey]({info.Label}, {width}x{height}{owner})[/]");
+                    if (!json)
+                    {
+                        var owner = info.OwnerHwnd != 0 ? $", owner: HWND {info.OwnerHwnd}" : "";
+                        ansiConsole.MarkupLine($"  [green]✓[/] HWND [cyan]{w.Hwnd}[/]: \"{Markup.Escape(title)}\" [grey]({info.Label}, {width}x{height}{owner})[/]");
+                    }
                 }
-                catch (DesktopEscalationRequiredException)
-                {
-                    // Propagate so the whole invocation escalates and recaptures from the beginning;
-                    // recording a per-window failure here would publish a partially observational image.
-                    throw;
-                }
-                catch (CaptureForegroundNotTargetException)
-                {
-                    // The foreground is a property of the desktop, not of this one window, so a refused
-                    // activation is not a per-window failure: recording it as one and continuing would
-                    // end with "No windows could be captured" (internal_error) and bury the real,
-                    // actionable cause. Propagate to the handler that reports foreground_not_target.
-                    throw;
-                }
-                catch (Exception ex) when (!UiCoordinatedAction.IsCoordinationFault(ex))
+                catch (Exception ex)
                 {
                     logger.LogDebug("Failed to capture HWND {Hwnd}: {Error}", w.Hwnd, ex.Message);
                     windowDetails.Add(new UiScreenshotWindowInfo
@@ -308,22 +208,15 @@ internal class UiScreenshotCommand : Command, IShortDescription
                         Captured = false,
                         Error = ex.Message,
                     });
-                    progress.Add($"  [red]✗[/] HWND {w.Hwnd}: \"{Markup.Escape(title)}\" — {Markup.Escape(ex.Message)}");
+                    if (!json)
+                    {
+                        ansiConsole.MarkupLine($"  [red]✗[/] HWND {w.Hwnd}: \"{Markup.Escape(title)}\" — {Markup.Escape(ex.Message)}");
+                    }
                 }
             }
 
             if (captures.Count == 0)
             {
-                // Every window failed for a non-escalation reason, so there is no image to publish — but
-                // the buffered per-window diagnostics are exactly what explains the failure.
-                if (!json)
-                {
-                    foreach (var line in progress)
-                    {
-                        ansiConsole.MarkupLine(line);
-                    }
-                }
-
                 logger.LogError("No windows could be captured.");
                 UiJsonError.Emit(json, UiJsonError.CodeInternalError, "No windows could be captured.");
                 return 1;
@@ -345,11 +238,6 @@ internal class UiScreenshotCommand : Command, IShortDescription
 
             if (!json)
             {
-                // Only now that the image is published does the buffered progress reach the user.
-                foreach (var line in progress)
-                {
-                    ansiConsole.MarkupLine(line);
-                }
                 ansiConsole.MarkupLine($"  [green]✓[/] Saved composite: {absolutePath}");
             }
 
@@ -360,9 +248,9 @@ internal class UiScreenshotCommand : Command, IShortDescription
                     FilePath = absolutePath,
                     Width = compositeWidth,
                     Height = compositeHeight,
-                    ProcessId = session.ProcessId,
-                    WindowTitle = session.WindowTitle,
-                    Hwnd = session.WindowHandle,
+                    ProcessId = uiTarget.ProcessId,
+                    WindowTitle = uiTarget.WindowTitle,
+                    Hwnd = uiTarget.WindowHandle,
                     Windows = windowDetails.ToArray(),
                 };
                 ansiConsole.Profile.Out.Writer.WriteLine(

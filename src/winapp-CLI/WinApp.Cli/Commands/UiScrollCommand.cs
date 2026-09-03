@@ -9,7 +9,6 @@ using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
-using WinApp.Cli.Services.InteractiveDesktop;
 
 namespace WinApp.Cli.Commands;
 
@@ -57,47 +56,33 @@ internal class UiScrollCommand : Command, IShortDescription
     }
 
     public class Handler(
-        IUiSessionService sessionService,
-        IUiAutomationService uiAutomation,
-        ISelectorService selectorService,
+        IUiTargetResolver targetResolver,
+        IUiAutomation uiAutomation,
+        IUiSelectorParser selectorParser,
         IMouseInput mouseInput,
         IForegroundGuard foregroundGuard,
-        IDesktopForegroundService desktopForeground,
-        ISystemUiQuery systemQuery,
-        IInteractiveDesktopLock desktopLock,
         IAnsiConsole ansiConsole,
-        ILogger<UiScrollCommand> logger) : UiCoordinatedAction(desktopLock, logger)
+        ILogger<UiScrollCommand> logger) : AsynchronousCommandLineAction
     {
         // Cursor-settle pause (ms) after positioning over the target, before the confirm read + wheel.
         private const int CursorSettleMs = 30;
 
-        protected override string Operation => "ui scroll";
-
-        /// <remarks>
-        /// Spec §6.1: <c>--wheel</c> injects OS-wide mouse input at the cursor, so it is desktop-exclusive.
-        /// <c>--direction</c> / <c>--to</c> use the UIA <c>ScrollPattern</c>, which works in the background
-        /// and stays an observation.
-        /// </remarks>
-        protected override UiTurnMode ResolveMode(ParseResult parseResult)
-            => parseResult.GetValue(WheelOption) is not null
-                ? UiTurnMode.DesktopExclusive
-                : UiTurnMode.Observe;
-
-        protected override int? Preflight(ParseResult parseResult)
+        public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
             var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
             var selectorStr = parseResult.GetValue(SharedUiOptions.SelectorArgument);
             var app = parseResult.GetValue(SharedUiOptions.AppOption);
             var window = parseResult.GetValue(SharedUiOptions.WindowOption);
-            var direction = parseResult.GetValue(DirectionOption);
-            var to = parseResult.GetValue(ToOption);
-            var wheel = parseResult.GetValue(WheelOption);
 
             if (string.IsNullOrWhiteSpace(app) && window is null)
             {
                 UiErrors.MissingApp(logger, json);
                 return 1;
             }
+
+            var direction = parseResult.GetValue(DirectionOption);
+            var to = parseResult.GetValue(ToOption);
+            var wheel = parseResult.GetValue(WheelOption);
 
             if (string.IsNullOrWhiteSpace(selectorStr))
             {
@@ -122,25 +107,11 @@ internal class UiScrollCommand : Command, IShortDescription
                 return 1;
             }
 
-            return null;
-        }
-
-        protected override async Task<int> ExecuteAsync(ParseResult parseResult, IUiTurn turn, CancellationToken cancellationToken)
-        {
-            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
-            // Preflight rejected a missing selector, so this is non-null by construction.
-            var selectorStr = parseResult.GetValue(SharedUiOptions.SelectorArgument)!;
-            var app = parseResult.GetValue(SharedUiOptions.AppOption);
-            var window = parseResult.GetValue(SharedUiOptions.WindowOption);
-            var direction = parseResult.GetValue(DirectionOption);
-            var to = parseResult.GetValue(ToOption);
-            var wheel = parseResult.GetValue(WheelOption);
-
             try
             {
-                var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
-                var selector = selectorService.Parse(selectorStr);
-                var element = await uiAutomation.FindSingleElementAsync(session, selector, cancellationToken);
+                var uiTarget = await targetResolver.ResolveAsync(app, window, cancellationToken);
+                var selector = selectorParser.Parse(selectorStr);
+                var element = await uiAutomation.FindSingleElementAsync(uiTarget, selector, cancellationToken);
 
                 if (element is null)
                 {
@@ -148,10 +119,13 @@ internal class UiScrollCommand : Command, IShortDescription
                     return 1;
                 }
 
-                var targetHwnd = element.WindowHandle ?? session.WindowHandle;
+                var targetHwnd = element.WindowHandle ?? uiTarget.WindowHandle;
 
                 if (wheel is int notches)
                 {
+                    int centerX = (int)(element.X + element.Width / 2.0);
+                    int centerY = (int)(element.Y + element.Height / 2.0);
+
                     if (element.Width == 0 || element.Height == 0)
                     {
                         logger.LogError("{Symbol} Element has zero size — cannot scroll-wheel over it.", UiSymbols.Error);
@@ -159,79 +133,67 @@ internal class UiScrollCommand : Command, IShortDescription
                         return 1;
                     }
 
-                    // Foreground, re-resolve, cursor positioning and the wheel injection all share the
-                    // desktop and run in one section; the result formatting below does not.
-                    await using (await turn.EnterAsync(cancellationToken).ConfigureAwait(false))
+                    if (targetHwnd != 0)
                     {
-                        // Re-resolve first (spec §10.5): the container may have moved, closed, or been
-                        // replaced while this command waited, so the HWND we foreground must be fresh.
-                        var stable = await GestureTargeting.ResolveStableAsync(
-                            uiAutomation, session, selector, element,
-                            GestureTargeting.DefaultMaxReads, GestureTargeting.DefaultReadDelayMs, null, cancellationToken);
-                        if (!GestureTargeting.TryReport(stable, logger, json, selectorStr, "scroll --wheel"))
-                        {
-                            return 1;
-                        }
-                        var centerX = stable.CenterX;
-                        var centerY = stable.CenterY;
-                        // TryReport returned true, so a settled element was resolved and Element is populated.
-                        targetHwnd = stable.Element.WindowHandle ?? session.WindowHandle;
-
-                        if (!DesktopTargetValidation.TryConfirmTargetWindow(
-                                systemQuery, targetHwnd, session.ProcessId, logger, json, "scroll --wheel", parseResult.InvocationConfiguration.Error))
-                        {
-                            return 1;
-                        }
-
-                        if (targetHwnd != 0)
-                        {
-                            desktopForeground.RequestForeground(targetHwnd);
-                            await Task.Delay(100, cancellationToken);
-                        }
-
-                        // Verify the target STILL holds the foreground as the first gate before the OS-wide
-                        // wheel injection. The re-resolve above awaits UIA reads (with delays) during which
-                        // another window could steal focus, so we check here — after the awaits, not before
-                        // them. Also distinguishes a locked/secure desktop from a wrong-window foreground.
-                        if (!foregroundGuard.TryEnsureForeground(targetHwnd, logger, json, "scroll --wheel"))
-                        {
-                            return 1;
-                        }
-
-                        // Close the residual re-resolve→wheel race (mirrors click/drag): ScrollWheel positions
-                        // the cursor and settles before injecting, which is an unguarded window in which a
-                        // still-animating target could drift, routing the wheel to whatever is now under the
-                        // pointer. Position the cursor, let it settle, confirm the target hasn't moved, re-check
-                        // the foreground, then inject with settleMs: 0 — so a reported ✅ means the wheel went to
-                        // the element.
-                        mouseInput.MoveCursor(centerX, centerY);
-                        await Task.Delay(CursorSettleMs, cancellationToken);
-
-                        var confirmed = await GestureTargeting.ConfirmStillAsync(
-                            uiAutomation, session, selector, stable.Element, cancellationToken);
-                        if (!GestureTargeting.TryReport(confirmed, logger, json, selectorStr, "scroll --wheel"))
-                        {
-                            return 1;
-                        }
-                        centerX = confirmed.CenterX;
-                        centerY = confirmed.CenterY;
-
-                        // Final foreground gate after the awaited confirm read (focus could shift during it).
-                        if (!foregroundGuard.TryEnsureForeground(targetHwnd, logger, json, "scroll --wheel"))
-                        {
-                            return 1;
-                        }
-
-                        // --wheel is expressed in notches for ergonomics; SendInput's mouse wheel works in
-                        // WHEEL_DELTA units (120 per detent), so scale up to the raw delta the OS expects. The
-                        // cursor is already positioned and the target just confirmed, so skip the inner settle.
-                        mouseInput.ScrollWheel(centerX, centerY, notches * WheelDelta, settleMs: 0);
+                        Windows.Win32.PInvoke.SetForegroundWindow(
+                            new Windows.Win32.Foundation.HWND((nint)targetHwnd));
+                        await Task.Delay(100, cancellationToken);
                     }
+
+                    // Re-resolve just before scrolling (N5): foregrounding can restore/animate the window,
+                    // so the captured rect may be stale. Refuse rather than scroll empty space if it's
+                    // still moving.
+                    var stable = await GestureTargeting.ResolveStableAsync(
+                        uiAutomation, uiTarget, selector, element,
+                        GestureTargeting.DefaultMaxReads, GestureTargeting.DefaultReadDelayMs, null, cancellationToken);
+                    if (!UiInjectionReporting.TryReport(stable, logger, json, selectorStr, "scroll --wheel"))
+                    {
+                        return 1;
+                    }
+                    centerX = stable.CenterX;
+                    centerY = stable.CenterY;
+
+                    // Verify the target STILL holds the foreground as the first gate before the OS-wide
+                    // wheel injection. The re-resolve above awaits UIA reads (with delays) during which
+                    // another window could steal focus, so we check here — after the awaits, not before
+                    // them. Also distinguishes a locked/secure desktop from a wrong-window foreground.
+                    if (!foregroundGuard.TryEnsureForeground(targetHwnd, logger, json, "scroll --wheel"))
+                    {
+                        return 1;
+                    }
+
+                    // Close the residual re-resolve→wheel race (mirrors click/drag): ScrollWheel positions
+                    // the cursor and settles before injecting, which is an unguarded window in which a
+                    // still-animating target could drift, routing the wheel to whatever is now under the
+                    // pointer. Position the cursor, let it settle, confirm the target hasn't moved, re-check
+                    // the foreground, then inject with settleMs: 0 — so a reported ✅ means the wheel went to
+                    // the element.
+                    mouseInput.MoveCursor(centerX, centerY);
+                    await Task.Delay(CursorSettleMs, cancellationToken);
+
+                    var confirmed = await GestureTargeting.ConfirmStillAsync(
+                        uiAutomation, uiTarget, selector, stable.Element, cancellationToken);
+                    if (!UiInjectionReporting.TryReport(confirmed, logger, json, selectorStr, "scroll --wheel"))
+                    {
+                        return 1;
+                    }
+                    centerX = confirmed.CenterX;
+                    centerY = confirmed.CenterY;
+
+                    // Final foreground gate after the awaited confirm read (focus could shift during it).
+                    if (!foregroundGuard.TryEnsureForeground(targetHwnd, logger, json, "scroll --wheel"))
+                    {
+                        return 1;
+                    }
+
+                    // --wheel is expressed in notches for ergonomics; SendInput's mouse wheel works in
+                    // WHEEL_DELTA units (120 per detent), so scale up to the raw delta the OS expects. The
+                    // cursor is already positioned and the target just confirmed, so skip the inner settle.
+                    mouseInput.ScrollWheel(centerX, centerY, notches * WheelDelta, settleMs: 0);
                 }
                 else
                 {
-                    // UIA scrolling is background-safe: no foreground, no cursor, no desktop section.
-                    await uiAutomation.ScrollContainerAsync(session, element, direction, to, cancellationToken);
+                    await uiAutomation.ScrollContainerAsync(uiTarget, element, direction, to, cancellationToken);
                 }
 
                 if (json)
@@ -260,7 +222,7 @@ internal class UiScrollCommand : Command, IShortDescription
                 UiErrors.StaleElement(logger, json);
                 return 1;
             }
-            catch (Exception ex) when (!UiCoordinatedAction.IsCoordinationFault(ex))
+            catch (Exception ex)
             {
                 UiErrors.GenericError(logger, ex, json);
                 return 1;

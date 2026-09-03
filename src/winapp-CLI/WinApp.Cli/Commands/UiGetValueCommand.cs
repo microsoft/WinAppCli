@@ -30,9 +30,9 @@ internal class UiGetValueCommand : Command, IShortDescription
     }
 
     public class Handler(
-        IUiSessionService sessionService,
-        IUiAutomationService uiAutomation,
-        ISelectorService selectorService,
+        IUiTargetResolver targetResolver,
+        IUiAutomation uiAutomation,
+        IUiSelectorParser selectorParser,
         IAnsiConsole ansiConsole,
         IInteractiveDesktopLock desktopLock,
         ILogger<UiGetValueCommand> logger) : UiCoordinatedAction(desktopLock, logger)
@@ -74,9 +74,9 @@ internal class UiGetValueCommand : Command, IShortDescription
 
             try
             {
-                var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
-                var selector = selectorService.Parse(selectorStr);
-                var element = await uiAutomation.FindSingleElementAsync(session, selector, cancellationToken);
+                var uiTarget = await targetResolver.ResolveAsync(app, window, cancellationToken);
+                var selector = selectorParser.Parse(selectorStr);
+                var element = await uiAutomation.FindSingleElementAsync(uiTarget, selector, cancellationToken);
 
                 if (element is null)
                 {
@@ -84,7 +84,7 @@ internal class UiGetValueCommand : Command, IShortDescription
                     return 1;
                 }
 
-                var text = await uiAutomation.GetTextAsync(session, element, cancellationToken);
+                var text = await uiAutomation.GetTextAsync(uiTarget, element, cancellationToken);
 
                 if (json)
                 {

@@ -52,7 +52,7 @@ internal class UiListWindowsCommand : Command, IShortDescription
     }
 
     public class Handler(
-        IUiAutomationService uiAutomation,
+        IUiAutomation uiAutomation,
         IAnsiConsole ansiConsole,
         IInteractiveDesktopLock desktopLock,
         ILogger<UiListWindowsCommand> logger) : UiCoordinatedAction(desktopLock, logger)
@@ -132,7 +132,7 @@ internal class UiListWindowsCommand : Command, IShortDescription
                     var foregroundHwnd = (long)Windows.Win32.PInvoke.GetForegroundWindow();
                     var results = windows.Select(w =>
                     {
-                        var info = UiSessionService.GetWindowInfo(w.Hwnd);
+                        var info = UiTargetResolver.GetWindowInfo(w.Hwnd);
                         return (w, info);
                     })
                     .Where(x => ShouldIncludeWindow(x.w.Title, x.info.Width, x.info.Height, showHidden))
@@ -159,7 +159,7 @@ internal class UiListWindowsCommand : Command, IShortDescription
                 var displayedCount = 0;
                 foreach (var w in windows)
                 {
-                    var info = UiSessionService.GetWindowInfo(w.Hwnd);
+                    var info = UiTargetResolver.GetWindowInfo(w.Hwnd);
 
                     if (!ShouldIncludeWindow(w.Title, info.Width, info.Height, showHidden))
                     {

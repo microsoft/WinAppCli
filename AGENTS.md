@@ -2,6 +2,62 @@
 
 This file provides focused, actionable information to help an AI coding agent be immediately productive in this repo.
 
+## Audience contracts
+
+### User documentation
+
+Write for someone using winapp. Lead with the smallest command or input that
+demonstrates the behavior, then answer: what can I do, what do I type, what
+happens, and what action should I take if it fails. Describe observable behavior,
+not implementation machinery.
+
+Keep internal deliberation, review provenance, rejected alternatives, review
+rounds/IDs, resolved blockers, and defenses of the implementation out of user
+documentation. State each user-facing fact once on its canonical surface and link
+to it elsewhere instead of copying it.
+
+Example: "After cloning a project with `winapp.yaml`, run `winapp restore` to
+reinstall its pinned SDK packages and projections without changing versions. For
+a .NET project without `winapp.yaml`, run `dotnet restore` instead."
+
+### Reviews and author communication
+
+Assume the reader has no prior codebase or conversation context. A junior
+developer should understand each finding after one read. Use a plain title, then:
+
+- **What is wrong:** the behavior or design defect.
+- **Show me:** the smallest concrete command, input, tree, or code path, preferably
+  as input -> actual result -> expected result.
+- **Why it matters:** the user, build, or maintenance consequence.
+- **Smallest fix:** the least-complex change that resolves it.
+
+Define unavoidable jargon at first use. Put paths and lines in supporting detail,
+not in a title the reader must decode. If the issue cannot be demonstrated
+concretely, lower its confidence or drop it.
+
+Example:
+
+- **What is wrong:** `--setup-sdks none` fails instead of skipping SDK updates.
+- **Show me:** `winapp init --setup-sdks none` -> exits nonzero in the package
+  update loop; expected: succeeds without updating SDKs.
+- **Why it matters:** documented automation stops before initialization.
+- **Smallest fix:** skip the package-update loop when the value is `none`.
+
+## Compatibility boundary
+
+Backward compatibility starts at the latest supported published release, not an
+earlier commit, review round, current PR implementation, or unreleased release
+work. Before adding or requesting an alias, fallback, migration path, legacy
+branch, or compatibility abstraction, name all three:
+
+1. The supported published version that contains the behavior.
+2. The public contract or persisted user data that depends on it.
+3. A real external consumer that would break.
+
+If any cannot be named, replace the unreleased behavior cleanly instead of
+preserving it with a shim. The only exception is a preview contract the project
+has publicly committed to support.
+
 ## Big picture
 
 Two main components:
@@ -20,6 +76,11 @@ dotnet build src/winapp-CLI/winapp.sln -c Debug
 
 # Run native CLI in-tree
 dotnet run --project src/winapp-CLI/WinApp.Cli/WinApp.Cli.csproj -- <args>
+
+# Build the NuGet packages. -SkipCliPackage builds only the UI Automation libraries, which need
+# no published CLI and so pack in seconds; without it the CLI tools package is built too and
+# artifacts/cli must already hold an x64 + arm64 publish.
+.\scripts\package-nuget.ps1 -SkipCliPackage
 
 # Update npm package after CLI changes
 cd src/winapp-npm && npm run build              # builds C# CLI + copies to npm bin
@@ -43,10 +104,15 @@ node cli.js help
 Failed to install Microsoft.Windows.SDK.BuildTools: The SSL connection could not be established
 ```
 
-**This is a known limitation, not a flaky test and not a transient outage.** Do not dismiss a
-failure on these grounds and do not re-run hoping it passes. `NugetService` falls back to
-`api.nuget.org` only when the feed environment variables are unset; point them at the internal
-feed instead — the same values `.pipelines/templates/build.yaml` uses in CI:
+**These failures are configuration, not a limitation.** With the setup below the full unit suite
+passes locally on a corp machine: **4621 tests, 0 failures**. Do not accept a NuGet-related
+failure as environmental — none of them are.
+
+Two separate mechanisms are involved, and you need both:
+
+**1. `NugetService` downloads** (`Microsoft.Windows.SDK.BuildTools` and friends) read the
+`WINAPP_NUGET_*` variables and fall back to `api.nuget.org` only when they are unset. These are
+the same values `.pipelines/templates/build.yaml` uses in CI:
 
 ```powershell
 $env:WINAPP_NUGET_FLAT_CONTAINER = 'https://pkgs.dev.azure.com/microsoft/pde-oss/_packaging/pde-oss_Internal/nuget/v3/flat2'
@@ -68,12 +134,49 @@ Invoke-RestMethod "$env:WINAPP_NUGET_FLAT_CONTAINER/microsoft.windows.sdk.buildt
     -Headers @{ Authorization = "Basic $cred" }
 ```
 
+**2. End-to-end tests that shell out to `dotnet add package Microsoft.WindowsAppSDK`** go through
+the NuGet client instead, which reads `nuget.config` and ignores `WINAPP_NUGET_*` entirely. If
+`nuget.org` is disabled and no internal feed is a registered source, they fail with
+`[ERROR] - Failed to add Microsoft.WindowsAppSDK package reference`.
+
+Do **not** fix this by adding a global package source — these tests run in `%TEMP%`, outside the
+repo, so a repo-local `nuget.config` never applies to them, and a machine-wide registration is a
+persistent change to a shared dev box. Instead point `APPDATA` at a throwaway directory holding
+the repo's own feed config, which scopes the whole thing to the session:
+
+```powershell
+$feed = 'https://pkgs.dev.azure.com/microsoft/pde-oss/_packaging/pde-oss_Internal/nuget/v3/index.json'
+
+# NuGet resolves its user-level config from %APPDATA%\NuGet\NuGet.Config, so redirecting APPDATA
+# swaps in the repo's feed list without touching the real one.
+$cfg = Join-Path $env:TEMP "winapp-nuget-$PID"
+New-Item -ItemType Directory -Path "$cfg\NuGet" -Force | Out-Null
+Copy-Item .pipelines\release-nuget.config "$cfg\NuGet\NuGet.Config"
+$env:APPDATA = $cfg
+
+# The Azure Artifacts credential provider needs the endpoint spelled out.
+# VSS_NUGET_ACCESSTOKEN alone is NOT enough here - the service index returns 401 without this.
+$env:VSS_NUGET_EXTERNAL_FEED_ENDPOINTS = @{
+    endpointCredentials = @(@{ endpoint = $feed; username = 'docker'; password = $env:VSS_NUGET_ACCESSTOKEN })
+} | ConvertTo-Json -Compress -Depth 5
+```
+
+`.pipelines/release-nuget.config` is the single source of truth for the feed URL — do not hardcode
+it somewhere else. CI does the same thing less surgically, by copying that file over
+`%APPDATA%\NuGet\NuGet.Config` on a throwaway agent.
+
+Because `APPDATA` is redirected, run this in a dedicated shell and let it end with the run.
+
 More generally: if something fails locally but passes in CI, the difference is configuration,
 not luck. Check `.pipelines/templates/build.yaml` for the environment CI provides before
 concluding a failure is environmental.
 
-## Always update documentation and samples
-When adding or changing public facing features, ensure all documentation is also updated. Places to update (but not limited to):
+## Update affected user-facing documentation
+
+When observable behavior changes, update only the surfaces that teach or expose
+that behavior. Internal refactors do not require user documentation. Never use
+documentation to explain internal implementation details or review history.
+Choose affected surfaces from:
 
 - docs\usage.md
 - docs\guides\
@@ -81,9 +184,10 @@ When adding or changing public facing features, ensure all documentation is also
 - plugins\winapp\skills\
 - README.md
 - .github\plugin\marketplace.json (and .claude-plugin\marketplace.json)
-- plugins\winapp\agents\
+- plugins\winapp\com.github.copilot\agents\
 
-If a feature is big enough and requires its own docs page, add it under docs\
+Add a page under `docs\` only when users need a new workflow or reference that
+does not fit an existing canonical page.
 
 ## Sample & guide testing
 
@@ -138,8 +242,28 @@ Sample & guide tests run via `.github/workflows/test-samples.yml` using a GitHub
 | CLI schema | `docs/cli-schema.json` |
 | Shipped agent skills | `plugins/winapp/skills/` |
 | Plugin (Copilot + Claude) | `plugins/winapp/` |
+| Copilot-specific plugin components | `plugins/winapp/com.github.copilot/` |
 | Plugin marketplaces | `.github/plugin/marketplace.json`, `.claude-plugin/marketplace.json` |
 | Samples | `samples/` (electron, cpp-app, dotnet-app, etc.) |
+| ADO pipelines | `.pipelines/` — see [`.pipelines/README.md`](.pipelines/README.md) |
+
+### Editing the ADO pipelines
+
+Agent setup (.NET, Node, internal feeds and their auth) is shared via
+`.pipelines/templates/build-env.yaml`. Change it there, not in each pipeline.
+
+1ES **release jobs cannot check out the repo**, so any step inside a `templateContext.type:
+releaseJob` job cannot call a `.ps1` from the working tree. It *can* still share logic via a
+YAML `- template:` reference, because templates are expanded at compile time — that is how
+`release.yml`'s Build-stage preflight and its `Release_GitHub` job share
+`templates/release-assets.yaml`. Prefer that over
+duplicating inline script between the two.
+
+`.pipelines/release.yml` both ships releases (from `rel/v*`) and rehearses one weekly (from
+`main`). Every publishing action is gated on `startsWith(variables['Build.SourceBranch'],
+'refs/heads/rel/v')` — derived from the branch, not a parameter, because Azure DevOps compiles
+scheduled and triggered runs with parameter *defaults*. If you add a publishing step, gate it the
+same way, and write the condition as a positive test for `rel/v*` so it fails closed.
 
 ## CLI command semantics
 
@@ -167,29 +291,76 @@ Do not edit it directly; run `scripts/build-cli.ps1` to regenerate it.
 The files under `plugins/winapp/skills/` are the hand-authored, shipped plugin
 skills shared by GitHub Copilot and Claude Code. Edit these files directly.
 
-The single plugin under `plugins/winapp/` is consumed by both hosts via their per-host manifests (`plugin.json` for Copilot, `.claude-plugin/plugin.json` for Claude) and marketplaces (`.github/plugin/marketplace.json`, `.claude-plugin/marketplace.json`). The repo-root `plugin.json` is a thin shim that keeps `copilot plugin install microsoft/WinAppCli` and the awesome-copilot listing resolving the repo as a plugin. `generate-llm-docs.ps1` keeps every manifest's `version` field in sync with the CLI version.
+The single plugin under `plugins/winapp/` conforms to the
+[Agent Plugins 1.0 specification](https://agent-plugins.org/specification):
+
+```text
+plugins/winapp/
+├── plugin.json                 # portable Agent Plugins 1.0 manifest ($schema + metadata only)
+├── skills/<skill>/SKILL.md     # portable Agent Skills (fixed location)
+├── com.github.copilot/
+│   └── agents/winapp.agent.md  # Copilot-specific component
+└── .claude-plugin/plugin.json  # Claude Code manifest (Claude is not an Agent Plugins client)
+```
+
+`plugin.json` uses the closed Agent Plugins schema, so it must contain **only**
+`$schema`, `name`, `version`, `description`, `author`, `homepage`, `repository`,
+`license`, `keywords`, and `extensions`. Component paths are auto-discovered and
+must not be declared there — adding fields like `agents` or `skills` back to it
+breaks schema conformance. Claude Code has no `com.github.copilot/` awareness, so
+`.claude-plugin/plugin.json` points its `agents` field at the same file rather than
+duplicating it.
+
+Both hosts are listed through their marketplaces (`.github/plugin/marketplace.json`,
+`.claude-plugin/marketplace.json`). The repo-root `plugin.json` is deliberately kept in
+the **legacy** Copilot manifest format (no `$schema`) so that
+`copilot plugin install microsoft/WinAppCli` and the awesome-copilot listing keep
+resolving the repo as a plugin; adding `$schema` there would make its nested
+`skills`/`agents` paths unknown fields that clients must ignore.
+`generate-llm-docs.ps1` keeps every manifest's `version` field in sync with the CLI version.
+
+`scripts/validate-plugin-package.ps1` enforces all of the above: the closed manifest
+schema, the plugin name constraints, `SKILL.md` presence and frontmatter for every
+immediate child of `skills/`, the Copilot agent's location, the Claude `agents` pointer
+resolving to a real file, and the repo-root shim staying legacy. It needs no build
+output, so run it directly while editing plugin files:
+
+```powershell
+.\scripts\validate-plugin-package.ps1
+```
+
+`validate-llm-docs.ps1` also invokes it, so CI fails on any conformance regression.
 
 ## C# service architecture guidelines
 
 ### File size limits
-- **Target**: ≤500 lines per file
-- **Soft limit**: ~800 lines — if approaching this, look for extraction opportunities
-- **Hard limit**: Do not let any single file exceed ~1,000 lines. Split into partial classes or extract services.
+
+Line counts are signals to inspect cohesion, not extraction requirements. Around
+500 lines is a useful prompt to check readability; around 800-1,000 lines deserves
+an explicit cohesion review. Never extract solely to hit a line target. Keep one
+cohesive implementation together when splitting it would create wrappers,
+indirection, or scattered state.
 
 ### Service patterns
 Use the appropriate pattern for new code:
 
 | Pattern | When to use | Example |
 |---------|------------|---------|
-| **Interface + DI service** | Stateful logic, needs dependencies | `IPriService` / `PriService` |
+| **DI service** | Stateful logic or logic with dependencies; a concrete class can be registered directly | `PriService` |
+| **Interface** | Multiple implementations, an established contract, or a necessary substitution/test boundary | `IPriService` |
 | **Static helper** | Pure functions, no DI needed | `PeHelper`, `MrtAssetHelper` |
 | **Data document** | Wraps a file/data format with typed access | `AppxManifestDocument` |
 | **Partial class** | Splitting a large service with tight internal coupling | `MsixService.Runtime.cs` |
 
 ### Separation of concerns
-- One responsibility per service/helper file
-- Extract shared logic into helpers rather than duplicating across services
-- If a method group only uses 1-2 of a service's 10+ dependencies, it's a candidate for extraction
+
+- Organize around cohesive responsibilities, not one-caller layers.
+- Prefer one cohesive implementation over several wrappers that only forward to
+  one another.
+- Extract shared logic when it creates a real reusable boundary or prevents
+  meaningful duplication.
+- Do not extract a method group merely because it uses only a few of a service's
+  dependencies.
 
 ### XML handling
 - **Use `XDocument` / `XElement`** (System.Xml.Linq) for structured XML manipulation — never regex

@@ -33,9 +33,9 @@ internal class UiSetValueCommand : Command, IShortDescription
     }
 
     public class Handler(
-        IUiSessionService sessionService,
-        IUiAutomationService uiAutomation,
-        ISelectorService selectorService,
+        IUiTargetResolver targetResolver,
+        IUiAutomation uiAutomation,
+        IUiSelectorParser selectorParser,
         IAnsiConsole ansiConsole,
         IInteractiveDesktopLock desktopLock,
         ILogger<UiSetValueCommand> logger) : UiCoordinatedAction(desktopLock, logger)
@@ -91,9 +91,9 @@ internal class UiSetValueCommand : Command, IShortDescription
 
             try
             {
-                var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
-                var selector = selectorService.Parse(selectorStr);
-                var element = await uiAutomation.FindSingleElementAsync(session, selector, cancellationToken);
+                var uiTarget = await targetResolver.ResolveAsync(app, window, cancellationToken);
+                var selector = selectorParser.Parse(selectorStr);
+                var element = await uiAutomation.FindSingleElementAsync(uiTarget, selector, cancellationToken);
 
                 if (element is null)
                 {
@@ -101,10 +101,10 @@ internal class UiSetValueCommand : Command, IShortDescription
                     return 1;
                 }
 
-                await uiAutomation.SetValueAsync(session, element, value, cancellationToken);
+                await uiAutomation.SetValueAsync(uiTarget, element, value, cancellationToken);
                 if (json)
                 {
-                    var result = new UiSetValueResult { ElementId = (element.Selector ?? element.Id ?? ""), Hwnd = session.WindowHandle };
+                    var result = new UiSetValueResult { ElementId = (element.Selector ?? element.Id ?? ""), Hwnd = uiTarget.WindowHandle };
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(result, UiJsonContext.Default.UiSetValueResult));
                 }

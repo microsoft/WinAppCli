@@ -58,9 +58,9 @@ internal class UiWaitForCommand : Command, IShortDescription
     }
 
     public class Handler(
-        IUiSessionService sessionService,
-        IUiAutomationService uiAutomation,
-        ISelectorService selectorService,
+        IUiTargetResolver targetResolver,
+        IUiAutomation uiAutomation,
+        IUiSelectorParser selectorParser,
         IPollDelay pollDelay,
         IAnsiConsole ansiConsole,
         IInteractiveDesktopLock desktopLock,
@@ -111,18 +111,18 @@ internal class UiWaitForCommand : Command, IShortDescription
 
             try
             {
-                var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
-                var selector = selectorService.Parse(selectorStr);
+                var uiTarget = await targetResolver.ResolveAsync(app, window, cancellationToken);
+                var selector = selectorParser.Parse(selectorStr);
                 var sw = Stopwatch.StartNew();
 
                 while (sw.ElapsedMilliseconds < timeout)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
-                    Models.UiElement? element;
+                    UiElement? element;
                     try
                     {
-                        element = await uiAutomation.FindSingleElementAsync(session, selector, cancellationToken);
+                        element = await uiAutomation.FindSingleElementAsync(uiTarget, selector, cancellationToken);
                     }
                     catch
                     {
@@ -156,7 +156,7 @@ internal class UiWaitForCommand : Command, IShortDescription
                             if (property is not null)
                             {
                                 // --property specified: check raw UIA property
-                                var props = await uiAutomation.GetPropertiesAsync(session, element, property, cancellationToken);
+                                var props = await uiAutomation.GetPropertiesAsync(uiTarget, element, property, cancellationToken);
                                 if (props.TryGetValue(property, out var propValue))
                                 {
                                     currentValue = propValue?.ToString();
@@ -165,7 +165,7 @@ internal class UiWaitForCommand : Command, IShortDescription
                             else
                             {
                                 // No --property: use smart fallback (TextPattern → ValuePattern → Name)
-                                currentValue = await uiAutomation.GetTextAsync(session, element, cancellationToken);
+                                currentValue = await uiAutomation.GetTextAsync(uiTarget, element, cancellationToken);
                             }
 
                             var valueMatches = contains

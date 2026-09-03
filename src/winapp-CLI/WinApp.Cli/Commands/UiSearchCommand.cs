@@ -30,9 +30,9 @@ internal class UiSearchCommand : Command, IShortDescription
     }
 
     public class Handler(
-        IUiSessionService sessionService,
-        IUiAutomationService uiAutomation,
-        ISelectorService selectorService,
+        IUiTargetResolver targetResolver,
+        IUiAutomation uiAutomation,
+        IUiSelectorParser selectorParser,
         IAnsiConsole ansiConsole,
         IInteractiveDesktopLock desktopLock,
         ILogger<UiSearchCommand> logger) : UiCoordinatedAction(desktopLock, logger)
@@ -75,9 +75,9 @@ internal class UiSearchCommand : Command, IShortDescription
 
             try
             {
-                var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
-                var selector = selectorService.Parse(selectorStr);
-                var matches = await uiAutomation.SearchAsync(session, selector, maxResults + 1, cancellationToken);
+                var uiTarget = await targetResolver.ResolveAsync(app, window, cancellationToken);
+                var selector = selectorParser.Parse(selectorStr);
+                var matches = await uiAutomation.SearchAsync(uiTarget, selector, maxResults + 1, cancellationToken);
 
                 var hasMore = matches.Length > maxResults;
                 if (hasMore)
