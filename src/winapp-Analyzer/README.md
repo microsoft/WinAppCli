@@ -96,3 +96,10 @@ by default (a user can still opt an individual rule into an error via their own
   `helpLinkUri` into `HelpLinks.cs`, and add positive / negative / FP-guard
   tests under `Microsoft.WindowsAppSDK.Analyzers.Tests/Rules/`. Update
   `RULES.md`, `CHANGELOG.md`, and the rule list in `AnalyzerReleases.Unshipped.md`.
+* **On release**, promote the rules in `AnalyzerReleases.Unshipped.md` into
+  `AnalyzerReleases.Shipped.md` under a `## Release <version>` header (matching the
+  version the `rel/v*` pipeline publishes), then clear the Unshipped list. This is
+  manual — the pipeline pushes the package but does not move these rows, and
+  `Shipped.md` otherwise stays empty and the shipped-rule history is lost. The
+  release tracker enforces it: a rule missing from both files fails the build
+  (`RS2000`).
