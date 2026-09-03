@@ -159,3 +159,65 @@ test('a real spawn failure is still wrapped with the winapp-cli context', async 
     /Failed to execute winapp-cli/
   );
 });
+
+/**
+ * Emits what Node really emits for an aborted spawn: the AbortError on 'error', and then 'close'
+ * with a non-zero code, because the child was killed.
+ */
+function abortingSpawnThatAlsoCloses(): void {
+  mock.method(childProcess, 'spawn', ((_cmd: string, _args: string[], _options: SpawnOptions) => {
+    const child = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter };
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    process.nextTick(() => {
+      const error = new Error('The operation was aborted');
+      error.name = 'AbortError';
+      child.emit('error', error);
+      child.emit('close', 1);
+    });
+    return child;
+  }) as unknown as typeof childProcess.spawn);
+}
+
+test('aborting an exitOnError call rejects without terminating the host process', async () => {
+  // Both events arrive for a single aborted spawn. The promise ignores the second settle on its own,
+  // but process.exit does not: without a gate the caller is handed an AbortError to handle and the
+  // whole process is then torn down underneath it, which for a library is the worst of both.
+  abortingSpawnThatAlsoCloses();
+  const controller = new AbortController();
+
+  const exitCalls: (number | undefined)[] = [];
+  mock.method(process, 'exit', ((code?: number) => {
+    exitCalls.push(code);
+    // Deliberately does NOT terminate, so the test can observe the bug instead of dying with it.
+    return undefined as never;
+  }) as typeof process.exit);
+
+  await assert.rejects(
+    () => callWinappCli(['ui', 'click'], { signal: controller.signal, exitOnError: true }),
+    (error: Error) => {
+      assert.equal(error.name, 'AbortError');
+      return true;
+    }
+  );
+
+  // Give the trailing 'close' every chance to be processed before asserting.
+  await new Promise((r) => setImmediate(r));
+
+  assert.deepEqual(exitCalls, [], 'a cancelled call must never call process.exit');
+});
+
+test('a late close cannot re-settle an aborted capture call', async () => {
+  abortingSpawnThatAlsoCloses();
+  const controller = new AbortController();
+
+  await assert.rejects(
+    () => callWinappCliCapture(['ui', 'click'], { signal: controller.signal }),
+    (error: Error) => {
+      assert.equal(error.name, 'AbortError', 'the first outcome is the one the caller asked about');
+      return true;
+    }
+  );
+
+  await new Promise((r) => setImmediate(r));
+});

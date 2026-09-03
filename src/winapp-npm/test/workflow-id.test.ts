@@ -1,8 +1,10 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import * as assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import childProcess = require('child_process');
 
 import { WINAPP_UI_WORKFLOW_ID } from '../src/winapp-cli-utils';
 import { uiListWindows } from '../src/winapp-commands';
@@ -44,4 +46,54 @@ test('omitting workflowId leaves an inherited value untouched', async () => {
       process.env[WINAPP_UI_WORKFLOW_ID] = before;
     }
   }
+});
+
+// An unpaired surrogate is not text. Node replaces every one of them with U+FFFD while building the
+// child environment, so "\uD800", "\uD801" and a literal "\uFFFD" all arrive at the CLI as the same
+// valid string. The CLI cannot tell them apart — it would see well-formed text and group three
+// unrelated workflows into one owner sharing one desktop turn — so the check has to happen here,
+// before the value crosses the process boundary and the distinction is lost.
+
+test('an ill-formed workflowId is rejected before the CLI is spawned', async () => {
+  const spawnCalls: unknown[] = [];
+  mock.method(childProcess, 'spawn', ((..._args: unknown[]) => {
+    spawnCalls.push(_args);
+    const child = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter };
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    process.nextTick(() => child.emit('close', 0));
+    return child;
+  }) as unknown as typeof childProcess.spawn);
+
+  for (const ill of ['\uD800', '\uDC00', 'wf-\uD801-tail', 'lead\uDFFF']) {
+    await assert.rejects(
+      () => uiListWindows({ workflowId: ill }),
+      /unpaired UTF-16 surrogate/,
+      `expected ${JSON.stringify(ill)} to be refused`
+    );
+  }
+
+  assert.equal(spawnCalls.length, 0, 'an ill-formed workflow id must never reach a child process');
+  mock.restoreAll();
+});
+
+test('well-formed workflow ids — including a real U+FFFD — are still accepted', async () => {
+  const spawnCalls: unknown[] = [];
+  mock.method(childProcess, 'spawn', ((..._args: unknown[]) => {
+    spawnCalls.push(_args);
+    const child = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter };
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    process.nextTick(() => child.emit('close', 0));
+    return child;
+  }) as unknown as typeof childProcess.spawn);
+
+  // A surrogate PAIR is one valid astral character, and U+FFFD is an ordinary character a caller is
+  // entitled to use; neither may be caught by the ill-formed check.
+  for (const ok of ['plain-workflow', '550e8400-e29b-41d4-a716-446655440000', '\uD83D\uDE80', '\uFFFD']) {
+    await uiListWindows({ workflowId: ok }).catch(() => undefined);
+  }
+
+  assert.equal(spawnCalls.length, 4, 'every well-formed workflow id must still spawn the CLI');
+  mock.restoreAll();
 });

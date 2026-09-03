@@ -129,7 +129,121 @@ internal class UiRecordCommand : Command, IShortDescription
                 return 1;
             }
 
+            // The output path is knowable now, so a recording that can never be written must not first
+            // queue for — and then occupy — a desktop turn. Only an explicit --output is checked here:
+            // the generated default carries a timestamp and a GUID, so it cannot collide, and resolving
+            // it now would produce a different name than the one Execute goes on to use.
+            if (parseResult.GetValue(SharedUiOptions.OutputOption) is { } explicitOutput)
+            {
+                return ValidateRecordingOutput(
+                    explicitOutput, frames, json, parseResult.InvocationConfiguration.Error, out _, out _);
+            }
+
             return null;
+        }
+
+        /// <summary>
+        /// Resolves and validates where a recording will be written: a usable path, no collision with an
+        /// existing artifact, and a parent directory that exists and can be written to.
+        /// </summary>
+        /// <remarks>
+        /// Shared by <c>Preflight</c> and <c>ExecuteAsync</c> rather than moved wholesale, because the two
+        /// answer different questions. Preflight rejects a doomed command before it takes a turn; the
+        /// re-check under the turn still matters because the file system can change while the command
+        /// queues, and the engine's own no-clobber check remains the final word.
+        /// </remarks>
+        /// <returns><see langword="null"/> when the path is usable, otherwise the exit code to return.</returns>
+        private int? ValidateRecordingOutput(
+            string candidate,
+            bool frames,
+            bool json,
+            TextWriter errorOut,
+            out string fullPath,
+            out string? framesDirectory)
+        {
+            fullPath = "";
+            framesDirectory = null;
+
+            try
+            {
+                // A path ending in a separator names a directory, and a recording is a file. Left to
+                // GetFullPath it resolves to a directory path that only fails much later, mid-capture.
+                if (candidate.Length > 0
+                    && (candidate.EndsWith(Path.DirectorySeparatorChar) || candidate.EndsWith(Path.AltDirectorySeparatorChar)))
+                {
+                    UiJsonError.Emit(
+                        json,
+                        UiJsonError.CodeInvalidArguments,
+                        $"Invalid output path: '{candidate}' names a directory, not a file.",
+                        errorOut: errorOut,
+                        recoveryHint: "Pass --output a file path ending in .mp4.");
+                    logger.LogError("{Symbol} Invalid output path: '{Path}' names a directory, not a file.", UiSymbols.Error, candidate);
+                    return 1;
+                }
+
+                fullPath = Path.GetFullPath(candidate);
+                framesDirectory = frames ? GetFramesDirectory(fullPath) : null;
+
+                if (Directory.Exists(fullPath))
+                {
+                    UiJsonError.Emit(
+                        json,
+                        UiJsonError.CodeInvalidArguments,
+                        $"Invalid output path: '{fullPath}' is an existing directory.",
+                        errorOut: errorOut,
+                        recoveryHint: "Pass --output a file path ending in .mp4.");
+                    logger.LogError("{Symbol} Invalid output path: '{Path}' is an existing directory.", UiSymbols.Error, fullPath);
+                    return 1;
+                }
+
+                // Applies to every recording mode, not only --frames: replacing a take that already
+                // exists loses it, and the loss is silent because the command still reports success.
+                if (Path.Exists(fullPath))
+                {
+                    UiJsonError.Emit(
+                        json,
+                        UiJsonError.CodeOutputExists,
+                        $"MP4 output already exists: {fullPath}",
+                        errorOut: errorOut,
+                        recoveryHint: "Choose a new --output path; recording never replaces existing artifacts.");
+                    logger.LogError("{Symbol} MP4 output already exists: {Path}", UiSymbols.Error, fullPath);
+                    return 1;
+                }
+
+                if (framesDirectory is not null && Path.Exists(framesDirectory))
+                {
+                    UiJsonError.Emit(
+                        json,
+                        UiJsonError.CodeOutputExists,
+                        $"Frame artifact output already exists: {framesDirectory}",
+                        errorOut: errorOut,
+                        recoveryHint: "Choose a new --output path; the derived frame directory already exists and is never replaced.");
+                    logger.LogError("{Symbol} Frame artifact output already exists: {Path}", UiSymbols.Error, framesDirectory);
+                    return 1;
+                }
+
+                var dir = Path.GetDirectoryName(fullPath);
+                if (dir is not null)
+                {
+                    Directory.CreateDirectory(dir);
+                }
+
+                return null;
+            }
+            catch (Exception pathEx) when (pathEx is ArgumentException
+                or NotSupportedException
+                or PathTooLongException
+                or IOException
+                or UnauthorizedAccessException)
+            {
+                UiJsonError.Emit(
+                    json,
+                    UiJsonError.CodeInvalidArguments,
+                    $"Invalid output path: {pathEx.Message}",
+                    errorOut: errorOut);
+                logger.LogError("{Symbol} Invalid output path: {Message}", UiSymbols.Error, pathEx.Message);
+                return 1;
+            }
         }
 
         protected override async Task<int> ExecuteAsync(ParseResult parseResult, IUiTurn turn, CancellationToken cancellationToken)
@@ -158,53 +272,20 @@ internal class UiRecordCommand : Command, IShortDescription
             _stdinMonitorStopped = false;
             try
             {
-                // Resolve output path inside error handling so path errors produce structured output.
+                // Re-resolved under the turn. Preflight already rejected a doomed explicit path before
+                // this command queued; this pass covers the generated default and anything that changed
+                // on disk while waiting, and the engine's no-clobber check is still the final word.
                 string filePath;
-                string? framesDirectory = null;
-                try
+                string? framesDirectory;
+                if (ValidateRecordingOutput(
+                        output ?? $"recording-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.mp4",
+                        frames,
+                        json,
+                        parseResult.InvocationConfiguration.Error,
+                        out filePath,
+                        out framesDirectory) is { } outputFailure)
                 {
-                    // Avoid collisions between concurrent recordings using the default path.
-                    filePath = Path.GetFullPath(
-                        output ?? $"recording-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.mp4");
-                    framesDirectory = frames ? GetFramesDirectory(filePath) : null;
-
-                    if (framesDirectory is not null)
-                    {
-                        if (Path.Exists(filePath))
-                        {
-                            UiJsonError.Emit(
-                                json,
-                                UiJsonError.CodeOutputExists,
-                                $"MP4 output already exists: {filePath}",
-                                errorOut: parseResult.InvocationConfiguration.Error,
-                                recoveryHint: "Choose a new --output path; recording never replaces existing artifacts.");
-                            logger.LogError("{Symbol} MP4 output already exists: {Path}", UiSymbols.Error, filePath);
-                            return 1;
-                        }
-                        if (Path.Exists(framesDirectory))
-                        {
-                            UiJsonError.Emit(
-                                json,
-                                UiJsonError.CodeOutputExists,
-                                $"Frame artifact output already exists: {framesDirectory}",
-                                errorOut: parseResult.InvocationConfiguration.Error,
-                                recoveryHint: "Choose a new --output path; the derived frame directory already exists and is never replaced.");
-                            logger.LogError("{Symbol} Frame artifact output already exists: {Path}", UiSymbols.Error, framesDirectory);
-                            return 1;
-                        }
-                    }
-
-                    var dir = Path.GetDirectoryName(filePath);
-                    if (dir is not null)
-                    {
-                        Directory.CreateDirectory(dir);
-                    }
-                }
-                catch (Exception pathEx)
-                {
-                    UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, $"Invalid output path: {pathEx.Message}");
-                    logger.LogError("{Symbol} Invalid output path: {Message}", UiSymbols.Error, pathEx.Message);
-                    return 1;
+                    return outputFailure;
                 }
 
                 var uiTarget = await targetResolver.ResolveAsync(app, window, cancellationToken);

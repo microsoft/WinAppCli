@@ -256,6 +256,9 @@ public partial class UiCommandTests
         _fakeSystemQuery.ProcessIdForWindowResult = 4321;
         _fakeSystemQuery.WindowTextResult = "Main Window";
         _fakeWindowFinder.OwnedWindowsResult = [((nint)0xD1A, 4321, "Owned Dialog")];
+        // A real owned dialog reports the app window as its GW_OWNER; that link is what attributes it
+        // to this application rather than to whatever process happens to host it.
+        _fakeSystemQuery.WindowOwnerByHwnd[0xD1A] = (nint)2748;
         _fakeUia.ScreenshotResult = (new byte[4], 1, 1);
         var path = ShotPath();
 

@@ -80,7 +80,74 @@ internal class UiScreenshotCommand : Command, IShortDescription
                 return 1;
             }
 
-            return null;
+            // Where the PNG goes is knowable now. Screenshot takes the desktop exclusively, so a command
+            // that cannot possibly write its file must not first queue for a turn, foreground a window
+            // and capture pixels only to fail at the last step — the user waited and every other
+            // workflow waited too, for nothing.
+            return ValidateScreenshotOutput(
+                parseResult.GetValue(SharedUiOptions.OutputOption) ?? DefaultOutputFileName,
+                json,
+                parseResult.InvocationConfiguration.Error);
+        }
+
+        private const string DefaultOutputFileName = "screenshot.png";
+
+        /// <summary>
+        /// Checks that the screenshot can actually be written: a file-shaped path, not an existing
+        /// directory, and a parent directory that exists or can be created.
+        /// </summary>
+        /// <remarks>
+        /// Overwriting an existing <em>file</em> stays deliberate — unlike a recording, a screenshot is
+        /// cheap to retake and callers rely on writing to a fixed name repeatedly. The write in
+        /// <c>PublishAsync</c> keeps its own directory creation and error handling, because the file
+        /// system can change while the command waits for its turn.
+        /// </remarks>
+        /// <returns><see langword="null"/> when the path is usable, otherwise the exit code to return.</returns>
+        private int? ValidateScreenshotOutput(string candidate, bool json, TextWriter errorOut)
+        {
+            try
+            {
+                if (candidate.Length > 0
+                    && (candidate.EndsWith(Path.DirectorySeparatorChar) || candidate.EndsWith(Path.AltDirectorySeparatorChar)))
+                {
+                    return InvalidOutput($"'{candidate}' names a directory, not a file.");
+                }
+
+                var fullPath = Path.GetFullPath(candidate);
+
+                if (Directory.Exists(fullPath))
+                {
+                    return InvalidOutput($"'{fullPath}' is an existing directory.");
+                }
+
+                var dir = Path.GetDirectoryName(fullPath);
+                if (dir is not null)
+                {
+                    Directory.CreateDirectory(dir);
+                }
+
+                return null;
+            }
+            catch (Exception pathEx) when (pathEx is ArgumentException
+                or NotSupportedException
+                or PathTooLongException
+                or IOException
+                or UnauthorizedAccessException)
+            {
+                return InvalidOutput(pathEx.Message);
+            }
+
+            int InvalidOutput(string detail)
+            {
+                UiJsonError.Emit(
+                    json,
+                    UiJsonError.CodeInvalidArguments,
+                    $"Invalid output path: {detail}",
+                    errorOut: errorOut,
+                    recoveryHint: "Pass --output a writable file path ending in .png.");
+                logger.LogError("{Symbol} Invalid output path: {Detail}", UiSymbols.Error, detail);
+                return 1;
+            }
         }
 
         protected override async Task<int> ExecuteAsync(ParseResult parseResult, IUiTurn turn, CancellationToken cancellationToken)
@@ -145,6 +212,27 @@ internal class UiScreenshotCommand : Command, IShortDescription
         }
 
         /// <summary>Pixels captured by one pass, plus everything needed to publish them.</summary>
+        /// <summary>
+        /// One window the pass intends to capture, together with where it came from.
+        /// </summary>
+        /// <param name="ActualPid">
+        /// The process that currently owns the HWND. This is what the engine is handed, because it is
+        /// what the window really belongs to.
+        /// </param>
+        /// <param name="ExpectedAppPid">
+        /// The process of the application this window was discovered *for*. For an app's own window that
+        /// is the same process; for a cross-process owned dialog — a common-item file picker, a system
+        /// print dialog — it is the app that owns the dialog, not the host that runs it.
+        /// </param>
+        /// <remarks>
+        /// The distinction is the whole point. Validating an owned dialog against its own current PID is
+        /// close to vacuous: any live window passes, including a recycled handle that now belongs to a
+        /// different dialog in the same system host and has no relationship to this app at all.
+        /// Validating against <paramref name="ExpectedAppPid"/> makes the owner chain prove the window
+        /// still belongs to the application being captured.
+        /// </remarks>
+        private readonly record struct CaptureCandidate(nint Hwnd, int ActualPid, int ExpectedAppPid, string Title);
+
         /// <param name="ExitCode">Set when the pass already reported a failure and produced no pixels.</param>
         private sealed record CapturePass(
             int? ExitCode,
@@ -189,15 +277,14 @@ internal class UiScreenshotCommand : Command, IShortDescription
             if (selector is null)
             {
                 var targetWindowHwnd = (nint)singleTarget.WindowHandle;
-                var ownedWindows = ownedWindowFinder.FindOwnedWindows(
-                    [(targetWindowHwnd, singleTarget.ProcessId, singleTarget.WindowTitle ?? "")]);
+                var appWindows = new List<(nint Hwnd, int Pid, string Title)>
+                {
+                    (targetWindowHwnd, singleTarget.ProcessId, singleTarget.WindowTitle ?? ""),
+                };
+                var ownedWindows = ownedWindowFinder.FindOwnedWindows(appWindows);
                 if (ownedWindows.Count > 0)
                 {
-                    var allWindows = new List<(nint Hwnd, int Pid, string Title)>
-                    {
-                        (targetWindowHwnd, singleTarget.ProcessId, singleTarget.WindowTitle ?? ""),
-                    };
-                    allWindows.AddRange(ownedWindows);
+                    var allWindows = ToCandidates(appWindows, ownedWindows);
                     return await CaptureWindowsAsync(allWindows, singleTarget, json, captureScreen, focus, ct).ConfigureAwait(false);
                 }
             }
@@ -223,7 +310,7 @@ internal class UiScreenshotCommand : Command, IShortDescription
         }
 
         private async Task<CapturePass> CaptureWindowsAsync(
-            List<(nint Hwnd, int Pid, string Title)> windows,
+            List<CaptureCandidate> windows,
             UiTarget uiTarget,
             bool json,
             bool captureScreen,
@@ -250,9 +337,13 @@ internal class UiScreenshotCommand : Command, IShortDescription
                 var title = string.IsNullOrEmpty(w.Title) ? "(no title)" : w.Title;
 
                 // Each handle was discovered before this command waited for the desktop, so any of them
-                // could have closed and had its handle reused since. Capturing an unvalidated handle
-                // would composite another application's pixels into an image reported as this target's.
-                var state = DesktopTargetValidation.ClassifyTargetWindow(systemQuery, w.Hwnd, w.Pid);
+                // could have closed and had its handle reused since. The check is against the process the
+                // window was discovered FOR, not the one that currently owns it: for a cross-process
+                // owned dialog those differ, and comparing it with its own PID would accept any live
+                // window in the same system host — including a recycled handle with no connection to
+                // this app. Validating against the originating process makes the owner chain prove the
+                // dialog still belongs to it.
+                var state = DesktopTargetValidation.ClassifyTargetWindow(systemQuery, w.Hwnd, w.ExpectedAppPid);
                 if (state != DesktopTargetValidation.TargetWindowState.Valid)
                 {
                     var reason = state == DesktopTargetValidation.TargetWindowState.Gone
@@ -279,7 +370,9 @@ internal class UiScreenshotCommand : Command, IShortDescription
                 {
                     var windowTarget = new UiTarget
                     {
-                        ProcessId = w.Pid,
+                        // The engine is handed the process that really owns the window, which for an
+                        // owned dialog is its host rather than the app it was discovered for.
+                        ProcessId = w.ActualPid,
                         ProcessName = uiTarget.ProcessName,
                         WindowTitle = title,
                         WindowHandle = w.Hwnd,
@@ -343,7 +436,7 @@ internal class UiScreenshotCommand : Command, IShortDescription
         /// </summary>
         private async Task<int> PublishAsync(CapturePass pass, string? output, bool json, CancellationToken ct)
         {
-            var filePath = output ?? "screenshot.png";
+            var filePath = output ?? DefaultOutputFileName;
             var captures = pass.Captures;
 
             var pngBytes = pass.IsComposite
@@ -455,7 +548,7 @@ internal class UiScreenshotCommand : Command, IShortDescription
         /// Discover all windows for the target app, including cross-process owned windows.
         /// Returns null if we can't determine the app's windows (e.g., no --app provided).
         /// </summary>
-        private List<(nint Hwnd, int Pid, string Title)>? DiscoverAllWindows(string? app, long? window)
+        private List<CaptureCandidate>? DiscoverAllWindows(string? app, long? window)
         {
             List<(nint Hwnd, int Pid, string Title)> appWindows;
 
@@ -502,9 +595,52 @@ internal class UiScreenshotCommand : Command, IShortDescription
 
             // Also find cross-process owned windows
             var ownedWindows = ownedWindowFinder.FindOwnedWindows(appWindows);
-            appWindows.AddRange(ownedWindows);
 
-            return appWindows.Count > 1 ? appWindows : null;
+            return ToCandidates(appWindows, ownedWindows) is { Count: > 1 } candidates ? candidates : null;
+        }
+
+        /// <summary>
+        /// Combines an app's own windows with the dialogs they own, recording for each the application
+        /// process it was discovered for.
+        /// </summary>
+        /// <remarks>
+        /// The finder reports only <em>direct</em> owners — it admits a window when a single
+        /// <c>GW_OWNER</c> hop lands inside the app window set — so the owner is re-read here and matched
+        /// back to that set. A dialog whose owner cannot be matched is dropped rather than guessed at:
+        /// without provenance there is nothing to validate it against later, and capturing it would put
+        /// an unattributed window into an image labelled as this application's.
+        /// </remarks>
+        private List<CaptureCandidate> ToCandidates(
+            List<(nint Hwnd, int Pid, string Title)> appWindows,
+            List<(nint Hwnd, int Pid, string Title)> ownedWindows)
+        {
+            var appPidByHwnd = new Dictionary<nint, int>();
+            foreach (var w in appWindows)
+            {
+                appPidByHwnd[w.Hwnd] = w.Pid;
+            }
+
+            // An app window stands for itself, so its expected process is its own.
+            var candidates = appWindows
+                .Select(w => new CaptureCandidate(w.Hwnd, w.Pid, w.Pid, w.Title))
+                .ToList();
+
+            foreach (var owned in ownedWindows)
+            {
+                var ownerHwnd = systemQuery.GetWindowOwner(owned.Hwnd);
+                if (ownerHwnd != 0 && appPidByHwnd.TryGetValue(ownerHwnd, out var expectedAppPid))
+                {
+                    candidates.Add(new CaptureCandidate(owned.Hwnd, owned.Pid, expectedAppPid, owned.Title));
+                }
+                else
+                {
+                    logger.LogDebug(
+                        "Skipping owned window {Hwnd}: its owner is no longer one of the application's windows.",
+                        owned.Hwnd);
+                }
+            }
+
+            return candidates;
         }
 
         private static byte[] EncodePng(byte[] bgraPixels, int width, int height)

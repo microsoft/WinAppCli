@@ -93,7 +93,25 @@ internal sealed class UiOwnerResolver : IUiOwnerResolver
                 $"Set {WorkflowIdVariable} to a short opaque value such as a GUID.");
         }
 
-        return new UiOwnerIdentity(UiOwnerKind.Workflow, ComputeWorkflowKey(raw));
+        return ResolveWorkflowKey(raw);
+    }
+
+    private static UiOwnerIdentity ResolveWorkflowKey(string raw)
+    {
+        try
+        {
+            return new UiOwnerIdentity(UiOwnerKind.Workflow, ComputeWorkflowKey(raw));
+        }
+        catch (EncoderFallbackException)
+        {
+            // An unpaired surrogate is not text. Encoding it with the usual replacement behaviour turns
+            // every such value into U+FFFD, so "\uD800", "\uD801" and a literal "\uFFFD" would all hash
+            // to one key and three unrelated workflows would silently share an owner — and the desktop.
+            throw new UiCoordinationException(
+                UiCoordinationErrorCodes.InvalidWorkflowId,
+                $"{WorkflowIdVariable} is not valid text: it contains an unpaired UTF-16 surrogate.",
+                $"Set {WorkflowIdVariable} to a plain text value identifying one logical UI workflow, for example a GUID.");
+        }
     }
 
     /// <summary>
@@ -101,8 +119,19 @@ internal sealed class UiOwnerResolver : IUiOwnerResolver
     /// to contain a path, ticket number or user name never reaches disk, and the domain prefix keeps a
     /// named workflow from ever colliding with an anonymous owner.
     /// </summary>
+    /// <remarks>
+    /// The encoding is strict on purpose. <see cref="Encoding.UTF8"/> substitutes U+FFFD for anything
+    /// it cannot encode, which would map distinct ill-formed ids onto one key; throwing instead makes
+    /// that collision structurally impossible rather than merely unlikely.
+    /// </remarks>
+    /// <exception cref="EncoderFallbackException">
+    /// <paramref name="rawWorkflowId"/> is not well-formed UTF-16.
+    /// </exception>
     internal static string ComputeWorkflowKey(string rawWorkflowId)
-        => Hash(Encoding.UTF8.GetBytes(WorkflowDomain + rawWorkflowId));
+        => Hash(s_strictUtf8.GetBytes(WorkflowDomain + rawWorkflowId));
+
+    /// <summary>UTF-8 that refuses to encode ill-formed UTF-16 rather than substituting U+FFFD.</summary>
+    private static readonly UTF8Encoding s_strictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     /// <summary>
     /// A fresh key per call. Two no-ID commands are therefore different owners even when they come from
