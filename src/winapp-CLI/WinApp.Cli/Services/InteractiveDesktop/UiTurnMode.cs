@@ -37,25 +37,25 @@ internal enum UiTurnMode
     DesktopExclusive,
 }
 
-/// <summary>How the logical workflow owner behind a command was resolved (spec §5).</summary>
+/// <summary>How the logical workflow owner behind a command was resolved.</summary>
+/// <remarks>
+/// The two values are the two tiers. Arbitration applies to both; only <see cref="Workflow"/> carries
+/// continuity across invocations.
+/// </remarks>
 [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<UiOwnerKind>))]
 internal enum UiOwnerKind
 {
-    /// <summary>Resolved from <c>WINAPP_UI_OWNER_ID</c>. Groups cooperating processes explicitly.</summary>
-    [System.Text.Json.Serialization.JsonStringEnumMemberName("explicit")]
-    Explicit,
-
     /// <summary>
-    /// Derived from the immediate parent PID plus that parent's start time, which groups the commands of
-    /// one long-lived shell or script. Never walks farther up the tree — a higher ancestor may be shared
-    /// by unrelated workflows.
+    /// Resolved from <c>WINAPP_UI_WORKFLOW_ID</c>. Groups cooperating processes explicitly and earns a
+    /// post-command idle grace so a burst of commands reads as one workflow.
     /// </summary>
-    [System.Text.Json.Serialization.JsonStringEnumMemberName("parent")]
-    Parent,
+    [System.Text.Json.Serialization.JsonStringEnumMemberName("workflow")]
+    Workflow,
 
     /// <summary>
-    /// A unique one-command owner used when parent inspection fails. It queues normally but receives no
-    /// post-command idle grace.
+    /// A unique one-command owner minted when no workflow id is set. It queues and arbitrates like any
+    /// other owner, but receives no post-command idle grace and hands the desktop off the moment it
+    /// completes.
     /// </summary>
     [System.Text.Json.Serialization.JsonStringEnumMemberName("anonymous")]
     Anonymous,

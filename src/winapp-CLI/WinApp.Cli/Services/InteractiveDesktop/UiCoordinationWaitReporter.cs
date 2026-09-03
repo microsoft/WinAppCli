@@ -27,8 +27,7 @@ internal readonly record struct UiWaitDiagnostics(
 internal sealed class UiCoordinationWaitReporter(
     IAnsiConsole console,
     UiCoordinationOutputMode outputMode,
-    string operation,
-    int? parentProcessId)
+    string operation)
 {
     /// <summary>Delay before the first status line.</summary>
     internal const int FirstReportAfterMs = 1_000;
@@ -70,13 +69,9 @@ internal sealed class UiCoordinationWaitReporter(
                   : $" running {Markup.Escape(diagnostics.ActiveOperation)}")
             : "no active winapp command";
 
-        var parent = parentProcessId is { } pid
-            ? $"parent PID {pid.ToString(CultureInfo.InvariantCulture)}"
-            : "parent PID unknown";
-
         return "[grey]Waiting for the desktop for " + seconds + "s — " +
                Markup.Escape(operation) + "; " + active + "; " +
-               $"queue depth {diagnostics.QueueDepth}, {diagnostics.CommandsAhead} ahead; " +
-               parent + ". Press Ctrl+C to cancel.[/]";
+               $"queue depth {diagnostics.QueueDepth}, {diagnostics.CommandsAhead} ahead" +
+               ". Press Ctrl+C to cancel.[/]";
     }
 }

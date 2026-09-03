@@ -45,6 +45,9 @@ DBG_EXCEPTION_NOT_HANDLED
 GetShortPathName
 GetForegroundWindow
 SetForegroundWindow
+IsIconic
+ShowWindow
+SHOW_WINDOW_CMD
 MiniDumpWriteDump
 MINIDUMP_TYPE
 MINIDUMP_EXCEPTION_INFORMATION
@@ -58,8 +61,3 @@ GetHandleInformation
 SetHandleInformation
 STD_HANDLE
 HANDLE_FLAGS
-CreateToolhelp32Snapshot
-Process32First
-Process32Next
-PROCESSENTRY32
-CREATE_TOOLHELP_SNAPSHOT_FLAGS

@@ -93,7 +93,7 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
         }
     }
 
-    private LivenessProbe CreateProbe() => new LivenessProbe(_participants, _processInspector);
+    private LivenessProbe CreateProbe() => new LivenessProbe(_participants);
 
     /// <summary>
     /// Waits for <c>active.lock</c>. Never steals it from a live process — a hung owner is recovered by
@@ -138,15 +138,12 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
         }
     }
 
-    /// <summary>Composes lease-backed participant liveness with process liveness for parent owners.</summary>
-    private sealed class LivenessProbe(IParticipantRegistry participants, IProcessInspector processInspector)
+    /// <summary>Lease-backed participant liveness, the only basis for pruning.</summary>
+    private sealed class LivenessProbe(IParticipantRegistry participants)
         : ICoordinationLivenessProbe
     {
         public bool IsParticipantLive(int processId, long startTicksUtc)
             => participants.IsParticipantLive(processId, startTicksUtc);
-
-        public bool? IsParentAlive(int processId, long startTicksUtc)
-            => processInspector.IsProcessAlive(processId, startTicksUtc);
     }
 
     /// <summary>
@@ -331,7 +328,7 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
             if (admission.Admission == UiAdmission.Detached)
             {
                 // BeginObserve re-normalizes, so ownership can lapse between the check above and here —
-                // an expiring grace, or a dead parent reservation being released. Nothing was added to
+                // an expiring grace released by normalization. Nothing was added to
                 // the state, so the lease must go too: keeping it open would publish liveness for a
                 // participant with no entry, and Complete would later adjust a foreign owner's turn.
                 _lease.Dispose();
@@ -397,7 +394,7 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
             }
 
             var reporter = new UiCoordinationWaitReporter(
-                coordinator._console, outputMode, participant.Operation, owner.ParentPid);
+                coordinator._console, outputMode, participant.Operation);
 
             while (true)
             {

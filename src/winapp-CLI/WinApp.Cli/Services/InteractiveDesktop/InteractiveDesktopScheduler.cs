@@ -15,12 +15,6 @@ internal interface ICoordinationLivenessProbe
     /// reported alive and keeps its queue position.
     /// </summary>
     bool IsParticipantLive(int processId, long startTicksUtc);
-
-    /// <summary>
-    /// Whether a parent-derived owner's shell is still running. <see langword="null"/> means liveness
-    /// could not be determined, which must never be treated as death.
-    /// </summary>
-    bool? IsParentAlive(int processId, long startTicksUtc);
 }
 
 /// <summary>Identity of the command this process is registering.</summary>
@@ -76,16 +70,14 @@ internal sealed class InteractiveDesktopScheduler(IMonotonicClock clock)
     internal const int MaxGlobalWaiters = 64;
 
     /// <summary>
-    /// Applies section 10.1 normalization: prune dead participants, release a parent-derived
-    /// reservation whose shell died, expire an idle turn, promote the oldest live waiter, and
-    /// re-evaluate owner-local eligibility.
+    /// Applies section 10.1 normalization: prune dead participants, expire an idle turn, promote the
+    /// oldest live waiter, and re-evaluate owner-local eligibility.
     /// </summary>
     /// <returns><see langword="true"/> when anything changed and the state must be published.</returns>
     public bool Normalize(InteractiveDesktopState state, ICoordinationLivenessProbe probe)
     {
         var changed = ClampStaleDeadline(state);
         changed |= PruneDeadParticipants(state, probe);
-        changed |= ReleaseDeadParentReservation(state, probe);
         changed |= ExpireIdleTurn(state);
         changed |= PromoteOldestWaiter(state, probe);
         changed |= AbsorbSameOwnerWaiters(state);
@@ -209,8 +201,6 @@ internal sealed class InteractiveDesktopScheduler(IMonotonicClock clock)
             OwnerKind = owner.Kind,
             Pid = participant.ProcessId,
             ProcessStartTicksUtc = participant.StartTicksUtc,
-            DiagnosticParentPid = owner.ParentPid,
-            ParentStartTicksUtc = owner.ParentStartTicksUtc,
             Operation = participant.Operation,
             Mode = mode,
         });
@@ -273,18 +263,12 @@ internal sealed class InteractiveDesktopScheduler(IMonotonicClock clock)
 
         if (state.Owner is not null && OwnerMatches(state.Owner, owner))
         {
-            if (renewGrace && owner.Kind != UiOwnerKind.Anonymous)
-            {
-                // Stored unconditionally but only consulted once OwnerCommands is empty, so a long-running
-                // sibling command is unaffected.
-                state.IdleExpiresTick64 = clock.NowTicks64 + IdleGraceMs;
-            }
-            else if (owner.Kind == UiOwnerKind.Anonymous)
-            {
-                // A one-command owner has no shell that could issue a follow-up, so holding the desktop for
-                // another four seconds would only delay everyone else.
-                state.IdleExpiresTick64 = clock.NowTicks64;
-            }
+            // The two tiers differ only here. A named workflow banks a grace so its next command finds
+            // the desktop still reserved; an anonymous one-shot has nothing that could issue a follow-up,
+            // so holding the desktop any longer would only delay everyone else.
+            state.IdleExpiresTick64 = renewGrace && owner.HasContinuity
+                ? clock.NowTicks64 + IdleGraceMs
+                : clock.NowTicks64;
         }
 
         Normalize(state, probe);
@@ -374,8 +358,6 @@ internal sealed class InteractiveDesktopScheduler(IMonotonicClock clock)
     {
         Kind = owner.Kind,
         Key = owner.Key,
-        DiagnosticParentPid = owner.ParentPid,
-        ParentStartTicksUtc = owner.ParentStartTicksUtc,
     };
 
     private static bool OwnerMatches(OwnerRecord record, UiOwnerIdentity owner)
@@ -399,35 +381,8 @@ internal sealed class InteractiveDesktopScheduler(IMonotonicClock clock)
     }
 
     /// <summary>
-    /// A parent-derived owner exists only to group one shell's commands. Once that shell is gone no
-    /// further command can arrive, so the reservation is released immediately instead of idling for the
-    /// full grace. An <em>unreadable</em> parent keeps the normal deadline (spec §5.2).
+    /// Whether the idle turn expired.
     /// </summary>
-    private bool ReleaseDeadParentReservation(InteractiveDesktopState state, ICoordinationLivenessProbe probe)
-    {
-        if (state.Owner is not { Kind: UiOwnerKind.Parent } owner
-            || state.OwnerCommands.Count > 0
-            || owner.DiagnosticParentPid is not { } parentPid
-            || owner.ParentStartTicksUtc is not { } parentStart)
-        {
-            return false;
-        }
-
-        if (probe.IsParentAlive(parentPid, parentStart) is not false)
-        {
-            return false;
-        }
-
-        var now = clock.NowTicks64;
-        if (state.IdleExpiresTick64 <= now)
-        {
-            return false;
-        }
-
-        state.IdleExpiresTick64 = now;
-        return true;
-    }
-
     private bool ExpireIdleTurn(InteractiveDesktopState state)
     {
         // Any live entry — waiting or running — counts as owner activity, so the turn is never taken
@@ -467,8 +422,6 @@ internal sealed class InteractiveDesktopScheduler(IMonotonicClock clock)
         {
             Kind = oldest.OwnerKind,
             Key = oldest.OwnerKey,
-            DiagnosticParentPid = oldest.DiagnosticParentPid,
-            ParentStartTicksUtc = oldest.ParentStartTicksUtc,
         });
         return true;
     }

@@ -9,8 +9,8 @@ namespace WinApp.Cli.Services.InteractiveDesktop;
 /// </summary>
 internal static class UiCoordinationErrorCodes
 {
-    /// <summary><c>WINAPP_UI_OWNER_ID</c> was set but empty/whitespace or longer than 256 UTF-16 units.</summary>
-    public const string InvalidOwnerId = "invalid_ui_owner_id";
+    /// <summary><c>WINAPP_UI_WORKFLOW_ID</c> was set but empty/whitespace or longer than 256 UTF-16 units.</summary>
+    public const string InvalidWorkflowId = "invalid_ui_workflow_id";
 
     /// <summary>
     /// Coordination state could not be read, published, or safely recovered — for example an unknown

@@ -88,27 +88,14 @@ internal sealed class InteractiveDesktopState
 /// <summary>The owner currently holding the turn.</summary>
 internal sealed class OwnerRecord
 {
-    /// <summary>How this owner was resolved. Drives the idle-grace and parent-liveness rules.</summary>
+    /// <summary>How this owner was resolved. Drives whether the turn earns a post-command idle grace.</summary>
     public UiOwnerKind Kind { get; set; }
 
     /// <summary>
     /// Lowercase hex SHA-256 of the domain-separated owner payload. Never the raw
-    /// <c>WINAPP_UI_OWNER_ID</c>, and never emitted in output, logs or telemetry.
+    /// <c>WINAPP_UI_WORKFLOW_ID</c>, and never emitted in output, logs or telemetry.
     /// </summary>
     public string Key { get; set; } = "";
-
-    /// <summary>
-    /// Parent PID for <see cref="UiOwnerKind.Parent"/> owners. Used to release an idle reservation
-    /// immediately when the parent shell is confirmed dead, and shown by <c>--verbose</c> waiting
-    /// output. Local diagnostics only — never telemetry.
-    /// </summary>
-    public int? DiagnosticParentPid { get; set; }
-
-    /// <summary>
-    /// The parent's <c>Process.StartTime.ToUniversalTime().Ticks</c>, so a recycled PID is not mistaken
-    /// for the original parent.
-    /// </summary>
-    public long? ParentStartTicksUtc { get; set; }
 
     /// <summary>Unknown properties from a newer writer, preserved verbatim on rewrite.</summary>
     [JsonExtensionData]
@@ -163,12 +150,6 @@ internal sealed class WaiterEntry
 
     /// <summary>The owning process's <c>Process.StartTime.ToUniversalTime().Ticks</c>.</summary>
     public long ProcessStartTicksUtc { get; set; }
-
-    /// <summary>Parent PID of the waiting process, for <c>--verbose</c> waiting output. Never telemetry.</summary>
-    public int? DiagnosticParentPid { get; set; }
-
-    /// <summary>The parent's start ticks, carried so a promoted parent-derived owner keeps its liveness check.</summary>
-    public long? ParentStartTicksUtc { get; set; }
 
     /// <summary>The owner kind to install when this waiter is promoted.</summary>
     public UiOwnerKind OwnerKind { get; set; }
