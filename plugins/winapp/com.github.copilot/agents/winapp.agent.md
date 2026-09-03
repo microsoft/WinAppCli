@@ -105,8 +105,9 @@ Building a WinUI 3 UI and need to find the right control or a working sample?
 **Purpose:** Create a brand-new **WinUI** app from an official Windows App SDK `dotnet new` template. Unlike `winapp init` (which adds Windows support to an *existing* project), `new` scaffolds a project from scratch. Most WinUI templates already include Windows packaging and identity (`Package.appxmanifest`) — the exception is the `lib` class-library template, which has no app manifest — so no separate `winapp init` step is needed afterward.
 **When to use:** The user has no project yet and wants to start a WinUI app.
 **Behavior:** Interactive by default (pick a template, then a name; output defaults to `./<name>`). Automatically uses defaults in non-interactive environments. Requires the .NET SDK — fails fast with guidance if it's missing (winapp does not install toolchains). Installs the WinUI template pack on demand and delegates scaffolding to `dotnet new`.
+**Template styles:** **XAML** templates (`winui`, `winui-navview`, `winui-tabview`, `winui-mvvm`) use markup plus a C# code-behind. **Reactor** templates (`reactor`, `reactor-mvu`, `reactor-navview`, `reactor-tabview`) are pure C# with no XAML, using an MVU pattern. Reactor is **experimental** — it references prerelease `Microsoft.UI.Reactor` packages whose APIs can change or be removed, and it requires the .NET 10 SDK or newer. Never choose a Reactor template unless the user explicitly asks for Reactor or MVU; `winapp new` marks them `(Experimental)` in `--list`, reports `"Experimental": true` in `--json`, and never defaults to one.
 **Key options:**
-- `-t, --template <short-name>` — WinUI template short name from the live catalog (e.g. `winui`, `winui-navview`, `winui-tabview`, `winui-mvvm`, `winui-lib`, `winui-unittest`; default: `winui`). Run `winapp new --list` to see the current set.
+- `-t, --template <short-name>` — WinUI template short name from the live catalog (e.g. `winui`, `winui-navview`, `winui-tabview`, `winui-mvvm`, `winui-lib`, `winui-unittest`, or an experimental `reactor*` template; default: `winui`). Run `winapp new --list` to see the current set.
 - `-n, --name <name>` — app/project name (default: derived from `--output`, else `WinUIApp`)
 - `-o, --output <path>` — directory to create the app in (default: `./<name>`)
 - `--use-defaults` / `--no-prompt` — skip prompts (blank template, default name)
@@ -275,7 +276,7 @@ Building a WinUI 3 UI and need to find the right control or a working sample?
 - `--refresh` — re-fetch the corpus from GitHub
 - `--json` — structured, agent-friendly output
 
-**Note:** The corpus is fetched from GitHub on first use and cached per-user, so the **first run requires network access**.
+**Note:** The corpus ships inside the CLI, so `find-ui` works with **no network access**. When GitHub is reachable the CLI refreshes from it and caches per-user; when it isn't, results come from the built-in corpus and `--json` reports `"corpus": "embedded"`.
 
 ### `winapp ui` — UI automation commands
 **Purpose:** Inspect and interact with running Windows app UIs using Windows UI Automation (UIA).

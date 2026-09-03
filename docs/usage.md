@@ -142,7 +142,7 @@ winapp new [options]
 
 **Options:**
 
-- `-t, --template <short-name>` - Template short name (e.g. `winui`, `winui-navview`, `winui-mvvm`, `winui-lib`, `winui-unittest`). Validated against the installed pack at run time; run `winapp new --list` to see all. Default: `winui` (blank app).
+- `-t, --template <short-name>` - Template short name (e.g. `winui`, `winui-navview`, `winui-mvvm`, `winui-lib`, `winui-unittest`, or an experimental Reactor template such as `reactor` or `reactor-mvu`). Validated against the installed pack at run time; run `winapp new --list` to see all. Default: `winui` (blank XAML app).
 - `-n, --name <name>` - Name for the new app/project (default: derived from `--output`, else `WinUIApp`)
 - `-o, --output <path>` - Directory to create the app in (default: `./<name>`)
 - `--use-defaults`, `--no-prompt` - Do not prompt; use defaults (blank template, name from `--output`/`--name`, and keep the installed template pack rather than updating it)
@@ -153,18 +153,24 @@ winapp new [options]
 
 **Templates:**
 
-The template list is read live from the installed pack, so it always reflects the version you have — run `winapp new --list` to see the current set. Common templates:
+The pack ships two styles of WinUI app. **XAML** templates define the UI in markup with a C# code-behind. **Reactor** templates are pure C# with no XAML, using an MVU (Model-View-Update) pattern. The template list is read live from the installed pack, so it always reflects the version you have — run `winapp new --list` to see the current set. Common templates:
 
 | Short name | Description |
 |------------|-------------|
-| `winui` | Minimal blank WinUI 3 app (MSIX packaging) |
-| `winui-navview` | NavigationView starter app |
-| `winui-tabview` | TabView starter app |
-| `winui-mvvm` | MVVM app (CommunityToolkit.Mvvm) |
+| `winui` | Minimal blank XAML app (MSIX packaging) |
+| `winui-navview` | XAML NavigationView starter app |
+| `winui-tabview` | XAML TabView starter app |
+| `winui-mvvm` | XAML MVVM app (CommunityToolkit.Mvvm) |
 | `winui-lib` | WinUI 3 class library |
 | `winui-unittest` | Packaged MSTest app; tests run when it's launched |
+| `reactor` | **Experimental.** Blank Reactor app — pure C#, no XAML |
+| `reactor-mvu` | **Experimental.** Reactor app demonstrating the MVU pattern |
+| `reactor-navview` | **Experimental.** Reactor NavigationView starter app |
+| `reactor-tabview` | **Experimental.** Reactor TabView starter app |
 
-Each template's canonical short name is the first alias `dotnet new` lists for it; any listed alias (e.g. `winui3`, `wasdk-single`) is also accepted. When run inside an existing WinUI project, `dotnet new` also surfaces **item** templates (e.g. a blank page), which `winapp new` adds into the current project rather than creating a new one.
+> **Reactor templates are experimental.** They reference the prerelease `Microsoft.UI.Reactor` packages, whose APIs can change or be removed in a future release. `winapp new` marks them **(Experimental)** in `--list` and in the interactive picker, sets `"Experimental": true` in `--json`, and prints a warning after scaffolding one. They are never chosen as the default template. Reactor also requires the **.NET 10 SDK or newer**; on an older SDK `winapp new` fails up front with the version it needs rather than scaffolding a project you can't build.
+
+Each template's canonical short name is the first alias `dotnet new` lists for it; any listed alias (e.g. `winui3`, `wasdk-single`, `winui-reactor`) is also accepted. When run inside an existing WinUI project, `dotnet new` also surfaces **item** templates (e.g. a blank page), which `winapp new` adds into the current project rather than creating a new one.
 
 **Template pack versioning:**
 
@@ -193,6 +199,9 @@ winapp new --list
 
 # One-shot with a specific template
 winapp new --name MyApp --template winui-navview
+
+# Experimental Reactor app (pure C#, no XAML) — requires the .NET 10 SDK
+winapp new --name MyApp --template reactor-mvu
 
 # Always use the newest template pack, no prompts
 winapp new --name MyApp --template-version latest --use-defaults
@@ -1203,7 +1212,9 @@ Search **WinUI** controls and samples for a working code example. WinUI-only: th
 winapp find-ui "<query>" [options]
 ```
 
-The corpus is fetched from GitHub on first use and cached per-user under `<global .winapp>/cache/find-ui`, so the **first run requires network access**. Subsequent runs are served from the local cache (refreshed at most every 7 days, or on demand with `--refresh`).
+The Gallery, Toolkit, and Reactor corpora ship **inside the CLI**, so `find-ui` works with no network access — including on a first run in an agent sandbox or behind a corporate proxy that blocks `raw.githubusercontent.com`. When GitHub *is* reachable the CLI refreshes from it and caches the result per-user under `<global .winapp>/cache/find-ui`; the built-in corpus is only a floor, never a ceiling. Cached data is refreshed at most every 24 hours, or on demand with `--refresh`.
+
+The built-in corpus is re-fetched from GitHub every time a stable release is built, and a refresh that fails **stops the release build** rather than quietly shipping older data — the baker fetches through the same code path `--refresh` uses, so a failure there means the live refresh is broken too and is worth investigating before shipping. A release can still be cut against the previously committed corpus, but only as an explicit override. When results are served from the built-in copy, `find-ui` says so on stderr and `--json` output carries `"corpus": "embedded"` (other values: `"network"` for a fresh fetch, `"cache"` for the local cache).
 
 **Options:**
 
