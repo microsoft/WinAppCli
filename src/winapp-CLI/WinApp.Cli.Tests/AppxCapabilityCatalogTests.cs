@@ -283,6 +283,20 @@ public class AppxCapabilityCatalogTests
     }
 
     [TestMethod]
+    [DataRow("rescap:RUNFULLTRUST", "runFullTrust", DisplayName = "upper-cased rescap name")]
+    [DataRow("device:Microphone", "microphone", DisplayName = "title-cased device name")]
+    [DataRow("app:InternetClient", "internetClient", DisplayName = "title-cased foundation name")]
+    [DataRow("SYSTEMAI:systemaimodels", "systemAIModels", DisplayName = "lower-cased systemai name")]
+    public void Parse_KnownNameInAnyCasing_EmitsTheCanonicalSpelling(string value, string expected)
+    {
+        // Lookup is case-insensitive but the manifest schema's enumerations are ordinal, so carrying the
+        // caller's casing through produces a capability Windows registers and does not grant.
+        Assert.IsTrue(AppxCapabilityCatalog.TryParse(value, out var caps, out var error), error);
+        Assert.AreEqual(1, caps.Count);
+        Assert.AreEqual(expected, caps[0].Name);
+    }
+
+    [TestMethod]
     public void Parse_KnownFoundationCapabilityUnderAppPrefix_IsAccepted()
     {
         Assert.IsTrue(AppxCapabilityCatalog.TryParse("app:internetClient", out var caps, out _));

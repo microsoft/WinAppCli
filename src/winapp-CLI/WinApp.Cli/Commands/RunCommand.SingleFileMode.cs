@@ -188,6 +188,13 @@ internal partial class RunCommand
 
             HintNoConsoleOutput(resolution, withoutAlias, noLaunch, detach, isJson);
 
+            var effectiveLayout = outputAppXDirectory ?? new DirectoryInfo(Path.Join(outputFolder.FullName, "AppX"));
+
+            // Snapshot BEFORE the pipeline runs. Once registration succeeds, FindDevPackages reports the
+            // package this run just created, so "was it already registered, and from where?" has exactly
+            // one moment at which it can be answered.
+            var priorRegistrations = FindPriorRegistrations(resolvedManifest);
+
             // A tier-3 manifest can be named <stem>.appxmanifest, which ManifestHelper.FindManifest does not
             // probe for, so the resolved manifest is always passed explicitly rather than left to
             // folder-mode auto-detection.
@@ -215,8 +222,8 @@ internal partial class RunCommand
                 // Reported only once the package actually exists — see ReportSingleFileRegistrationImpact.
                 onRegistered: () => ReportSingleFileRegistrationImpact(
                     resolution.SingleFile,
-                    resolvedManifest,
-                    outputAppXDirectory ?? new DirectoryInfo(Path.Join(outputFolder.FullName, "AppX")),
+                    priorRegistrations,
+                    effectiveLayout,
                     unregisterOnExit,
                     isJson,
                     BuildUnregisterCommand(
@@ -226,7 +233,8 @@ internal partial class RunCommand
                         runtimeOption,
                         properties,
                         manifest,
-                        outputAppXDirectory)));
+                        outputAppXDirectory,
+                        effectiveLayout)));
         }
 
         /// <summary>
@@ -484,18 +492,59 @@ internal partial class RunCommand
         }
 
         /// <summary>
+        /// The package name and the install locations of dev registrations already holding it, captured
+        /// BEFORE a run registers anything, so the notice can still tell "already registered" from
+        /// "registered by this run".
+        /// </summary>
+        private sealed record PriorRegistrations(string PackageName, IReadOnlyList<string> InstallLocations)
+        {
+            public static readonly PriorRegistrations None = new(string.Empty, []);
+        }
+
+        /// <summary>
+        /// Reads the manifest's identity and the dev registrations already holding it.
+        /// </summary>
+        /// <remarks>
+        /// Must run BEFORE registration. Afterwards <c>FindDevPackages</c> returns the package this run just
+        /// created, which would make every run look like a re-registration and suppress the notice entirely.
+        /// </remarks>
+        private PriorRegistrations FindPriorRegistrations(FileInfo manifest)
+        {
+            try
+            {
+                if (!manifest.Exists)
+                {
+                    return PriorRegistrations.None;
+                }
+
+                var packageName = AppxManifestDocument.Load(manifest.FullName).IdentityName;
+                if (string.IsNullOrEmpty(packageName))
+                {
+                    return PriorRegistrations.None;
+                }
+
+                return new PriorRegistrations(
+                    packageName,
+                    [.. packageRegistrationService.FindDevPackages(packageName)
+                        .Where(p => p.IsDevelopmentMode)
+                        .Select(p => p.InstallLocation)
+                        .OfType<string>()
+                        .Where(location => location.Length > 0)]);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or XmlException or ArgumentException or InvalidOperationException)
+            {
+                // Purely advisory — an unreadable or malformed manifest must not fail the run. Unexpected
+                // exception types still surface rather than being silently swallowed.
+                logger.LogDebug("Could not check for an existing registration: {Message}", ex.Message);
+                return PriorRegistrations.None;
+            }
+        }
+
+        /// <summary>
         /// Reports what a registration leaves behind: a warning when it REPLACES a different app's
         /// registration, and a one-time note when it creates one that outlives the run.
         /// </summary>
         /// <remarks>
-        /// <para>
-        /// Two <c>counter.cs</c> files in different directories both default to
-        /// <c>Identity Name="counter"</c>, so the second run silently replaces the first. Suffixing the
-        /// identity with a path hash would prevent that, but it would make the AUMID and Start-menu entry
-        /// ugly for everyone in order to protect a rare case — and identity is already scoped by
-        /// <c>Publisher=CN=&lt;user&gt;</c>, so it can never collide across users. Keep the clean default
-        /// and make the replacement visible instead of silent.
-        /// </para>
         /// <para>
         /// The persistence note is deliberately tied to the FIRST registration of an identity rather than
         /// printed every run. <c>winapp run app.cs</c> is an inner-loop command that gets run dozens of
@@ -506,6 +555,11 @@ internal partial class RunCommand
         /// also lands in the Start menu, so scoping the note to console apps would teach the wrong model.
         /// </para>
         /// <para>
+        /// The replacement warning still fires for two apps that explicitly share one
+        /// <c>WinAppPackageName</c>; the path hash in the default identity is what keeps unrelated
+        /// same-named files from colliding in the first place.
+        /// </para>
+        /// <para>
         /// <paramref name="layoutDirectory"/> must be the EFFECTIVE AppX layout directory (honoring
         /// <c>--output-appx-directory</c>), because that is what a registration's install location points
         /// at. Comparing against the build output instead would warn about every re-run that uses a
@@ -514,7 +568,7 @@ internal partial class RunCommand
         /// </remarks>
         private void ReportSingleFileRegistrationImpact(
             FileInfo singleFile,
-            FileInfo manifest,
+            PriorRegistrations prior,
             DirectoryInfo layoutDirectory,
             bool unregisterOnExit,
             bool isJson,
@@ -523,62 +577,30 @@ internal partial class RunCommand
             // Gate on Warning, not Information: --quiet suppresses Information but still promises
             // warnings, and silently replacing another app's registration is exactly what a user needs
             // to hear about.
-            if (isJson || !logger.IsEnabled(LogLevel.Warning))
+            if (isJson || prior.PackageName.Length == 0 || !logger.IsEnabled(LogLevel.Warning))
             {
                 return;
             }
 
-            try
+            foreach (var installLocation in prior.InstallLocations)
             {
-                if (!manifest.Exists)
+                if (!PathsPointToSameLocation(installLocation, layoutDirectory.FullName))
                 {
+                    logger.LogWarning(
+                        "{UISymbol} Replacing the existing registration of '{PackageName}', which was installed from a different location ({InstallLocation}). Set '#:property {Property}=<name>' to give this app its own package identity.",
+                        UiSymbols.Warning, prior.PackageName, installLocation, SingleFileManifestPlanner.PackageNameProperty);
                     return;
                 }
-
-                var document = AppxManifestDocument.Load(manifest.FullName);
-                var packageName = document.IdentityName;
-                if (string.IsNullOrEmpty(packageName))
-                {
-                    return;
-                }
-
-                var registeredElsewhere = false;
-                var alreadyRegistered = false;
-
-                foreach (var existing in packageRegistrationService.FindDevPackages(packageName))
-                {
-                    if (!existing.IsDevelopmentMode || string.IsNullOrEmpty(existing.InstallLocation))
-                    {
-                        continue;
-                    }
-
-                    alreadyRegistered = true;
-
-                    if (!PathsPointToSameLocation(existing.InstallLocation, layoutDirectory.FullName))
-                    {
-                        logger.LogWarning(
-                            "{UISymbol} Replacing the existing registration of '{PackageName}', which was installed from a different location ({InstallLocation}). Set '#:property {Property}=<name>' to give this app its own package identity.",
-                            UiSymbols.Warning, packageName, existing.InstallLocation, SingleFileManifestPlanner.PackageNameProperty);
-                        registeredElsewhere = true;
-                        break;
-                    }
-                }
-
-                // --unregister-on-exit already removes it, so the note would be wrong.
-                if (registeredElsewhere || alreadyRegistered || unregisterOnExit || !logger.IsEnabled(LogLevel.Information))
-                {
-                    return;
-                }
-
-                ansiConsole.MarkupLineInterpolated(
-                    $"{UiSymbols.Note} '{singleFile.Name}' stays registered as '{packageName}' after it exits. Remove it with '{unregisterCommand ?? $"winapp unregister {singleFile.Name}"}', or use --unregister-on-exit.");
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or XmlException or ArgumentException or InvalidOperationException)
+
+            // Already registered from here, or --unregister-on-exit removes it: the note would be wrong.
+            if (prior.InstallLocations.Count > 0 || unregisterOnExit || !logger.IsEnabled(LogLevel.Information))
             {
-                // Purely advisory — an unreadable or malformed manifest must not fail the run. Unexpected
-                // exception types still surface rather than being silently swallowed.
-                logger.LogDebug("Could not check for an existing registration: {Message}", ex.Message);
+                return;
             }
+
+            ansiConsole.MarkupLineInterpolated(
+                $"{UiSymbols.Note} '{singleFile.Name}' stays registered as '{prior.PackageName}' after it exits. Remove it with '{unregisterCommand ?? $"winapp unregister {singleFile.Name}"}', or use --unregister-on-exit.");
         }
 
         /// <summary>
@@ -599,6 +621,10 @@ internal partial class RunCommand
         /// alongside <c>--manifest</c> (they can name different packages) as well as the resolution options
         /// without one. That case therefore emits the manifest form alone.
         /// </para>
+        /// <para>
+        /// A secret-looking property value is masked with the same policy the build echo uses, so the
+        /// notice cannot copy a credential into a CI log. The caller tells the user to restore it.
+        /// </para>
         /// </remarks>
         private static string BuildUnregisterCommand(
             FileInfo singleFile,
@@ -607,7 +633,8 @@ internal partial class RunCommand
             string? runtimeOption,
             IReadOnlyList<string> properties,
             FileInfo? explicitManifest,
-            DirectoryInfo? outputAppXDirectory)
+            DirectoryInfo? outputAppXDirectory,
+            DirectoryInfo effectiveLayout)
         {
             var tokens = new List<string> { "winapp", "unregister" };
 
@@ -643,15 +670,24 @@ internal partial class RunCommand
                 foreach (var property in properties)
                 {
                     tokens.Add("-p");
-                    tokens.Add(property);
+                    tokens.Add(ProjectRunService.RedactSecretPropertyForDisplay(property));
                 }
             }
 
-            // Shapes the layout ownership check rather than the identity, so it applies to both forms.
+            // Names the layout rather than the identity, so it applies to both forms. `unregister` refuses
+            // to remove a package whose install location it cannot tie to something the caller named; from
+            // a manifest it trusts only the manifest's own directory and the current directory, and a
+            // file-based app's layout is under %TEMP%\dotnet\runfile — neither of those. Without this, the
+            // printed command reports "registered from a different project tree" and removes nothing.
             if (outputAppXDirectory != null)
             {
                 tokens.Add("--output-appx-directory");
                 tokens.Add(outputAppXDirectory.FullName);
+            }
+            else if (explicitManifest != null)
+            {
+                tokens.Add("--output-appx-directory");
+                tokens.Add(effectiveLayout.FullName);
             }
 
             return WindowsCommandLine.JoinArguments(tokens)

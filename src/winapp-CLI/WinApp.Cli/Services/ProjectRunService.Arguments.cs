@@ -591,6 +591,17 @@ internal sealed partial class ProjectRunService
         return anyChanged ? WindowsCommandLine.JoinArguments(redacted) ?? commandLine : commandLine;
     }
 
+    /// <summary>
+    /// Masks a secret-looking value in a single <c>Name=Value</c> MSBuild property, using the same policy
+    /// as <see cref="RedactSecretsForDisplay"/>.
+    /// </summary>
+    /// <remarks>
+    /// For a property echoed on its own rather than inside a command line — a <c>-p</c> value repeated back
+    /// in guidance, say — where the <c>-p:</c> token prefix that drives the command-line form is absent.
+    /// </remarks>
+    internal static string RedactSecretPropertyForDisplay(string property) =>
+        RedactPropertySegments(property, out _);
+
     private static string RedactPropertySegments(string body, out bool changed)
     {
         changed = false;

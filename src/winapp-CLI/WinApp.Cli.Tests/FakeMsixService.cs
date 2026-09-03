@@ -56,6 +56,14 @@ internal class FakeMsixService : IMsixService
     /// <summary>When set, <see cref="CreateMsixBundleAsync"/> throws this exception.</summary>
     public Exception? BundleExceptionToThrow { get; set; }
 
+    /// <summary>
+    /// Invoked inside <see cref="AddLooseLayoutIdentityAsync"/>, before it returns. Lets a test simulate
+    /// the side effect real registration has — the package becoming visible to
+    /// <c>IPackageRegistrationService.FindDevPackages</c> — so code that must observe state BEFORE
+    /// registration can be told apart from code that reads it afterwards.
+    /// </summary>
+    public Action? OnAddLooseLayout { get; set; }
+
     public Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(
         FileInfo appxManifestPath,
         DirectoryInfo inputDirectory,
@@ -80,6 +88,7 @@ internal class FakeMsixService : IMsixService
         {
             throw ExceptionToThrow;
         }
+        OnAddLooseLayout?.Invoke();
         return Task.FromResult(FakeIdentityResult);
     }
 

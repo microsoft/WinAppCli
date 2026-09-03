@@ -799,6 +799,7 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
     {
         // `unregister` re-evaluates the identity from the .cs, and a command-line property overrides the
         // file's own #:property directives — so without these the command resolves a DIFFERENT package.
+        WidenConsoleForCommandAssertions();
         var (singleFile, outputDir) = CreateSingleFileApp();
         SetOutcome(singleFile, outputDir);
         _fakePackageRegistrationService.FakeDevPackages = [];
@@ -858,6 +859,78 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
 
         Assert.IsFalse(TestAnsiConsole.Output.Contains("stays registered", StringComparison.Ordinal),
             "Nothing stays registered when registration never succeeded");
+    }
+
+    [TestMethod]
+    public async Task SingleFileMode_ExplicitManifest_UnregisterCommandNamesTheEffectiveLayout()
+    {
+        // `unregister --manifest` trusts only the manifest's own directory and the current directory, and
+        // a file-based app's layout is under %TEMP%\dotnet\runfile — neither of those. Without the layout
+        // the printed command reports "registered from a different project tree" and removes nothing.
+        WidenConsoleForCommandAssertions();
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir);
+        var manifest = new FileInfo(Path.Join(_tempDirectory.FullName, $"custom_{Guid.NewGuid():N}.appxmanifest"));
+        File.WriteAllText(
+            manifest.FullName,
+            """
+            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
+              <Identity Name="com.contoso.authored" Publisher="CN=Test" Version="1.0.0.0" />
+            </Package>
+            """);
+        _fakePackageRegistrationService.FakeDevPackages = [];
+        var command = GetRequiredService<RunCommand>();
+
+        await ParseAndInvokeWithCaptureAsync(
+            command,
+            [singleFile.FullName, "--detach", "--manifest", manifest.FullName]);
+
+        StringAssert.Contains(
+            TestAnsiConsole.Output,
+            $"--output-appx-directory {Path.Join(outputDir.FullName, "AppX")}");
+    }
+
+    [TestMethod]
+    public async Task SingleFileMode_SecretProperty_IsMaskedInTheUnregisterCommand()
+    {
+        // The notice is copied into CI logs, so it must not carry a credential the user passed through -p.
+        WidenConsoleForCommandAssertions();
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir);
+        _fakePackageRegistrationService.FakeDevPackages = [];
+        var command = GetRequiredService<RunCommand>();
+
+        await ParseAndInvokeWithCaptureAsync(
+            command,
+            [singleFile.FullName, "--detach", "-p", "ApiKey=super-secret"]);
+
+        var output = TestAnsiConsole.Output;
+        Assert.IsFalse(output.Contains("super-secret", StringComparison.Ordinal),
+            "A secret-looking property value must not reach the console");
+        StringAssert.Contains(output, "ApiKey=***");
+    }
+
+    [TestMethod]
+    public async Task SingleFileMode_RegistrationBecomingVisible_StillReportsTheFirstRegistration()
+    {
+        // The check has to read registration state BEFORE the pipeline. Reading it from the success
+        // callback would see the package this very run just created, conclude "already registered", and
+        // suppress the notice on every run — including the first, which is the only one it exists for.
+        WidenConsoleForCommandAssertions();
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir);
+        _fakePackageRegistrationService.FakeDevPackages = [];
+        _fakeMsixService.OnAddLooseLayout = () =>
+            _fakePackageRegistrationService.FakeDevPackages =
+            [
+                new DevPackageInfo("counter_1.0.0.0_x64__abc", "counter", "1.0.0.0",
+                    Path.Join(outputDir.FullName, "AppX"), IsDevelopmentMode: true)
+            ];
+        var command = GetRequiredService<RunCommand>();
+
+        await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--detach"]);
+
+        StringAssert.Contains(TestAnsiConsole.Output, "stays registered");
     }
 
     [TestMethod]

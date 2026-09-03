@@ -300,6 +300,18 @@ internal static partial class AppxCapabilityCatalog
             return false;
         }
 
+        // The prefix agrees with the catalog, so hand back the catalogued entry itself. Lookup is
+        // case-insensitive, so 'rescap:RUNFULLTRUST' and 'device:Microphone' arrive with the caller's
+        // spelling, and rebuilding from `name` would carry that spelling into the manifest — where the
+        // schema's enumerations are ordinal. A wrong-cased DeviceCapability registers and grants nothing,
+        // and 'app:InternetClient' is rejected outright by the foundation check below. No catalogued name
+        // needs child elements, so nothing downstream is skipped by returning here.
+        if (catalogued is not null)
+        {
+            capability = catalogued;
+            return true;
+        }
+
         // 'device:' selects the DeviceCapability ELEMENT rather than a namespace, and 'app:' spells the
         // default foundation namespace so a general capability can be forced explicitly.
         if (string.Equals(prefix, "device", StringComparison.OrdinalIgnoreCase))
@@ -339,9 +351,9 @@ internal static partial class AppxCapabilityCatalog
             return false;
         }
 
-        // A known name carries its documented floor (e.g. systemAIModels), so keep that even when the
-        // user spelled the namespace out. The prefix is known to agree with the catalog by this point.
-        capability = new AppxCapability(name, CapabilityElementName, prefix, ns, catalogued?.MinimumMaxVersionTested);
+        // Uncatalogued by this point, so there is no documented version floor to carry over — the prefix
+        // is the escape hatch for restricted capabilities winapp has not mapped.
+        capability = new AppxCapability(name, CapabilityElementName, prefix, ns);
         return true;
     }
 
