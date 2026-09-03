@@ -55,8 +55,7 @@ internal static partial class NuGetResolver
         // unconditionally answers a plain .NET or Win32 project from WinAppSDK metadata
         // it does not build against, and pins it to whatever runtime happens to be
         // installed rather than anything the project declares.
-        string? referencedWinAppSdkVersion = packages
-            .FirstOrDefault(package => IsWinAppSdkPackage(package.Id))?.Version;
+        string? referencedWinAppSdkVersion = ReferencedWinAppSdkVersion(packages);
         packages.AddRange(CollectSdkPackages(
             winAppSdkRuntimePath,
             targetPlatformVersion,
@@ -223,6 +222,34 @@ internal static partial class NuGetResolver
     private static bool IsWinAppSdkPackage(string id) =>
         id.Equals("Microsoft.WindowsAppSDK", StringComparison.OrdinalIgnoreCase)
         || id.StartsWith("Microsoft.WindowsAppSDK.", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The WinAppSDK version a project builds against, or <see langword="null"/> when it
+    /// references none.
+    /// </summary>
+    /// <remarks>
+    /// The umbrella <c>Microsoft.WindowsAppSDK</c> package carries no <c>.winmd</c>, so it
+    /// never reaches this list and cannot be read for the release. The sub-packages that do
+    /// carry metadata drift apart within one release — 2.2.0 resolves Foundation 2.1.0,
+    /// InteractiveExperiences 2.0.15, and WinUI 2.2.1 — so taking whichever happens to come
+    /// first would compare an installed 2.2 runtime against "2.0" and drop the very runtime
+    /// the project builds against. The newest of them is the release.
+    /// </remarks>
+    internal static string? ReferencedWinAppSdkVersion(IEnumerable<PackageWithWinMd> packages) =>
+        packages
+            .Where(package => IsWinAppSdkPackage(package.Id))
+            .Select(package => package.Version)
+            .OrderByDescending(ReleaseSortKey)
+            .FirstOrDefault();
+
+    /// <summary>Orders versions by release; an unrecognizable one sorts last.</summary>
+    private static (int Major, int Minor) ReleaseSortKey(string version)
+    {
+        string[] parts = (MajorMinor(version) ?? string.Empty).Split('.');
+        return parts.Length == 2
+            ? (int.Parse(parts[0], CultureInfo.InvariantCulture), int.Parse(parts[1], CultureInfo.InvariantCulture))
+            : (-1, -1);
+    }
 
     private static List<PackageWithWinMd> Deduplicate(List<PackageWithWinMd> packages) =>
         packages
