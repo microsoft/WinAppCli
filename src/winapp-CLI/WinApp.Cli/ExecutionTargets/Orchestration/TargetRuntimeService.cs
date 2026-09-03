@@ -45,7 +45,7 @@ internal sealed record RuntimeProvisionResult(
 /// therefore verifiable against a fake transport.
 /// <para>
 /// Nothing about the host machine is inspected for readiness or changed. Payloads are read from
-/// caches the host already has and are installed in the guest — a <c>--sandbox</c> run must never
+/// caches the host already has and are installed in the guest — a <c>--on sandbox</c> run must never
 /// register a runtime on the developer's machine, which is a large part of why the flag exists.
 /// </para>
 /// <para>
@@ -301,7 +301,7 @@ internal sealed class TargetRuntimeService(
 
         var diagnostics = new StringBuilder();
 
-        var result = await target.Channel.ExecuteAsync(
+        var result = await target.Operations.ExecuteAsync(
             new GuestExecRequest
             {
                 UseGuestWinapp = true,
@@ -360,7 +360,7 @@ internal sealed class TargetRuntimeService(
 
         try
         {
-            await target.Channel
+            await target.Operations
                 .GetFileAsync(scope, RuntimeProvisionReport.FileName, buffer, cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -426,7 +426,7 @@ internal sealed class TargetRuntimeService(
                     "; ",
                     unsatisfied.Where(item => item.Detail is not null).Select(item => item.Detail!)),
             },
-            example: "winapp sandbox exec -- winget install Microsoft.WindowsAppRuntime");
+            example: "winapp target exec sandbox -- winget install Microsoft.WindowsAppRuntime");
     }
 
     private static ExecutionTargetException MissingManagedRoot() =>

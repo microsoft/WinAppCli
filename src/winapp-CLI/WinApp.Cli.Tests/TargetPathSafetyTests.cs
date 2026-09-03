@@ -4,6 +4,8 @@
 using WinApp.Cli.ExecutionTargets.Abstractions;
 using WinApp.Cli.ExecutionTargets.Orchestration;
 
+using WinApp.Cli.ExecutionTargets.WindowsSandbox;
+
 namespace WinApp.Cli.Tests;
 
 /// <summary>
@@ -113,6 +115,6 @@ public class TargetPathSafetyTests
         // here rather than at runtime.
         TargetPathSafety.EnsureSafeSegment(TargetStateStore.StateFileName);
         TargetPathSafety.EnsureSafeSegment(TargetMutationLock.LockFileName);
-        TargetPathSafety.EnsureSafeSegment(ExecutionTargetRef.WindowsSandboxDefault.Slug);
+        TargetPathSafety.EnsureSafeSegment(WindowsSandboxTarget.Default.StateKey);
     }
 }

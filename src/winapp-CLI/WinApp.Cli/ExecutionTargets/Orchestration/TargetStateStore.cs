@@ -93,6 +93,26 @@ internal sealed class TargetStateStore(ITargetStateDirectoryProvider directoryPr
                 nextCommand: new ExecutionTargetNextCommand { Command = "winapp update", Advisory = false });
         }
 
+        // The record names the target it was written for, and it must be the one being asked about.
+        // The state key already separates targets, so a mismatch means the folder was reused, moved,
+        // or hand-edited -- and acting on it would let one target's ownership record fence another
+        // target's epochs and adopt its instance. Refusing costs a clear error; trusting it costs a
+        // command running against a guest that belongs to something else.
+        if (!target.Matches(state.TargetKind, state.TargetId))
+        {
+            throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.TargetAmbiguous,
+                $"The state recorded at '{file}' belongs to a different execution target.",
+                userAction: $"Delete '{file}' if no managed target is running, then retry.",
+                context: new Dictionary<string, string>
+                {
+                    ["requestedTarget"] = target.Selector,
+                    ["recordedKind"] = state.TargetKind ?? string.Empty,
+                    ["recordedId"] = state.TargetId ?? string.Empty,
+                    ["stateFile"] = file,
+                });
+        }
+
         return state;
     }
 

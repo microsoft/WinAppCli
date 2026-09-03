@@ -80,12 +80,12 @@ internal static class RuntimeStaging
         {
             // A previous pass left the scope in an unknown state. Discarding it is cheaper to reason
             // about than proving which of a partially transferred set is still intact.
-            await target.Channel.DeleteScopeAsync(scope, cancellationToken).ConfigureAwait(false);
+            await target.Operations.DeleteScopeAsync(scope, cancellationToken).ConfigureAwait(false);
         }
 
         var present = repair
             ? []
-            : await target.Channel.ListFilesAsync(scope, cancellationToken).ConfigureAwait(false);
+            : await target.Operations.ListFilesAsync(scope, cancellationToken).ConfigureAwait(false);
 
         var byPath = present.ToDictionary(file => file.RelativePath, StringComparer.OrdinalIgnoreCase);
 
@@ -94,7 +94,7 @@ internal static class RuntimeStaging
         // its predecessor wrote for the same plan.
         if (byPath.ContainsKey(RuntimeProvisionReport.FileName))
         {
-            await target.Channel
+            await target.Operations
                 .DeleteFilesAsync(scope, [RuntimeProvisionReport.FileName], cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -121,7 +121,7 @@ internal static class RuntimeStaging
         var planBytes = Encoding.UTF8.GetBytes(plan.ToJson());
         await using var planContent = new MemoryStream(planBytes, writable: false);
 
-        await target.Channel.PutFileAsync(
+        await target.Operations.PutFileAsync(
             scope,
             new GuestFileInfo(
                 RuntimeProvisionPlan.FileName,
@@ -159,7 +159,7 @@ internal static class RuntimeStaging
             bufferSize: 64 * 1024,
             useAsync: true);
 
-        await target.Channel.PutFileAsync(scope, info, content, cancellationToken).ConfigureAwait(false);
+        await target.Operations.PutFileAsync(scope, info, content, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Describes a host payload as the guest file it is about to become.</summary>

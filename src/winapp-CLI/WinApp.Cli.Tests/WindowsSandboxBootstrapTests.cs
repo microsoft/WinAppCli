@@ -145,7 +145,7 @@ public class WindowsSandboxBootstrapTests
     [TestMethod]
     public void BootstrapMaterial_RoundTripsAndRejectsTampering()
     {
-        var material = GuestBootstrapMaterial.Create(ExecutionTargetRef.WindowsSandboxDefault, Epoch, port: 5000);
+        var material = GuestBootstrapMaterial.Create(WindowsSandboxTarget.Default, Epoch, port: 5000);
 
         var parsed = GuestBootstrapMaterial.TryParse(material.ToJson());
         Assert.IsNotNull(parsed);
@@ -153,7 +153,7 @@ public class WindowsSandboxBootstrapTests
         Assert.AreEqual(GuestProtocol.PreSharedKeySize, parsed.DecodeKey().Length);
 
         // Fresh key per boot: material recovered from an earlier generation authenticates nothing.
-        var other = GuestBootstrapMaterial.Create(ExecutionTargetRef.WindowsSandboxDefault, Epoch, port: 5000);
+        var other = GuestBootstrapMaterial.Create(WindowsSandboxTarget.Default, Epoch, port: 5000);
         Assert.AreNotEqual(material.PreSharedKey, other.PreSharedKey);
 
         Assert.IsNull(GuestBootstrapMaterial.TryParse("{not json"));
@@ -163,7 +163,7 @@ public class WindowsSandboxBootstrapTests
     [TestMethod]
     public void BootstrapMaterial_MalformedKey_IsRefused()
     {
-        var material = GuestBootstrapMaterial.Create(ExecutionTargetRef.WindowsSandboxDefault, Epoch, port: 5000)
+        var material = GuestBootstrapMaterial.Create(WindowsSandboxTarget.Default, Epoch, port: 5000)
             with
         { PreSharedKey = Convert.ToBase64String([1, 2, 3]) };
 

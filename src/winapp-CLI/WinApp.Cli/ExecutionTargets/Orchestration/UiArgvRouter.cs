@@ -17,44 +17,34 @@ internal sealed record RoutedArtifact(string GuestRelativePath, string GuestFull
 internal sealed record RoutedUiCommand(List<string> Arguments, RoutedArtifact? Artifact);
 
 /// <summary>
-/// Rewrites a UI command line for execution in the guest (spec §"UI command routing").
+/// Rewrites a UI command line for execution on the target (spec §"UI command routing").
 /// </summary>
 /// <remarks>
-/// Only routing-specific arguments are touched: the <c>--sandbox</c> flag is removed, a
-/// <c>sandbox:</c> application prefix is stripped, and an output path is redirected into guest
-/// staging. Everything else is forwarded verbatim, so guest winapp parses and executes the ordinary
-/// command — which is what keeps every verb's behaviour and output identical to running it locally.
+/// Only routing-specific arguments are touched: the <c>--on</c> selector is removed, and an output
+/// path is redirected into target staging. Everything else is forwarded verbatim, so the target's
+/// own winapp parses and executes the ordinary command — which is what keeps every verb's behaviour
+/// and output identical to running it locally.
+/// <para>
+/// Removing <c>--on</c> is not cosmetic. Forwarding it would make the target's winapp try to select
+/// a target of its own and route the command again, so the command would either recurse or fail
+/// somewhere the user cannot see.
+/// </para>
 /// <para>
 /// Pure, and deliberately so: which tokens are rewritten is the only thing that can be wrong here,
-/// and that is exactly what a test can pin without a Sandbox.
+/// and that is exactly what a test can pin without a target.
 /// </para>
 /// </remarks>
 internal static class UiArgvRouter
 {
-    /// <summary>Prefix that routes a string application target into the guest.</summary>
-    internal const string SandboxTargetPrefix = "sandbox:";
-
-    private static readonly string[] SandboxFlagNames = ["--sandbox"];
+    private static readonly string[] TargetOptionNames = ["--on"];
     private static readonly string[] AppOptionNames = ["--app", "-a"];
     private static readonly string[] OutputOptionNames = ["--output", "-o"];
 
-    /// <summary>Whether an application target opts into guest routing by prefix.</summary>
-    public static bool IsSandboxTarget(string? app) =>
-        app is not null && app.StartsWith(SandboxTargetPrefix, StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>Removes the routing prefix from an application target.</summary>
-    public static string StripSandboxPrefix(string app)
-    {
-        ArgumentNullException.ThrowIfNull(app);
-
-        return IsSandboxTarget(app) ? app[SandboxTargetPrefix.Length..] : app;
-    }
-
     /// <summary>
-    /// Rewrites <paramref name="arguments"/> for the guest.
+    /// Rewrites <paramref name="arguments"/> for the target.
     /// </summary>
     /// <param name="arguments">The command line as typed, including the <c>ui</c> verb.</param>
-    /// <param name="guestArtifactDirectory">Absolute guest folder for this operation's outputs.</param>
+    /// <param name="guestArtifactDirectory">Absolute target folder for this operation's outputs.</param>
     /// <param name="resolveHostPath">Resolves a caller-supplied output path against the host.</param>
     public static RoutedUiCommand Rewrite(
         IReadOnlyList<string> arguments,
@@ -89,21 +79,16 @@ internal static class UiArgvRouter
 
             var (name, inlineValue) = SplitOption(token);
 
-            if (Matches(name, SandboxFlagNames))
+            if (Matches(name, TargetOptionNames))
             {
-                // A bool option can also be written with a separate value token; dropping the flag
-                // alone would leave that value stranded as a positional argument.
-                if (inlineValue is null && index + 1 < arguments.Count && IsBooleanLiteral(arguments[index + 1]))
+                // '--on sandbox' spends its value on a separate token; dropping only the option
+                // would leave 'sandbox' stranded as a positional argument on the target, where it
+                // would silently become an element selector.
+                if (inlineValue is null && index + 1 < arguments.Count)
                 {
                     index++;
                 }
 
-                continue;
-            }
-
-            if (Matches(name, AppOptionNames))
-            {
-                index += Rewrite(token, name, inlineValue, arguments, index, rewritten, StripSandboxPrefix);
                 continue;
             }
 
@@ -206,14 +191,10 @@ internal static class UiArgvRouter
     }
 
     private static bool IsKnownOption(string name) =>
-        Matches(name, SandboxFlagNames) ||
+        Matches(name, TargetOptionNames) ||
         Matches(name, AppOptionNames) ||
         Matches(name, OutputOptionNames);
 
     private static bool Matches(string name, string[] candidates) =>
         candidates.Contains(name, StringComparer.Ordinal);
-
-    private static bool IsBooleanLiteral(string token) =>
-        string.Equals(token, "true", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(token, "false", StringComparison.OrdinalIgnoreCase);
 }

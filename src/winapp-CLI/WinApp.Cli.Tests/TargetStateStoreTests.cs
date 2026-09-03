@@ -4,6 +4,8 @@
 using WinApp.Cli.ExecutionTargets.Abstractions;
 using WinApp.Cli.ExecutionTargets.Orchestration;
 
+using WinApp.Cli.ExecutionTargets.WindowsSandbox;
+
 namespace WinApp.Cli.Tests;
 
 /// <summary>
@@ -26,7 +28,7 @@ public class TargetStateStoreTests
         _tempRoot.Create();
 
         _store = new TargetStateStore(new TargetStateDirectoryProvider(_tempRoot.FullName));
-        _target = ExecutionTargetRef.WindowsSandboxDefault;
+        _target = WindowsSandboxTarget.Default;
     }
 
     [TestCleanup]
@@ -42,14 +44,14 @@ public class TargetStateStoreTests
     {
         SchemaVersion = TargetStateStore.CurrentSchemaVersion,
         Revision = 0,
-        TargetKind = ExecutionTargetRef.WindowsSandboxKind,
-        TargetId = ExecutionTargetRef.WindowsSandboxDefault.Id,
+        TargetKind = ExecutionTargetRef.SandboxKind,
+        TargetId = WindowsSandboxTarget.Default.Id,
         InstanceId = instanceId,
         BootNonce = nonce,
     };
 
     private string StateFilePath =>
-        Path.Join(_tempRoot.FullName, _target.Slug, TargetStateStore.StateFileName);
+        Path.Join(_tempRoot.FullName, _target.StateKey, TargetStateStore.StateFileName);
 
     [TestMethod]
     public void Read_NoState_ReturnsNull() => Assert.IsNull(_store.Read(_target));
@@ -66,12 +68,14 @@ public class TargetStateStoreTests
     }
 
     [TestMethod]
-    public void Commit_UsesTargetSlugDirectory_MatchingSpecPath()
+    public void Commit_UsesTargetStateKeyDirectory()
     {
         _store.Commit(_target, NewState(), expectedRevision: 0);
 
-        // The spec pins %LOCALAPPDATA%\Microsoft\WinApp\Targets\windows-sandbox-default.
-        Assert.AreEqual("windows-sandbox-default", _target.Slug);
+        // Readable enough to identify the target from the folder name, and unique enough that a
+        // second target can never land in the same one. ExecutionTargetIdentityTests owns the
+        // uniqueness rules; this only pins that the store actually uses the key.
+        StringAssert.StartsWith(_target.StateKey, "sandbox-default-");
         Assert.IsTrue(File.Exists(StateFilePath), $"Expected state at {StateFilePath}.");
     }
 
@@ -91,7 +95,7 @@ public class TargetStateStoreTests
         Assert.AreEqual("nonce-1", read.BootNonce);
         Assert.AreEqual("1.2.3", read.AgentVersion);
         Assert.AreEqual("abc123", read.AgentBinaryHash);
-        Assert.AreEqual(ExecutionTargetRef.WindowsSandboxKind, read.TargetKind);
+        Assert.AreEqual(ExecutionTargetRef.SandboxKind, read.TargetKind);
     }
 
     [TestMethod]
@@ -164,18 +168,54 @@ public class TargetStateStoreTests
     {
         _store.Commit(_target, NewState(), expectedRevision: 0);
 
-        var files = Directory.GetFiles(Path.Join(_tempRoot.FullName, _target.Slug));
+        var files = Directory.GetFiles(Path.Join(_tempRoot.FullName, _target.StateKey));
 
         Assert.AreEqual(1, files.Length, "Atomic replace must not leave temporary files behind.");
         Assert.AreEqual(TargetStateStore.StateFileName, Path.GetFileName(files[0]));
     }
 
     [TestMethod]
-    public void Slug_SanitizesSeparatorsForFilesystemAndKernelNames()
+    public void StateKey_SanitizesSeparatorsForFilesystemAndKernelNames()
     {
-        Assert.AreEqual("windows-sandbox-default", new ExecutionTargetRef("windows-sandbox", "windows-sandbox:default").Slug);
-        Assert.AreEqual("hyperv-winui-test", new ExecutionTargetRef("hyperv", "hyperv:winui/test").Slug);
-        Assert.AreEqual("target", new ExecutionTargetRef("odd", ":::").Slug);
+        StringAssert.StartsWith(
+            new ExecutionTargetRef("hyperv", "hyperv:winui/test").StateKey, "hyperv-hyperv-winui-test-");
+
+        // Nothing survives sanitising here, so the readable half falls back to a placeholder and
+        // the hash carries the whole identity.
+        StringAssert.StartsWith(new ExecutionTargetRef("odd", ":::").StateKey, "odd-");
+    }
+
+    /// <summary>
+    /// A record written for one target must never be read as another's, even if the two ever ended
+    /// up in the same folder: it is the proof of which guest an epoch and an instance ID belong to.
+    /// </summary>
+    [TestMethod]
+    public void Read_RecordForADifferentTarget_FailsClosed()
+    {
+        _store.Commit(_target, NewState(), expectedRevision: 0);
+
+        var impostor = new ExecutionTargetRef("hyperv", "WinAppTest");
+        var sameFolderStore = new TargetStateStore(new FixedRootProvider(
+            Path.Join(_tempRoot.FullName, _target.StateKey)));
+
+        var failure = Assert.ThrowsExactly<ExecutionTargetException>(() => sameFolderStore.Read(impostor));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.TargetAmbiguous, failure.Error.Code);
+    }
+
+    /// <summary>Points every target at one directory, to reproduce a reused state folder.</summary>
+    private sealed class FixedRootProvider(string root) : ITargetStateDirectoryProvider
+    {
+        public DirectoryInfo GetTargetRoot(ExecutionTargetRef target, bool create = true)
+        {
+            var directory = new DirectoryInfo(root);
+            if (create && !directory.Exists)
+            {
+                directory.Create();
+            }
+
+            return directory;
+        }
     }
 
     [TestMethod]

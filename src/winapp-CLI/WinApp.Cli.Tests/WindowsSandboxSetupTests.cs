@@ -8,7 +8,7 @@ using WinApp.Cli.ExecutionTargets.WindowsSandbox;
 namespace WinApp.Cli.Tests;
 
 /// <summary>
-/// Tests for <see cref="WindowsSandboxSetup"/>: what <c>--sandbox</c> installs on the user's behalf,
+/// Tests for <see cref="WindowsSandboxSetup"/>: what <c>--on sandbox</c> installs on the user's behalf,
 /// what it refuses to do, and what it reports when only Windows or the user can finish the job.
 /// </summary>
 /// <remarks>
@@ -163,7 +163,7 @@ public class WindowsSandboxSetupTests
     [TestMethod]
     public async Task FeaturePayloadMissing_EnablesTheFeatureAutomatically()
     {
-        // --sandbox is explicit consent. There is no second flag and no prompt of winapp's own; the
+        // --on sandbox is explicit consent. There is no second flag and no prompt of winapp's own; the
         // only dialog is the one Windows raises for elevation.
         _probe.Enqueue(Facts());
         _enabler.Result = new FeatureEnableResult(FeatureEnableOutcome.Enabled, 0);

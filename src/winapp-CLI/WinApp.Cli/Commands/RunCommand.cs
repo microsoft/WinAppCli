@@ -19,7 +19,7 @@ using WinApp.Cli.Telemetry.Events;
 
 namespace WinApp.Cli.Commands;
 
-internal partial class RunCommand : Command, IShortDescription
+internal partial class RunCommand : Command, IShortDescription, ITargetAwareCommand
 {
     public string ShortDescription => "Run a Windows app: build and launch from a .csproj/.sln, or launch an existing build-output folder.";
 
@@ -35,9 +35,6 @@ internal partial class RunCommand : Command, IShortDescription
     public static Option<bool> CleanOption { get; }
     public static Option<bool> SymbolsOption { get; }
     public static Option<string?> ExecutableOption { get; }
-
-    /// <summary>Runs the app in the managed Windows Sandbox instead of on this machine.</summary>
-    public static Option<bool> SandboxOption { get; }
 
     // Project-mode build options. Additive and inert in folder mode.
     public static Option<string> ConfigurationOption { get; }
@@ -180,10 +177,6 @@ internal partial class RunCommand : Command, IShortDescription
             Description = "Project mode: when the input is a solution (.sln/.slnx) or a directory with multiple runnable app projects, selects which project to launch (by name or path). Ignored in folder mode."
         };
 
-        SandboxOption = new Option<bool>("--sandbox")
-        {
-            Description = "Deploy and run the app inside the Windows Sandbox winapp manages, instead of on this machine. The app is still built on the host; registration, launch, and debugging happen in the Sandbox, which stays running afterwards for the next run. There is no fallback to local execution."
-        };
     }
 
     public RunCommand() : base("run", "Builds and runs a Windows app from a .csproj/.sln or a build-output folder. In project mode, invokes dotnet build then launches the app (packaged or unpackaged); in folder mode, creates a debug-signed layout, registers the package, and launches it.")
@@ -209,7 +202,6 @@ internal partial class RunCommand : Command, IShortDescription
         Options.Add(NoRestoreOption);
         Options.Add(PropertyOption);
         Options.Add(ProjectOption);
-        Options.Add(SandboxOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -265,7 +257,7 @@ internal partial class RunCommand : Command, IShortDescription
             var clean = parseResult.GetValue(CleanOption);
             var useSymbols = parseResult.GetValue(SymbolsOption);
             var executable = parseResult.GetValue(ExecutableOption);
-            var sandbox = parseResult.GetValue(SandboxOption);
+            var executionTarget = ExecutionTargetSelection.Resolve(parseResult);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
             // Reject a valueless -p/--property. The option uses ZeroOrMore arity so a bare
@@ -412,7 +404,7 @@ internal partial class RunCommand : Command, IShortDescription
 
             // Probed before the project is resolved or built, so an unsupported host costs seconds
             // rather than a full build — and never silently falls back to running locally.
-            if (sandbox)
+            if (!executionTarget.IsLocal)
             {
                 try
                 {
@@ -420,7 +412,7 @@ internal partial class RunCommand : Command, IShortDescription
                 }
                 catch (ExecutionTargetException ex)
                 {
-                    return SandboxOutput.Fail(ansiConsole, isJson, ex.Error);
+                    return TargetOutput.Fail(ansiConsole, isJson, ex.Error);
                 }
             }
 
@@ -494,7 +486,7 @@ internal partial class RunCommand : Command, IShortDescription
 
             if (inputResolution.Mode == WinAppRunMode.Project)
             {
-                return await RunProjectModeAsync(parseResult, inputResolution.Csproj!, inputResolution.Solution, inputResolution.SelectionReason, appArgs, isJson, sandbox, cancellationToken);
+                return await RunProjectModeAsync(parseResult, inputResolution.Csproj!, inputResolution.Solution, inputResolution.SelectionReason, appArgs, isJson, executionTarget, cancellationToken);
             }
 
             // Folder mode: the FileSystemInfo converter yields a DirectoryInfo for an existing
@@ -518,7 +510,7 @@ internal partial class RunCommand : Command, IShortDescription
             return await ExecuteRunPipelineAsync(
                 inputFolder, manifest, outputAppXDirectory, appArgs,
                 noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, isJson,
-                runtimeArch: null, projectFile: null, framework: null, noRestore: false, sandbox, cancellationToken);
+                runtimeArch: null, projectFile: null, framework: null, noRestore: false, executionTarget, cancellationToken);
         }
 
         /// <summary>
@@ -546,15 +538,15 @@ internal partial class RunCommand : Command, IShortDescription
             FileInfo? projectFile,
             string? framework,
             bool noRestore,
-            bool sandbox,
+            ExecutionTargetRef executionTarget,
             CancellationToken cancellationToken)
         {
-            // --sandbox diverges here rather than later: everything below this point registers a
+            // A non-local target diverges here rather than later: everything below this point registers a
             // package and launches a process on this machine, which is exactly what running
             // somewhere else must not do.
-            if (sandbox)
+            if (!executionTarget.IsLocal)
             {
-                return await ExecutePackagedSandboxRunAsync(
+                return await ExecutePackagedTargetRunAsync(
                     inputFolder, manifest, outputAppXDirectory, appArgs,
                     noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, executable, isJson,
                     projectFile, framework, noRestore, cancellationToken);
@@ -1072,7 +1064,7 @@ internal sealed class RunCommandResult
     public uint? ProcessId { get; set; }
     public string? Error { get; set; }
 
-    /// <summary>True when the app ran in an execution target rather than on this machine.</summary>
+    /// <summary>True when the app ran on an execution target rather than on this machine.</summary>
     /// <remarks>
     /// Every member below is additive and omitted entirely when absent, so a local run's payload is
     /// byte-for-byte what it has always been.
@@ -1082,28 +1074,38 @@ internal sealed class RunCommandResult
     /// <summary>Where <see cref="ProcessId"/> is meaningful, for example <c>sandbox</c>.</summary>
     public string? ProcessScope { get; set; }
 
-    /// <summary>A copyable target for the follow-up UI commands, for example <c>sandbox:4212</c>.</summary>
-    public string? AppTarget { get; set; }
+    /// <summary>
+    /// The exact arguments to append to a <c>winapp ui</c> command to reach this app, for example
+    /// <c>--on sandbox -a 4212</c>.
+    /// </summary>
+    /// <remarks>
+    /// Both halves are here on purpose. A process ID means nothing without the target it belongs to,
+    /// so this never contains a bare number and never encodes the target into the application value:
+    /// a caller that copies this string gets a command that runs where the app actually is, and a
+    /// caller that copies only the number gets something that visibly does not work rather than
+    /// something that quietly acts on the wrong machine.
+    /// </remarks>
+    public string? UiTargetArgs { get; set; }
 
     /// <summary>Which execution target ran it, provider-neutral.</summary>
     public ExecutionTargetInfo? ExecutionTarget { get; set; }
 }
 
-/// <summary>Provider-neutral description of the target a command ran in.</summary>
+/// <summary>Provider-neutral description of the target a command ran on.</summary>
 /// <remarks>
-/// Future explicit target selection populates the same object without changing any existing process,
+/// Explicit target selection populates the same object without changing any existing process,
 /// package, or artifact field. The epoch is what scopes the process ID and any window handle: values
 /// from a previous generation are rejected rather than resolved against a recreated guest.
 /// </remarks>
 internal sealed class ExecutionTargetInfo
 {
-    /// <summary>Target kind, for example <c>windows-sandbox</c>.</summary>
+    /// <summary>Target kind, for example <c>sandbox</c>.</summary>
     public string? Kind { get; set; }
 
-    /// <summary>Target identity, for example <c>windows-sandbox:default</c>.</summary>
+    /// <summary>Target identity within that kind, for example <c>default</c>.</summary>
     public string? Id { get; set; }
 
-    /// <summary>Guest processor architecture.</summary>
+    /// <summary>Target processor architecture.</summary>
     public string? Architecture { get; set; }
 
     /// <summary>Opaque generation identity the process ID and handles belong to.</summary>

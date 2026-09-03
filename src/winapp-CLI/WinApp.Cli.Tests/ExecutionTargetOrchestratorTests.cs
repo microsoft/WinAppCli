@@ -5,16 +5,18 @@ using WinApp.Cli.ExecutionTargets.Abstractions;
 using WinApp.Cli.ExecutionTargets.GuestAgent;
 using WinApp.Cli.ExecutionTargets.Orchestration;
 
+using WinApp.Cli.ExecutionTargets.WindowsSandbox;
+
 namespace WinApp.Cli.Tests;
 
 /// <summary>
-/// Tests for the single entry point every <c>--sandbox</c> command goes through.
+/// Tests for the single entry point every <c>--on sandbox</c> command goes through.
 /// </summary>
 /// <remarks>
 /// The ordering rules are the contract, and each is a failure mode rather than a preference:
 /// probing before mutation is what keeps an unsupported host from failing only after a long build;
 /// locking only for mutation is what keeps a read-only inspection from blocking behind a
-/// deployment; and never falling back to local execution is what keeps <c>--sandbox</c> from
+/// deployment; and never falling back to local execution is what keeps <c>--on sandbox</c> from
 /// silently running an application on the user's own desktop.
 /// </remarks>
 [TestClass]
@@ -94,7 +96,7 @@ public class ExecutionTargetOrchestratorTests
 
         // The lock covers establishing a channel, not using one. Holding it for the prepared
         // target's lifetime is what made a foreground application block every other command:
-        // `winapp run --sandbox` keeps its prepared target for as long as the app runs.
+        // `winapp run --on sandbox` keeps its prepared target for as long as the app runs.
         Assert.AreEqual(1, connectionLock.AcquireCalls);
         Assert.AreEqual(1, connectionLock.ReleaseCalls);
 
@@ -121,7 +123,7 @@ public class ExecutionTargetOrchestratorTests
                 new FakeBackend(), new FakeMutationLock(), connectionLock)
                 .PrepareAsync(PrepareTargetOptions.ReadOnly, TestContext.CancellationToken);
 
-            Assert.IsNotNull(second.Channel);
+            Assert.IsNotNull(second.Operations);
         }
     }
 
@@ -478,7 +480,7 @@ public class ExecutionTargetOrchestratorTests
         private readonly List<GuestCommandServer> _servers = [];
         private int _inFlight;
 
-        public ExecutionTargetRef Target => ExecutionTargetRef.WindowsSandboxDefault;
+        public ExecutionTargetRef Target => WindowsSandboxTarget.Default;
 
         public TargetSupportResult Support { get; init; } = TargetSupportResult.Supported;
 

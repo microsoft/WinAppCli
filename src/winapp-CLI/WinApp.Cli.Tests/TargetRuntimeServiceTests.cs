@@ -5,6 +5,8 @@ using System.IO.Compression;
 using WinApp.Cli.ExecutionTargets.Abstractions;
 using WinApp.Cli.ExecutionTargets.Orchestration;
 
+using WinApp.Cli.ExecutionTargets.WindowsSandbox;
+
 namespace WinApp.Cli.Tests;
 
 /// <summary>
@@ -25,7 +27,7 @@ public partial class TargetRuntimeServiceTests
     private const string RequiredVersion = "8000.675.1142.0";
     private const string Publisher = "CN=Microsoft Corporation";
 
-    private static readonly ExecutionTargetRef Target = ExecutionTargetRef.WindowsSandboxDefault;
+    private static readonly ExecutionTargetRef Target = WindowsSandboxTarget.Default;
     private static readonly ExecutionTargetEpoch Epoch = ExecutionTargetEpoch.Create("sandbox-1", "nonce-a");
 
     private string _root = null!;

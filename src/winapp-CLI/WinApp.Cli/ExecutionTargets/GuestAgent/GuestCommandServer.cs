@@ -875,7 +875,7 @@ internal sealed class GuestCommandServer : IAsyncDisposable
         // "could not start" failure from Process.Start regardless of whether the executable path was
         // otherwise fine, and that generic message blames the executable (or, for guest winapp, the
         // deployment) rather than the actual cause. Naming the directory here is what keeps
-        // `sandbox exec --cwd <missing>` from being misdiagnosed as a bad executable or deployment.
+        // `target exec --cwd <missing>` from being misdiagnosed as a bad executable or deployment.
         if (!string.IsNullOrWhiteSpace(request.WorkingDirectory) && !Directory.Exists(request.WorkingDirectory))
         {
             resolved = request;

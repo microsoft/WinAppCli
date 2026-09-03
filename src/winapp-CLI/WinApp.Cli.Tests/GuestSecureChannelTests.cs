@@ -108,7 +108,7 @@ public class GuestSecureChannelTests
         await using (host)
         await using (guest)
         {
-            var request = Encoding.UTF8.GetBytes("run --sandbox");
+            var request = Encoding.UTF8.GetBytes("run --on sandbox");
             await host.SendFrameAsync(request, TestContext.CancellationTokenSource.Token);
             var received = await guest.ReceiveFrameAsync(TestContext.CancellationTokenSource.Token);
             CollectionAssert.AreEqual(request, received!.Value.ToArray());

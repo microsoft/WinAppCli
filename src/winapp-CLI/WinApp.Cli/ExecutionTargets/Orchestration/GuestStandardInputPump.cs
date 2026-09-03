@@ -11,14 +11,14 @@ namespace WinApp.Cli.ExecutionTargets.Orchestration;
 /// <remarks>
 /// <para>
 /// One implementation shared by every command that claims to stream stdin — <c>sandbox exec</c>,
-/// <c>run --sandbox --with-alias</c>, and the UI router. They have identical ordering and shutdown
+/// <c>run --on sandbox --with-alias</c>, and the UI router. They have identical ordering and shutdown
 /// constraints, and keeping separate copies is how one of them ends up quietly forwarding only
 /// output.
 /// </para>
 /// <para>
 /// <b>Start ordering.</b> Forwarding must not begin before the operation ID exists. The channel
 /// assigns that ID as it sends the exec request, so bytes written eagerly by the caller — the common
-/// <c>echo hi | winapp sandbox exec ...</c> shape, where input is already buffered before winapp
+/// <c>echo hi | winapp target exec sandbox ...</c> shape, where input is already buffered before winapp
 /// even starts — would otherwise be sent for an operation the guest has not heard of and dropped.
 /// Starting from <c>OnOperationId</c> is what makes those first bytes arrive.
 /// </para>
@@ -32,7 +32,7 @@ namespace WinApp.Cli.ExecutionTargets.Orchestration;
 /// <b>Why standard input is always opened.</b> Not gated on
 /// <see cref="Console.IsInputRedirected"/>. When input is a real console, reading it is how a typed
 /// character reaches the guest, and treating that case as immediate EOF would stop an unbounded
-/// <c>winapp ui record --sandbox</c> the instant it started, because that verb ends on stdin EOF by
+/// <c>winapp ui record --on sandbox</c> the instant it started, because that verb ends on stdin EOF by
 /// design. The read is fire-and-forget on a background task, so a command whose guest process never
 /// reads stdin is unaffected and never waits on it.
 /// </para>
@@ -53,7 +53,7 @@ internal static class GuestStandardInputPump
     /// deadlock the very call it feeds: the operation does not complete until its input is consumed,
     /// and input does not end until the operation does.
     /// </remarks>
-    public static Action<Guid> Attach(GuestCommandChannel channel, CancellationToken cancellationToken)
+    public static Action<Guid> Attach(ITargetOperationExecutor channel, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(channel);
 
@@ -72,7 +72,7 @@ internal static class GuestStandardInputPump
     /// bytes and the close, neither of which is reachable through <see cref="Attach"/>.
     /// </remarks>
     internal static async Task RunAsync(
-        GuestCommandChannel channel,
+        ITargetOperationExecutor channel,
         Guid operationId,
         Stream input,
         CancellationToken cancellationToken)

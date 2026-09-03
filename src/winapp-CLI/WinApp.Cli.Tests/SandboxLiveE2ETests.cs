@@ -133,7 +133,7 @@ public partial class SandboxLiveE2ETests
 
                 firstEpoch = cold.Epoch.Value;
 
-                var result = await cold.Channel.ExecuteAsync(
+                var result = await cold.Operations.ExecuteAsync(
                     new GuestExecRequest
                     {
                         Executable = "cmd.exe",
@@ -240,7 +240,7 @@ public partial class SandboxLiveE2ETests
 
             await using (var stream = File.OpenRead(source))
             {
-                await target.Channel.PutFileAsync(
+                await target.Operations.PutFileAsync(
                     scope,
                     new GuestFileInfo("roundtrip.bin", content.Length, DateTime.UtcNow.Ticks, Sha256(content)),
                     stream,
@@ -249,12 +249,12 @@ public partial class SandboxLiveE2ETests
 
             await using (var stream = File.Create(returned))
             {
-                await target.Channel.GetFileAsync(scope, "roundtrip.bin", stream, timeout.Token);
+                await target.Operations.GetFileAsync(scope, "roundtrip.bin", stream, timeout.Token);
             }
 
             CollectionAssert.AreEqual(content, await File.ReadAllBytesAsync(returned, timeout.Token));
 
-            await target.Channel.DeleteFilesAsync(scope, ["roundtrip.bin"], timeout.Token);
+            await target.Operations.DeleteFilesAsync(scope, ["roundtrip.bin"], timeout.Token);
         }
         finally
         {
@@ -287,37 +287,37 @@ public partial class SandboxLiveE2ETests
         {
             var launched = await RunCliAsync(
                 [
-                    "run", project, "--sandbox", "--arch", architecture, "--detach", "--json",
+                    "run", project, "--on sandbox", "--arch", architecture, "--detach", "--json",
                 ],
                 timeout.Token);
             AssertCommandSucceeded(launched, "packaged WinUI launch");
             StringAssert.Contains(launched.StandardOutput, "\"Sandbox\": true");
 
             var inspect = await RunCliAsync(
-                ["ui", "inspect", "--sandbox", "-a", "winui-app", "--interactive"],
+                ["ui", "inspect", "--on sandbox", "-a", "winui-app", "--interactive"],
                 timeout.Token);
             AssertCommandSucceeded(inspect, "guest UI inspection");
             StringAssert.Contains(inspect.StandardOutput, "CounterButton");
 
             AssertCommandSucceeded(
                 await RunCliAsync(
-                    ["ui", "set-value", "--sandbox", "TextInput", "Sandbox hello", "-a", "winui-app"],
+                    ["ui", "set-value", "--on sandbox", "TextInput", "Sandbox hello", "-a", "winui-app"],
                     timeout.Token),
                 "guest text input");
             AssertCommandSucceeded(
                 await RunCliAsync(
-                    ["ui", "invoke", "--sandbox", "FeatureToggle", "-a", "winui-app"],
+                    ["ui", "invoke", "--on sandbox", "FeatureToggle", "-a", "winui-app"],
                     timeout.Token),
                 "guest toggle input");
             AssertCommandSucceeded(
                 await RunCliAsync(
-                    ["ui", "invoke", "--sandbox", "SubmitButton", "-a", "winui-app"],
+                    ["ui", "invoke", "--on sandbox", "SubmitButton", "-a", "winui-app"],
                     timeout.Token),
                 "guest submit input");
             AssertCommandSucceeded(
                 await RunCliAsync(
                     [
-                        "ui", "wait-for", "--sandbox", "ResultDisplay", "-a", "winui-app",
+                        "ui", "wait-for", "--on sandbox", "ResultDisplay", "-a", "winui-app",
                         "--property", "Name", "--value", "Submitted: Sandbox hello (Feature: On)",
                         "--timeout", "10000",
                     ],
@@ -325,7 +325,7 @@ public partial class SandboxLiveE2ETests
                 "guest UI postcondition");
 
             var captured = await RunCliAsync(
-                ["ui", "screenshot", "--sandbox", "-a", "winui-app", "-o", screenshot, "--json"],
+                ["ui", "screenshot", "--on sandbox", "-a", "winui-app", "-o", screenshot, "--json"],
                 timeout.Token);
             AssertCommandSucceeded(captured, "guest screenshot");
             Assert.IsTrue(File.Exists(screenshot));
@@ -334,7 +334,7 @@ public partial class SandboxLiveE2ETests
 
             var recorded = await RunCliAsync(
                 [
-                    "ui", "record", "--sandbox", "-a", "winui-app", "--duration-sec", "2",
+                    "ui", "record", "--on sandbox", "-a", "winui-app", "--duration-sec", "2",
                     "-o", recording, "--json",
                 ],
                 timeout.Token);
@@ -343,7 +343,7 @@ public partial class SandboxLiveE2ETests
             Assert.IsGreaterThan(1024L, new FileInfo(recording).Length);
 
             var store = new TargetStateStore(new TargetStateDirectoryProvider());
-            var previous = store.Read(ExecutionTargetRef.WindowsSandboxDefault)!;
+            var previous = store.Read(WindowsSandboxTarget.Default)!;
             await CreateCli().StopAsync(previous.InstanceId!, timeout.Token);
             await WaitForNoSandboxAsync(timeout.Token);
 
@@ -353,7 +353,7 @@ public partial class SandboxLiveE2ETests
             AssertCommandSucceeded(recovered, "external-stop recovery");
             StringAssert.Contains(recovered.StandardOutput, "recovered-after-stop");
 
-            var replacement = store.Read(ExecutionTargetRef.WindowsSandboxDefault)!;
+            var replacement = store.Read(WindowsSandboxTarget.Default)!;
             Assert.AreNotEqual(previous.InstanceId, replacement.InstanceId);
             Assert.AreNotEqual(previous.BootNonce, replacement.BootNonce);
         }
@@ -365,7 +365,7 @@ public partial class SandboxLiveE2ETests
     }
 
     /// <summary>
-    /// Standard input piped into <c>winapp sandbox exec</c> reaches the guest process.
+    /// Standard input piped into <c>winapp target exec sandbox</c> reaches the guest process.
     /// </summary>
     /// <remarks>
     /// The command is documented as streaming stdin as well as stdout and stderr, and this is the
@@ -442,7 +442,7 @@ public partial class SandboxLiveE2ETests
             await using var occupied = await orchestrator.PrepareAsync(
                 PrepareTargetOptions.ReadOnly, timeout.Token);
 
-            var longRunning = occupied.Channel.ExecuteAsync(
+            var longRunning = occupied.Operations.ExecuteAsync(
                 new GuestExecRequest
                 {
                     Executable = "cmd.exe",
@@ -467,7 +467,7 @@ public partial class SandboxLiveE2ETests
             await using (var separate = await orchestrator.PrepareAsync(
                 PrepareTargetOptions.ReadOnly, timeout.Token))
             {
-                var quick = await separate.Channel.ExecuteAsync(
+                var quick = await separate.Operations.ExecuteAsync(
                     new GuestExecRequest { Executable = "cmd.exe", Arguments = ["/c", "exit", "3"] },
                     callbacks: null,
                     timeout.Token);
@@ -497,7 +497,7 @@ public partial class SandboxLiveE2ETests
     }
 
     /// <summary>
-    /// A host directory junction must not widen what <c>sandbox cp</c> sends into the guest.
+    /// A host directory junction must not widen what <c>target push</c> sends into the guest.
     /// </summary>
     /// <remarks>
     /// The file behind the junction is an ordinary file with no reparse attribute, so a check that
@@ -540,17 +540,17 @@ public partial class SandboxLiveE2ETests
             await using var target = await orchestrator.PrepareAsync(
                 PrepareTargetOptions.Mutating with { RequireInteractiveDesktop = false }, timeout.Token);
 
-            var copied = await SandboxCopyService.CopyAsync(
-                target.Channel,
+            var copied = await TargetFileTransferService.CopyAsync(
+                target.Operations,
 
                 // Relative to the guest work root. A rooted guest path is refused outright, so
                 // passing one here would fail before the junction was ever exercised.
-                new SandboxCopyRequest(SandboxCopyDirection.ToGuest, root, guestFolder),
+                new TargetTransferRequest(TargetTransferDirection.ToTarget, root, guestFolder),
                 timeout.Token);
 
             Assert.AreEqual(1, copied.Transferred, "Only the file genuinely inside the folder may be copied.");
 
-            var guestFiles = await target.Channel.ListFilesAsync(
+            var guestFiles = await target.Operations.ListFilesAsync(
                 new GuestPathScope(GuestRootNames.Work, Scope: null), timeout.Token);
 
             Assert.IsFalse(
@@ -561,7 +561,7 @@ public partial class SandboxLiveE2ETests
                 guestFiles.Any(f => f.RelativePath.Contains("included.txt", StringComparison.OrdinalIgnoreCase)),
                 "The real file must still be copied.");
 
-            await target.Channel.DeleteFilesAsync(
+            await target.Operations.DeleteFilesAsync(
                 new GuestPathScope(GuestRootNames.Work, Scope: null),
                 [.. guestFiles
                     .Where(f => f.RelativePath.Contains(guestFolder, StringComparison.OrdinalIgnoreCase))
@@ -822,7 +822,7 @@ public partial class SandboxLiveE2ETests
     private static Dictionary<string, string> ReadBootstrapMaterial(TargetStateDirectoryProvider provider)
     {
         var material = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var root = provider.GetTargetRoot(ExecutionTargetRef.WindowsSandboxDefault, create: false);
+        var root = provider.GetTargetRoot(WindowsSandboxTarget.Default, create: false);
 
         if (!root.Exists)
         {
@@ -869,7 +869,7 @@ public partial class SandboxLiveE2ETests
 
         var running = await CreateCli().ListAsync(TestContext.CancellationToken);
         var owned = new TargetStateStore(new TargetStateDirectoryProvider())
-            .Read(ExecutionTargetRef.WindowsSandboxDefault)?.InstanceId;
+            .Read(WindowsSandboxTarget.Default)?.InstanceId;
 
         if (running.Any(id => !string.Equals(id, owned, StringComparison.OrdinalIgnoreCase)))
         {
@@ -893,7 +893,7 @@ public partial class SandboxLiveE2ETests
         try
         {
             var state = new TargetStateStore(new TargetStateDirectoryProvider())
-                .Read(ExecutionTargetRef.WindowsSandboxDefault);
+                .Read(WindowsSandboxTarget.Default);
 
             if (state?.InstanceId is { Length: > 0 } instanceId)
             {

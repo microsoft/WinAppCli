@@ -9,14 +9,15 @@ using WinApp.Cli.Telemetry.Events;
 namespace WinApp.Cli.Tests;
 
 /// <summary>
-/// What telemetry may record about the generic Sandbox escape hatches
+/// What telemetry may record about the generic execution-target escape hatches
 /// (spec §"Telemetry").
 /// </summary>
 /// <remarks>
-/// `sandbox exec` and `sandbox cp` carry whatever a caller needs to run or move: credentials in an
-/// argument, a customer name in a path, a token on a command line. The specification therefore
-/// excludes executable and argument values, environment variables, host and guest paths, streams,
-/// and file names outright.
+/// `target exec`, `target push`, and `target pull` carry whatever a caller needs to run or move:
+/// credentials in an argument, a customer name in a path, a token on a command line. The
+/// specification therefore excludes executable and argument values, environment variables, host
+/// and target paths, streams, and file names outright. The resolved target kind is recorded; the
+/// selector string the user typed is not.
 /// <para>
 /// The existing redaction already satisfies that — string, file, and directory values are recorded
 /// as the constant <c>[string]</c> rather than their content. These tests exist so that stays true:
@@ -25,7 +26,7 @@ namespace WinApp.Cli.Tests;
 /// </para>
 /// </remarks>
 [TestClass]
-public class SandboxTelemetryTests : BaseCommandTests
+public class TargetTelemetryTests : BaseCommandTests
 {
     /// <summary>Values that must never reach telemetry, whatever shape the command takes.</summary>
     private static readonly string[] MustNotAppear =
@@ -35,26 +36,26 @@ public class SandboxTelemetryTests : BaseCommandTests
         "s3cr3t-value",
         @"C:\Customers\Contoso",
         "secret-file.txt",
-        @"C:\Guest\Results",
+        @"Guest\Results",
     ];
 
     protected override IServiceCollection ConfigureServices(IServiceCollection services) => services;
 
     [TestMethod]
-    public void SandboxExec_RecordsNeitherTheCommandNorItsArgumentsNorPaths()
+    public void TargetExec_RecordsNeitherTheCommandNorItsArgumentsNorPaths()
     {
         var context = CreateContextFor(
-            "sandbox", "exec", "--cwd", @"C:\Customers\Contoso",
+            "target", "exec", "sandbox", "--cwd", @"C:\Customers\Contoso",
             "--", "dotnet", "run", "--token", "s3cr3t-value");
 
         AssertNothingSensitive(context);
     }
 
     [TestMethod]
-    public void SandboxCopy_RecordsNeitherEndpointNorFileName()
+    public void TargetPush_RecordsNeitherEndpointNorFileName()
     {
         var context = CreateContextFor(
-            "sandbox", "cp", @"C:\Customers\Contoso\secret-file.txt", @"sandbox:C:\Guest\Results");
+            "target", "push", "sandbox", @"C:\Customers\Contoso\secret-file.txt", @"Guest\Results");
 
         AssertNothingSensitive(context);
     }
@@ -66,7 +67,7 @@ public class SandboxTelemetryTests : BaseCommandTests
     public void Run_RecordsNeitherApplicationArgumentsNorPaths()
     {
         var context = CreateContextFor(
-            "run", @"C:\Customers\Contoso", "--sandbox", "--args", "--token s3cr3t-value");
+            "run", @"C:\Customers\Contoso", "--on", "sandbox", "--args", "--token s3cr3t-value");
 
         AssertNothingSensitive(context);
     }
@@ -78,7 +79,7 @@ public class SandboxTelemetryTests : BaseCommandTests
             Assert.DoesNotContain(
                 value,
                 context,
-                $"'{value}' must never reach telemetry from a Sandbox command; recorded context was: {context}");
+                $"'{value}' must never reach telemetry from an execution-target command; recorded context was: {context}");
         }
     }
 

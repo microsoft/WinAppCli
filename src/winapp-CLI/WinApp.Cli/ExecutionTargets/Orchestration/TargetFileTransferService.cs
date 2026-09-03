@@ -6,11 +6,55 @@ using WinApp.Cli.ExecutionTargets.GuestAgent;
 
 namespace WinApp.Cli.ExecutionTargets.Orchestration;
 
+/// <summary>Which way a transfer moves files.</summary>
+/// <remarks>
+/// Set by the verb the user typed — <c>push</c> or <c>pull</c> — rather than inferred from a prefix
+/// on one of the paths. A verb cannot be ambiguous about which side is being overwritten, and it
+/// leaves both paths as ordinary Windows paths that nothing has to strip a marker off first.
+/// </remarks>
+internal enum TargetTransferDirection
+{
+    /// <summary>Host to target.</summary>
+    ToTarget,
+
+    /// <summary>Target to host.</summary>
+    FromTarget,
+}
+
+/// <summary>One directed transfer between this machine and a target.</summary>
+/// <param name="Direction">Which way files move.</param>
+/// <param name="HostPath">The endpoint on this machine, always fully qualified.</param>
+/// <param name="TargetPath">The endpoint on the target, relative to its managed work area.</param>
+internal sealed record TargetTransferRequest(
+    TargetTransferDirection Direction,
+    string HostPath,
+    string TargetPath)
+{
+    /// <summary>Validates and normalises the two endpoints a transfer verb was given.</summary>
+    /// <exception cref="ExecutionTargetException">Either endpoint is missing or empty.</exception>
+    public static TargetTransferRequest Create(
+        TargetTransferDirection direction,
+        string? hostPath,
+        string? targetPath)
+    {
+        if (string.IsNullOrWhiteSpace(hostPath) || string.IsNullOrWhiteSpace(targetPath))
+        {
+            throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.TargetInvalid,
+                "A transfer needs both a source and a destination.",
+                userAction: "Give the target, then the source, then the destination.",
+                example: @"winapp target push sandbox .\setup.ps1 Setup\setup.ps1");
+        }
+
+        return new TargetTransferRequest(direction, Path.GetFullPath(hostPath), targetPath);
+    }
+}
+
 /// <summary>What a copy actually did.</summary>
 /// <param name="Transferred">Files whose content moved.</param>
 /// <param name="Skipped">Files already identical at the destination.</param>
 /// <param name="Bytes">Total bytes transferred.</param>
-internal sealed record SandboxCopyResult(int Transferred, int Skipped, long Bytes);
+internal sealed record TargetTransferResult(int Transferred, int Skipped, long Bytes);
 
 /// <summary>
 /// Copies files and directories between the host and managed guest storage
@@ -19,46 +63,46 @@ internal sealed record SandboxCopyResult(int Transferred, int Skipped, long Byte
 /// <remarks>
 /// Built on the same channel primitives deployment uses, so hashing, verification, atomic
 /// replacement, and containment behave identically whether a file arrived through
-/// <c>winapp run --sandbox</c> or <c>winapp sandbox cp</c>. A second transfer path would be a second
+/// <c>winapp run --on sandbox</c> or <c>winapp target push</c>. A second transfer path would be a second
 /// set of bugs.
 /// <para>
 /// Unchanged files are skipped by content hash rather than timestamp, because the point of skipping
 /// is to make a repeated copy cheap without ever leaving stale content behind.
 /// </para>
 /// </remarks>
-internal static class SandboxCopyService
+internal static class TargetFileTransferService
 {
     /// <summary>Guest scope arbitrary copies land in.</summary>
     /// <remarks>
-    /// Copies address the general-purpose work area rather than a deployment, so a `cp` can never
+    /// Copies address the general-purpose work area rather than a deployment, so a push or pull can never
     /// disturb a deployment's exact desired state and cause its next reconciliation to fight it.
     /// </remarks>
     internal static GuestPathScope WorkScope { get; } = new(GuestRootNames.Work, Scope: null);
 
     /// <summary>Performs a parsed copy.</summary>
-    public static Task<SandboxCopyResult> CopyAsync(
-        GuestCommandChannel channel,
-        SandboxCopyRequest request,
+    public static Task<TargetTransferResult> CopyAsync(
+        ITargetOperationExecutor channel,
+        TargetTransferRequest request,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(channel);
         ArgumentNullException.ThrowIfNull(request);
 
-        return request.Direction == SandboxCopyDirection.ToGuest
-            ? CopyToGuestAsync(channel, request, cancellationToken)
-            : CopyFromGuestAsync(channel, request, cancellationToken);
+        return request.Direction == TargetTransferDirection.ToTarget
+            ? CopyToTargetAsync(channel, request, cancellationToken)
+            : CopyFromTargetAsync(channel, request, cancellationToken);
     }
 
-    private static async Task<SandboxCopyResult> CopyToGuestAsync(
-        GuestCommandChannel channel,
-        SandboxCopyRequest request,
+    private static async Task<TargetTransferResult> CopyToTargetAsync(
+        ITargetOperationExecutor channel,
+        TargetTransferRequest request,
         CancellationToken cancellationToken)
     {
         var sources = EnumerateHostSources(request.HostPath, cancellationToken, out var sourceRoot);
 
         // Recorded from what the caller actually named, not re-derived later. `sourceRoot` is the
         // *parent directory* of a named file, so asking File.Exists about it always answered "no",
-        // and a file copied to sandbox:...\setup.ps1 landed at ...\setup.ps1\setup.ps1.
+        // and a file pushed to ...\setup.ps1 landed at ...\setup.ps1\setup.ps1.
         var singleFile = File.Exists(request.HostPath);
         var existing = await channel.ListFilesAsync(WorkScope, cancellationToken).ConfigureAwait(false);
 
@@ -72,8 +116,8 @@ internal static class SandboxCopyService
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var relativePath = CombineGuestRelativePath(
-                request.GuestPath, sourceRoot, source.FullName, singleFile);
+            var relativePath = CombineTargetRelativePath(
+                request.TargetPath, sourceRoot, source.FullName, singleFile);
 
             // Re-proven immediately before the file is read, so a link planted between the walk and
             // the copy — as an ancestor, as the source root, or as the file itself — is refused
@@ -117,16 +161,16 @@ internal static class SandboxCopyService
             bytes += source.Length;
         }
 
-        return new SandboxCopyResult(transferred, skipped, bytes);
+        return new TargetTransferResult(transferred, skipped, bytes);
     }
 
-    private static async Task<SandboxCopyResult> CopyFromGuestAsync(
-        GuestCommandChannel channel,
-        SandboxCopyRequest request,
+    private static async Task<TargetTransferResult> CopyFromTargetAsync(
+        ITargetOperationExecutor channel,
+        TargetTransferRequest request,
         CancellationToken cancellationToken)
     {
         var guestFiles = await channel.ListFilesAsync(WorkScope, cancellationToken).ConfigureAwait(false);
-        var prefix = NormalizeGuestRelative(request.GuestPath);
+        var prefix = NormalizeTargetRelative(request.TargetPath);
 
         var matches = guestFiles
             .Where(f => IsUnderPrefix(f.RelativePath, prefix))
@@ -136,9 +180,9 @@ internal static class SandboxCopyService
         {
             throw ExecutionTargetException.Create(
                 ExecutionTargetErrorCodes.ArtifactFailed,
-                $"Nothing at '{request.GuestPath}' in the Sandbox to copy.",
+                $"Nothing at '{request.TargetPath}' on the target to copy.",
                 userAction: "Check the path, then retry.",
-                context: new Dictionary<string, string> { ["guestPath"] = request.GuestPath });
+                context: new Dictionary<string, string> { ["targetPath"] = request.TargetPath });
         }
 
         var transferred = 0;
@@ -179,7 +223,7 @@ internal static class SandboxCopyService
             bytes += file.Size;
         }
 
-        return new SandboxCopyResult(transferred, Skipped: 0, bytes);
+        return new TargetTransferResult(transferred, Skipped: 0, bytes);
     }
 
     /// <summary>Proves what arrived is what the guest said it was sending.</summary>
@@ -276,22 +320,22 @@ internal static class SandboxCopyService
             context: new Dictionary<string, string> { ["hostPath"] = hostPath });
 
     /// <summary>Builds the guest-relative path one source file should land at.</summary>
-    /// <param name="guestPath">Destination the caller asked for.</param>
+    /// <param name="targetPath">Destination the caller asked for.</param>
     /// <param name="sourceRoot">Directory relative paths are measured from.</param>
     /// <param name="sourceFile">The file being placed.</param>
     /// <param name="singleFile">
     /// Whether the caller named one file rather than a folder. Passed in from what was actually
     /// named: it cannot be re-derived here, because <paramref name="sourceRoot"/> is the file's
     /// parent directory, so an existence check on it always reported "not a file" and turned
-    /// <c>cp .\setup.ps1 sandbox:Setup\setup.ps1</c> into <c>Setup\setup.ps1\setup.ps1</c>.
+    /// <c>push sandbox .\setup.ps1 Setup\setup.ps1</c> into <c>Setup\setup.ps1\setup.ps1</c>.
     /// </param>
-    private static string CombineGuestRelativePath(
-        string guestPath,
+    private static string CombineTargetRelativePath(
+        string targetPath,
         string sourceRoot,
         string sourceFile,
         bool singleFile)
     {
-        var target = NormalizeGuestRelative(guestPath);
+        var target = NormalizeTargetRelative(targetPath);
 
         // A single file lands exactly where it was pointed, whatever it is called on the host.
         if (singleFile)
@@ -354,37 +398,37 @@ internal static class SandboxCopyService
     /// </para>
     /// <para>
     /// A drive-absolute or rooted path is therefore <b>refused</b> rather than quietly stripped of
-    /// its root. Accepting <c>sandbox:C:\Setup\setup.ps1</c> and silently placing it at
+    /// its root. Accepting <c>C:\Setup\setup.ps1</c> as a target path and silently placing it at
     /// <c>C:\WinApp\work\Setup\setup.ps1</c> means the next command — which uses the path the user
     /// actually typed — cannot find it, and the copy reports success. Saying so plainly costs one
     /// error message and saves that entire class of confusion.
     /// </para>
     /// </remarks>
     /// <exception cref="ExecutionTargetException">The path is rooted, or escapes the work root.</exception>
-    internal static string NormalizeGuestRelative(string guestPath)
+    internal static string NormalizeTargetRelative(string targetPath)
     {
-        var path = (guestPath ?? string.Empty).Replace('/', '\\').Trim();
+        var path = (targetPath ?? string.Empty).Replace('/', '\\').Trim();
 
         if (path.StartsWith(@"\\", StringComparison.Ordinal))
         {
-            throw RootedGuestPath(guestPath!, "a UNC path");
+            throw RootedTargetPath(targetPath!, "a UNC path");
         }
 
         if (path.Length >= 2 && path[1] == ':')
         {
-            throw RootedGuestPath(guestPath!, "a drive-absolute path");
+            throw RootedTargetPath(targetPath!, "a drive-absolute path");
         }
 
         if (path.StartsWith('\\'))
         {
-            throw RootedGuestPath(guestPath!, "a rooted path");
+            throw RootedTargetPath(targetPath!, "a rooted path");
         }
 
         foreach (var segment in path.Split('\\', StringSplitOptions.RemoveEmptyEntries))
         {
             if (segment is "..")
             {
-                throw RootedGuestPath(guestPath!, "a path that leaves the managed folder");
+                throw RootedTargetPath(targetPath!, "a path that leaves the managed folder");
             }
         }
 
@@ -396,18 +440,18 @@ internal static class SandboxCopyService
     /// Reported on success so the effective location is never left implicit — the caller can copy
     /// it straight into the <c>--cwd</c> of the command they run next.
     /// </remarks>
-    internal static string DescribeGuestPath(string relativePath) =>
+    internal static string DescribeTargetPath(string relativePath) =>
         relativePath.Length == 0 ? GuestWorkRoot : $@"{GuestWorkRoot}\{relativePath}";
 
-    private static ExecutionTargetException RootedGuestPath(string guestPath, string what) =>
+    private static ExecutionTargetException RootedTargetPath(string targetPath, string what) =>
         ExecutionTargetException.Create(
             ExecutionTargetErrorCodes.TargetAmbiguous,
-            $"'{guestPath}' is {what}, and Sandbox paths are relative to '{GuestWorkRoot}'.",
+            $"'{targetPath}' is {what}, and target paths are relative to '{GuestWorkRoot}'.",
             userAction:
                 $"Drop the leading drive or separator and pass a relative path. It lands under " +
                 $"'{GuestWorkRoot}', which is what a following command should use as its working directory.",
-            example: @"winapp sandbox cp .\setup.ps1 sandbox:Setup\setup.ps1",
-            context: new Dictionary<string, string> { ["guestPath"] = guestPath });
+            example: @"winapp target push sandbox .\setup.ps1 Setup\setup.ps1",
+            context: new Dictionary<string, string> { ["targetPath"] = targetPath });
 
     private static bool IsUnderPrefix(string relativePath, string prefix) =>
         prefix.Length == 0 ||

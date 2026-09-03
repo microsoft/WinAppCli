@@ -6,6 +6,7 @@ using Spectre.Console;
 using System.CommandLine;
 using System.Runtime.InteropServices;
 using System.Text;
+using WinApp.Cli.ExecutionTargets.Abstractions;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
@@ -90,7 +91,7 @@ internal partial class RunCommand
             string? selectionReason,
             string? appArgs,
             bool isJson,
-            bool sandbox,
+            ExecutionTargetRef executionTarget,
             CancellationToken cancellationToken)
         {
             // Project-mode build inputs.
@@ -226,11 +227,11 @@ internal partial class RunCommand
                 ? await RunPackagedProjectAsync(
                     resolution, csproj, manifest, outputAppXDirectory, appArgs,
                     noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, noBuild, isJson,
-                    sandbox, cancellationToken)
+                    executionTarget, cancellationToken)
                 : await RunUnpackagedProjectAsync(
                     resolution, csproj, appArgs,
                     noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, manifest, outputAppXDirectory, isJson,
-                    sandbox, cancellationToken);
+                    executionTarget, cancellationToken);
         }
 
         /// <summary>
@@ -254,7 +255,7 @@ internal partial class RunCommand
             string? executable,
             bool noBuild,
             bool isJson,
-            bool sandbox,
+            ExecutionTargetRef executionTarget,
             CancellationToken cancellationToken)
         {
             var targetDir = new DirectoryInfo(resolution.TargetDir);
@@ -277,7 +278,7 @@ internal partial class RunCommand
             return await ExecuteRunPipelineAsync(
                 targetDir, manifest, outputAppXDirectory, appArgs,
                 noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, isJson,
-                runtimeArch: resolution.Architecture, projectFile: csproj, framework: resolution.Framework, noRestore: resolution.NoRestore, sandbox, cancellationToken);
+                runtimeArch: resolution.Architecture, projectFile: csproj, framework: resolution.Framework, noRestore: resolution.NoRestore, executionTarget, cancellationToken);
         }
 
         /// <summary>
@@ -300,7 +301,7 @@ internal partial class RunCommand
             FileInfo? manifest,
             DirectoryInfo? outputAppXDirectory,
             bool isJson,
-            bool sandbox,
+            ExecutionTargetRef executionTarget,
             CancellationToken cancellationToken)
         {
             // AUTHORITATIVE gate — rejects packaged-only options once packaging is definitively known.
@@ -312,7 +313,7 @@ internal partial class RunCommand
                 return Fail(BuildUnpackagedIncompatibleMessage(rejected, csproj.Name), isJson);
             }
 
-            if (sandbox)
+            if (!executionTarget.IsLocal)
             {
                 return await ExecuteUnpackagedSandboxRunAsync(
                     resolution, csproj, appArgs, debugOutput, detach, isJson, cancellationToken);

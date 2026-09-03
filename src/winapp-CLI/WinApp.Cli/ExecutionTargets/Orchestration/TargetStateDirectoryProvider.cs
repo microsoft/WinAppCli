@@ -43,7 +43,7 @@ internal sealed class TargetStateDirectoryProvider(string? rootOverride = null) 
     {
         ArgumentNullException.ThrowIfNull(target);
 
-        var root = TargetPathSafety.CombineInsideRoot(GetTargetsRoot(), target.Slug);
+        var root = TargetPathSafety.CombineInsideRoot(GetTargetsRoot(), target.StateKey);
         var directory = new DirectoryInfo(root);
         if (create && !directory.Exists)
         {

@@ -6,6 +6,8 @@ using WinApp.Cli.ExecutionTargets.Abstractions;
 using WinApp.Cli.ExecutionTargets.GuestAgent;
 using WinApp.Cli.ExecutionTargets.Orchestration;
 
+using WinApp.Cli.ExecutionTargets.WindowsSandbox;
+
 namespace WinApp.Cli.Tests;
 
 /// <summary>
@@ -21,7 +23,7 @@ namespace WinApp.Cli.Tests;
 [TestClass]
 public class TargetDeploymentServiceTests
 {
-    private static readonly ExecutionTargetRef Target = ExecutionTargetRef.WindowsSandboxDefault;
+    private static readonly ExecutionTargetRef Target = WindowsSandboxTarget.Default;
     private static readonly ExecutionTargetEpoch Epoch = ExecutionTargetEpoch.Create("sandbox-1", "nonce-a");
     private static readonly string[] RemovedStaleDll = ["stale.dll"];
 
@@ -388,7 +390,7 @@ public class TargetDeploymentServiceTests
     {
         public DirectoryInfo GetTargetRoot(ExecutionTargetRef target, bool create)
         {
-            var directory = new DirectoryInfo(TestPaths.Under(root, target.Slug));
+            var directory = new DirectoryInfo(TestPaths.Under(root, target.StateKey));
 
             if (create)
             {

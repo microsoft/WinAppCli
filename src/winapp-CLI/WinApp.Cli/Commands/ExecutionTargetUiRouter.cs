@@ -34,7 +34,7 @@ namespace WinApp.Cli.Commands;
 /// <param name="RequiresRealInput">
 /// Whether the guest should re-probe input readiness before starting the command.
 /// </param>
-internal sealed record SandboxUiRequirements(bool RequiresInteractiveDesktop, bool RequiresRealInput)
+internal sealed record TargetUiRequirements(bool RequiresInteractiveDesktop, bool RequiresRealInput)
 {
     /// <summary>Verbs that only read UI Automation state.</summary>
     /// <remarks>
@@ -55,10 +55,10 @@ internal sealed record SandboxUiRequirements(bool RequiresInteractiveDesktop, bo
     };
 
     /// <summary>Requirements for a verb that reads without touching anything.</summary>
-    public static SandboxUiRequirements ReadOnly { get; } = new(false, false);
+    public static TargetUiRequirements ReadOnly { get; } = new(false, false);
 
     /// <summary>Requirements for a verb that injects input or captures the screen.</summary>
-    public static SandboxUiRequirements Interactive { get; } = new(true, true);
+    public static TargetUiRequirements Interactive { get; } = new(true, true);
 
     /// <summary>Classifies the parsed command.</summary>
     /// <remarks>
@@ -66,7 +66,7 @@ internal sealed record SandboxUiRequirements(bool RequiresInteractiveDesktop, bo
     /// merely contains a verb's name — a selector or a file path — cannot change how the command is
     /// gated. An unrecognized verb gets the stricter treatment.
     /// </remarks>
-    public static SandboxUiRequirements For(ParseResult parseResult)
+    public static TargetUiRequirements For(ParseResult parseResult)
     {
         ArgumentNullException.ThrowIfNull(parseResult);
 
@@ -77,30 +77,31 @@ internal sealed record SandboxUiRequirements(bool RequiresInteractiveDesktop, bo
 }
 
 /// <summary>
-/// The single place a <c>winapp ui</c> command is diverted into the guest
-/// (spec §"UI command routing").
+/// The single place a <c>winapp ui</c> command is diverted onto an execution target.
 /// </summary>
 /// <remarks>
 /// Interception happens before any local UI service runs, rather than inside each verb. Twenty-odd
-/// handlers each remembering to check a flag is twenty-odd chances for one of them to perform UI
+/// handlers each remembering to check a selector is twenty-odd chances for one of them to perform UI
 /// Automation, window discovery, capture, or input injection on the host desktop when the user asked
-/// for the Sandbox — which is the one thing <c>--sandbox</c> exists to prevent.
+/// for somewhere else — which is the one thing <c>--on</c> exists to prevent.
 /// <para>
-/// Guest winapp parses and executes the ordinary command. The host rewrites only routing-specific
-/// arguments, relays the standard streams and exit code, brings any declared output file back, and
-/// rewrites the guest path in the result so the caller sees the path they asked for.
+/// The target's own winapp parses and executes the ordinary command. The host rewrites only
+/// routing-specific arguments, relays the standard streams and exit code, brings any declared output
+/// file back, and rewrites the target path in the result so the caller sees the path they asked for.
 /// </para>
 /// </remarks>
-internal sealed class SandboxUiRouter(
+internal sealed class ExecutionTargetUiRouter(
     ExecutionTargetOrchestrator orchestrator,
     IAnsiConsole console)
 {
     /// <summary>
-    /// Whether this invocation must run in the guest.
+    /// Whether this invocation must run somewhere other than this machine.
     /// </summary>
     /// <remarks>
-    /// Decided from the parsed result, not by scanning tokens: the parser already knows which
-    /// spelling of the flag was used and which value the application target resolved to.
+    /// Decided from the parsed result rather than by scanning raw tokens, and only for a <c>ui</c>
+    /// command: the parser already knows which spelling of <c>--on</c> was used and what it resolved
+    /// to. An application value never opts in by itself — a name, a PID, or a window handle carries
+    /// no scope, and inferring one would resolve a host window against the target or the reverse.
     /// </remarks>
     public static bool ShouldRoute(ParseResult parseResult)
     {
@@ -111,22 +112,15 @@ internal sealed class SandboxUiRouter(
             return false;
         }
 
-        if (parseResult.GetValue(SharedUiOptions.SandboxOption))
-        {
-            return true;
-        }
-
-        // A string application target may opt in by prefix, so `-a sandbox:MyApp` routes without
-        // a separate flag. Numeric --window deliberately does not: a handle carries no scope, and
-        // guessing one would resolve a host window against the guest or the reverse.
-        return parseResult.CommandResult.Command.Options.Contains(SharedUiOptions.AppOption) &&
-            UiArgvRouter.IsSandboxTarget(parseResult.GetValue(SharedUiOptions.AppOption));
+        // Safe to resolve without catching: Program validates target selection before dispatch, so
+        // an invalid selector has already failed by the time anything reaches here.
+        return !ExecutionTargetSelection.Resolve(parseResult).IsLocal;
     }
 
     /// <summary>Runs the command in the guest and returns its exit code.</summary>
     public async Task<int> RouteAsync(
         IReadOnlyList<string> arguments,
-        SandboxUiRequirements requirements,
+        TargetUiRequirements requirements,
         bool isJson,
         CancellationToken cancellationToken)
     {
@@ -158,9 +152,9 @@ internal sealed class SandboxUiRouter(
             // preparation or transport. Reported as a target failure with a code and an action,
             // because surfacing it as a bare "OperationCanceled" tells the user nothing about which
             // step gave up or what to do about it.
-            return SandboxOutput.Fail(console, isJson, ExecutionTargetException.Create(
+            return TargetOutput.Fail(console, isJson, ExecutionTargetException.Create(
                 ExecutionTargetErrorCodes.TransportFailed,
-                "The Windows Sandbox did not respond while preparing this command.",
+                $"The {orchestrator.Target.Selector} target did not respond while preparing this command.",
                 userAction:
                     "Retry the command. If it keeps failing, check that the Sandbox window is still " +
                     "connected, or close it so winapp can start a fresh one.",
@@ -175,7 +169,7 @@ internal sealed class SandboxUiRouter(
 
     private async Task<int> RouteCoreAsync(
         IReadOnlyList<string> arguments,
-        SandboxUiRequirements requirements,
+        TargetUiRequirements requirements,
         bool isJson,
         GuestPathScope operationScope,
         CancellationToken cancellationToken)
@@ -201,13 +195,13 @@ internal sealed class SandboxUiRouter(
             var owner = GuestOwnerContext.WithOwner(
                 environment: null,
                 GuestOwnerContext.ResolveGuestToken(
-                    ExecutionTargetRef.WindowsSandboxDefault.Id, target.Epoch.Value));
+                    target.Reference.Id, target.Epoch.Value));
 
             // Buffered only when the guest path would otherwise appear in the result. Streaming is
             // the default so a long-running verb still shows progress as it happens.
             using var buffered = routed.Artifact is null ? null : new MemoryStream();
 
-            var result = await target.Channel.ExecuteAsync(
+            var result = await target.Operations.ExecuteAsync(
                 new GuestExecRequest
                 {
                     UseGuestWinapp = true,
@@ -221,7 +215,7 @@ internal sealed class SandboxUiRouter(
                     RequiresRealInput = requirements.RequiresRealInput,
                 },
                 new GuestExecCallbacks(
-                    OnOperationId: GuestStandardInputPump.Attach(target.Channel, cancellationToken),
+                    OnOperationId: GuestStandardInputPump.Attach(target.Operations, cancellationToken),
                     OnStandardOutput: data =>
                     {
                         if (buffered is not null)
@@ -238,7 +232,7 @@ internal sealed class SandboxUiRouter(
             if (routed.Artifact is { } artifact)
             {
                 await PublishArtifactAsync(
-                    target.Channel, operationScope, artifact, buffered!, result.ExitCode, cancellationToken)
+                    target.Operations, operationScope, artifact, buffered!, result.ExitCode, cancellationToken)
                     .ConfigureAwait(false);
             }
 
@@ -246,7 +240,7 @@ internal sealed class SandboxUiRouter(
         }
         catch (ExecutionTargetException ex)
         {
-            return SandboxOutput.Fail(console, isJson, ex.Error);
+            return TargetOutput.Fail(console, isJson, ex.Error);
         }
     }
 
@@ -260,7 +254,7 @@ internal sealed class SandboxUiRouter(
     /// file from a previous run as this run's result would be worse than reporting nothing.
     /// </remarks>
     private async Task PublishArtifactAsync(
-        GuestCommandChannel channel,
+        ITargetOperationExecutor channel,
         GuestPathScope scope,
         RoutedArtifact artifact,
         MemoryStream buffered,

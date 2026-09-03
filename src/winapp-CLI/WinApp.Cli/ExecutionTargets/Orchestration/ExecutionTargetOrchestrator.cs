@@ -6,10 +6,14 @@ using WinApp.Cli.ExecutionTargets.GuestAgent;
 
 namespace WinApp.Cli.ExecutionTargets.Orchestration;
 
-/// <summary>A prepared execution target: a live channel, its epoch, and how it was obtained.</summary>
-/// <param name="Channel">Ready command channel to the guest agent.</param>
+/// <summary>A prepared execution target: a live executor, its identity, epoch, and how it was obtained.</summary>
+/// <param name="Reference">
+/// Which target this is. Carried on the prepared target so shared orchestration names the selected
+/// target rather than reaching for a hard-coded one, and so every result can report its own scope.
+/// </param>
+/// <param name="Operations">What this target can be asked to do, above the provider boundary.</param>
 /// <param name="Epoch">Generation identity every request and result is fenced against.</param>
-/// <param name="Capabilities">What the guest reported it can do.</param>
+/// <param name="Capabilities">What the target reported it can do.</param>
 /// <param name="Reused">True when an existing instance was reused, driving the progress line.</param>
 /// <param name="MutationLease">
 /// Non-null when this target was prepared with <see cref="PrepareTargetOptions.RequiresMutation"/>
@@ -30,12 +34,16 @@ namespace WinApp.Cli.ExecutionTargets.Orchestration;
 /// target changes guest state, and is released before the application runs.
 /// </remarks>
 internal sealed record PreparedTarget(
-    GuestCommandChannel Channel,
+    ExecutionTargetRef Reference,
+    ITargetOperationExecutor Operations,
     ExecutionTargetEpoch Epoch,
     ExecutionTargetCapabilities Capabilities,
     bool Reused,
     TargetMutationLease? MutationLease = null) : IAsyncDisposable
 {
+    /// <summary>Which target, and which incarnation of it, produced a result.</summary>
+    public ExecutionTargetScope Scope => ExecutionTargetScope.For(Reference, Epoch);
+
     /// <summary>
     /// Releases the mutation lock now, before the channel itself is torn down.
     /// </summary>
@@ -77,7 +85,13 @@ internal sealed record PreparedTarget(
     {
         try
         {
-            await Channel.DisposeAsync().ConfigureAwait(false);
+            // The executor is the target's own resource above the provider boundary, so tearing it
+            // down is a provider concern expressed through IAsyncDisposable rather than something
+            // this record knows how to do for a specific transport.
+            if (Operations is IAsyncDisposable disposable)
+            {
+                await disposable.DisposeAsync().ConfigureAwait(false);
+            }
         }
         finally
         {
@@ -110,7 +124,7 @@ internal sealed record PrepareTargetOptions(bool RequireInteractiveDesktop, bool
 }
 
 /// <summary>
-/// The single entry point every <c>--sandbox</c> command goes through
+/// The single entry point every targeted command goes through
 /// (spec §"Ensure and reuse", §"Shared orchestration").
 /// </summary>
 /// <remarks>
@@ -221,6 +235,7 @@ internal sealed class ExecutionTargetOrchestrator(
             EnsureCapable(options, capabilities);
 
             var prepared = new PreparedTarget(
+                backend.Target,
                 channel,
                 connection.Epoch,
                 capabilities,
@@ -265,6 +280,16 @@ internal sealed class ExecutionTargetOrchestrator(
 
     /// <summary>Provider diagnostics for a failure envelope.</summary>
     public IReadOnlyDictionary<string, string> DescribeForDiagnostics() => backend.DescribeForDiagnostics();
+
+    /// <summary>
+    /// The one non-local target this build's registered provider serves.
+    /// </summary>
+    /// <remarks>
+    /// Exposed so a command can prove the selector it was given names a target that actually exists
+    /// before it prepares anything. It is the provider's own reference, not a constant, so nothing
+    /// above the provider boundary has to know which kind is registered.
+    /// </remarks>
+    public ExecutionTargetRef Target => backend.Target;
 
     /// <summary>
     /// Acquires a fresh mutation lease against this target's own connection, without going through

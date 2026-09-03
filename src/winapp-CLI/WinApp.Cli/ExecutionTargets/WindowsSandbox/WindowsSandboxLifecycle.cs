@@ -32,7 +32,7 @@ internal enum SandboxInstanceOrigin
     RecoveredStart,
 
     /// <summary>
-    /// A Sandbox winapp did not start, taken over because <c>--sandbox</c> asked for one and
+    /// A Sandbox winapp did not start, taken over because <c>--on sandbox</c> asked for one and
     /// Windows allows only one at a time.
     /// </summary>
     Adopted,
@@ -81,7 +81,7 @@ internal sealed record SandboxInstanceLease(
 /// </summary>
 /// <remarks>
 /// <para>
-/// Windows permits only one Sandbox at a time, and <c>--sandbox</c> is explicit consent to make
+/// Windows permits only one Sandbox at a time, and <c>--on sandbox</c> is explicit consent to make
 /// that one usable. So a Sandbox that is already running is taken over rather than refused: asking
 /// the user to close it would mean the flag they just passed could not do the thing they passed it
 /// for. Taking it over does change the guest — see <see cref="AdoptRunningInstanceAsync"/> — but the
@@ -100,7 +100,7 @@ internal sealed class WindowsSandboxLifecycle(
     ITargetStateStore stateStore,
     ITargetProgress? progress = null)
 {
-    private readonly ExecutionTargetRef _target = ExecutionTargetRef.WindowsSandboxDefault;
+    private readonly ExecutionTargetRef _target = WindowsSandboxTarget.Default;
     private readonly ITargetProgress _progress = progress ?? NullTargetProgress.Instance;
 
     /// <summary>How long to keep polling for an instance an unconfirmed start may have created.</summary>
@@ -373,14 +373,14 @@ internal sealed class WindowsSandboxLifecycle(
     /// <remarks>
     /// <para>
     /// This is a deliberate product decision, not a fallback. Windows allows one Sandbox, and a user
-    /// who typed <c>--sandbox</c> asked for their command to run in it; refusing because something
+    /// who typed <c>--on sandbox</c> asked for their command to run in it; refusing because something
     /// is already there would make the flag unusable exactly when a Sandbox is available.
     /// </para>
     /// <para>
     /// Taking over is <b>not</b> read-only and is not reversible. Preparing the guest maps winapp's
     /// bootstrap folders into it, connects its client, enables Developer Mode, and adds an inbound
     /// firewall rule for the agent. Anything already running in that guest shares the session with
-    /// what winapp deploys, which is the trust model <c>--sandbox</c> documents. Nothing existing is
+    /// what winapp deploys, which is the trust model <c>--on sandbox</c> documents. Nothing existing is
     /// removed and the instance is never stopped.
     /// </para>
     /// <para>
@@ -407,7 +407,7 @@ internal sealed class WindowsSandboxLifecycle(
                     // Stopping a Sandbox winapp did not start can destroy the user's work.
                     Advisory = true,
                 },
-                example: "winapp run . --sandbox");
+                example: "winapp run . --on sandbox");
         }
 
         _progress.Report(AdoptingMessage);
@@ -464,7 +464,7 @@ internal sealed class WindowsSandboxLifecycle(
                 {
                     ["sandboxIds"] = string.Join(',', running),
                 },
-                example: "winapp run . --sandbox");
+                example: "winapp run . --on sandbox");
 
     /// <summary>Refuses a host with more running Sandboxes than winapp can account for.</summary>
     internal static ExecutionTargetException AmbiguousInstances(IReadOnlyList<string> running)
@@ -480,7 +480,7 @@ internal sealed class WindowsSandboxLifecycle(
                 ["sandboxIds"] = string.Join(',', running),
                 ["count"] = running.Count.ToString(CultureInfo.InvariantCulture),
             },
-            example: "winapp run . --sandbox");
+            example: "winapp run . --on sandbox");
     }
 
     /// <summary>Whether a failure says the Sandbox singleton is already in use.</summary>

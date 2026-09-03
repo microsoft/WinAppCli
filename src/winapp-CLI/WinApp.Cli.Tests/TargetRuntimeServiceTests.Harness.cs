@@ -15,6 +15,8 @@ using WinApp.Cli.Services;
 using WinApp.Cli.Telemetry;
 using WinApp.Cli.Telemetry.Events;
 
+using WinApp.Cli.ExecutionTargets.WindowsSandbox;
+
 namespace WinApp.Cli.Tests;
 
 public partial class TargetRuntimeServiceTests
@@ -75,7 +77,7 @@ public partial class TargetRuntimeServiceTests
                 mutationLockPath, FileMode.Create, FileAccess.ReadWrite, FileShare.None);
             _mutationLease = new TargetMutationLease(mutationStream, wasAbandoned: false);
 
-            Prepared = new PreparedTarget(
+            Prepared = new PreparedTarget(WindowsSandboxTarget.Default, 
                 channel,
                 currentEpoch,
                 new ExecutionTargetCapabilities
@@ -162,7 +164,7 @@ public partial class TargetRuntimeServiceTests
     {
         public DirectoryInfo GetTargetRoot(ExecutionTargetRef target, bool create)
         {
-            var directory = new DirectoryInfo(TestPaths.Under(root, target.Slug));
+            var directory = new DirectoryInfo(TestPaths.Under(root, target.StateKey));
 
             if (create)
             {

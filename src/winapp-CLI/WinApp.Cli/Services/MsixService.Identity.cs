@@ -136,7 +136,7 @@ internal partial class MsixService
     /// is going somewhere else. An execution target needs the materialized layout and the identity
     /// parsed out of it, and nothing more: installing a runtime on the host for an app that will run
     /// in a guest would change the developer's machine for no reason, and registering the package
-    /// here would mean a <c>--sandbox</c> run silently deployed to the host as well.
+    /// here would mean a <c>--on sandbox</c> run silently deployed to the host as well.
     /// <para>
     /// Materialization itself is byte-for-byte the same work in both modes, deliberately: a layout
     /// that behaves differently depending on where it is going would make a guest failure impossible
@@ -154,7 +154,7 @@ internal partial class MsixService
         if (!devModeService.IsEnabled() && outcome == LooseLayoutOutcome.Registered)
         {
             // Only registration needs Developer Mode. Requiring it to materialize a layout would
-            // make a host that never registers anything — the `--sandbox` case — fail on a
+            // make a host that never registers anything — the `--on sandbox` case — fail on a
             // prerequisite for a step it does not perform; the guest checks its own.
             throw new InvalidOperationException("Developer Mode is not enabled on this machine. Please enable Developer Mode and try again.");
         }

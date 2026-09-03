@@ -48,7 +48,7 @@ internal sealed record GuestExecResult(int ExitCode, int ProcessId);
 /// cancelled operation is normal and must not tear down the channel.
 /// </para>
 /// </remarks>
-internal sealed class GuestCommandChannel : IAsyncDisposable
+internal sealed class GuestCommandChannel : IAsyncDisposable, ITargetOperationExecutor
 {
     private readonly IGuestTransport _transport;
     private readonly string _targetEpoch;

@@ -37,11 +37,11 @@ internal interface IWindowsSandboxSetup
 }
 
 /// <summary>
-/// Performs Windows Sandbox prerequisite setup automatically, because <c>--sandbox</c> asked for it.
+/// Performs Windows Sandbox prerequisite setup automatically, because <c>--on sandbox</c> asked for it.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Passing <c>--sandbox</c> is explicit consent to do everything feasible to make Windows Sandbox
+/// Passing <c>--on sandbox</c> is explicit consent to do everything feasible to make Windows Sandbox
 /// usable in one command. So this enables the optional feature and initializes the Store-delivered
 /// client without a second flag, a subcommand, or a prompt. Only the things winapp genuinely cannot
 /// do are handed back: a denied or unavailable UAC elevation, a restart, an unsupported edition, and
@@ -151,7 +151,7 @@ internal sealed class WindowsSandboxSetup(
                 {
                     ["osVersion"] = Environment.OSVersion.Version.ToString(),
                 },
-                example: "winapp run . --sandbox");
+                example: "winapp run . --on sandbox");
         }
 
         if (facts.State is WindowsSandboxSetupState.FeaturePayloadMissing)
@@ -175,7 +175,7 @@ internal sealed class WindowsSandboxSetup(
                 "Windows is still updating the Windows Sandbox client.",
                 userAction: "Wait for Windows to finish, then run the command again.",
                 context: Detail(facts, facts.Detail),
-                example: "winapp run . --sandbox");
+                example: "winapp run . --on sandbox");
         }
 
         return await InitializeClientAsync(facts, cancellationToken).ConfigureAwait(false);
@@ -212,7 +212,7 @@ internal sealed class WindowsSandboxSetup(
                         // needs a restart, so running it stays the user's decision.
                         Advisory = true,
                     },
-                    example: "winapp run . --sandbox");
+                    example: "winapp run . --on sandbox");
 
             case FeatureEnableOutcome.RestartRequired:
                 throw ExecutionTargetException.Create(
@@ -220,7 +220,7 @@ internal sealed class WindowsSandboxSetup(
                     "The Windows Sandbox feature was enabled and Windows needs a restart to finish.",
                     userAction: "Restart Windows, then run the command again.",
                     context: Detail(facts, result.Detail),
-                    example: "winapp run . --sandbox");
+                    example: "winapp run . --on sandbox");
 
             case FeatureEnableOutcome.Failed:
                 throw ExecutionTargetException.Create(
@@ -230,7 +230,7 @@ internal sealed class WindowsSandboxSetup(
                         "Check that this edition supports Windows Sandbox, that hardware virtualization is "
                         + "enabled in firmware, and that policy allows optional features, then retry.",
                     context: Detail(facts, result.Detail),
-                    example: "winapp run . --sandbox");
+                    example: "winapp run . --on sandbox");
         }
 
         // Enabled without a restart. Re-measured rather than assumed: the client still has to
@@ -249,7 +249,7 @@ internal sealed class WindowsSandboxSetup(
                     "Windows may still be finishing. Wait, run the command again, and restart Windows if it "
                     + "keeps reporting this.",
                 context: Detail(facts, result.Detail),
-                example: "winapp run . --sandbox");
+                example: "winapp run . --on sandbox");
         }
 
         return facts;
@@ -288,7 +288,7 @@ internal sealed class WindowsSandboxSetup(
                     "Windows Sandbox is installed but its client could not be started to finish setting up.",
                     userAction: "Start Windows Sandbox once from the Start menu, then retry.",
                     context: Detail(facts, ex.Message),
-                    example: "winapp run . --sandbox",
+                    example: "winapp run . --on sandbox",
                     innerException: ex);
             }
         }
@@ -320,7 +320,7 @@ internal sealed class WindowsSandboxSetup(
                         "Windows may still be working in the background. Wait for it to finish, then run the "
                         + "command again — retrying continues the installation rather than restarting it.",
                     context: Detail(facts, facts.Detail),
-                    example: "winapp run . --sandbox");
+                    example: "winapp run . --on sandbox");
             }
 
             if (now >= nextProgress)

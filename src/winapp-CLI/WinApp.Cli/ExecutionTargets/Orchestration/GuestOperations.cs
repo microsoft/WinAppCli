@@ -109,7 +109,7 @@ internal static class GuestRootNames
     /// <summary>Staging for runtime payloads awaiting installation.</summary>
     public const string Runtimes = "runtimes";
 
-    /// <summary>Free-form working area for <c>sandbox cp</c> and <c>sandbox exec</c>.</summary>
+    /// <summary>Free-form working area for <c>target push</c> and <c>sandbox exec</c>.</summary>
     public const string Work = "work";
 
     /// <summary>

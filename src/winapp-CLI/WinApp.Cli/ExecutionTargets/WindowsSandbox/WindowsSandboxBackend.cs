@@ -151,13 +151,13 @@ internal sealed class WindowsSandboxBackend(
         RandomNumberGenerator.GetInt32(MinAgentPort, MaxAgentPort + 1);
 
     /// <inheritdoc/>
-    public ExecutionTargetRef Target => ExecutionTargetRef.WindowsSandboxDefault;
+    public ExecutionTargetRef Target => WindowsSandboxTarget.Default;
 
     /// <inheritdoc/>
     /// <remarks>
     /// <b>Not read-only, despite the name.</b> The name comes from
     /// <see cref="IExecutionTargetBackend"/>; for Windows Sandbox this is the point at which
-    /// <c>--sandbox</c>'s consent is spent, so it can enable a Windows feature behind a UAC prompt
+    /// <c>--on sandbox</c>'s consent is spent, so it can enable a Windows feature behind a UAC prompt
     /// and install the Sandbox client. Anything that only wants to know the host's state must call
     /// <see cref="IWindowsSandboxSetup.InspectAsync"/> instead.
     /// </remarks>
@@ -190,11 +190,11 @@ internal sealed class WindowsSandboxBackend(
                     Code = ExecutionTargetErrorCodes.Unsupported,
                     Message = "The Windows Sandbox command line (wsb.exe) was not found.",
                     UserAction = "Install Windows Sandbox on Windows 11 24H2 or newer, then retry.",
-                    Example = "winapp run . --sandbox",
+                    Example = "winapp run . --on sandbox",
                 });
         }
 
-        // `--sandbox` is explicit consent to make Windows Sandbox usable, so missing prerequisites
+        // `--on sandbox` is explicit consent to make Windows Sandbox usable, so missing prerequisites
         // are installed rather than reported. Only what winapp genuinely cannot do -- elevation the
         // user declined, a restart, an unsupported edition, a Store or policy failure -- comes back
         // as an error, and it says exactly which of those it was.
@@ -1040,7 +1040,7 @@ internal sealed class WindowsSandboxBackend(
     /// <para>
     /// When no client was launched, the same report is evidence rather than timing: the guest has a
     /// login session — so the session probe said so — but nothing is attached to it, which is what a
-    /// closed Sandbox window looks like. <c>--sandbox</c> is consent to make the Sandbox usable, so
+    /// closed Sandbox window looks like. <c>--on sandbox</c> is consent to make the Sandbox usable, so
     /// winapp reconnects rather than stopping to ask. That happens <b>exactly once</b>, driven by
     /// the agent's own failure rather than by a guess, which is what keeps a healthy attached client
     /// from ever being duplicated: a guest whose client is working does not produce this report.

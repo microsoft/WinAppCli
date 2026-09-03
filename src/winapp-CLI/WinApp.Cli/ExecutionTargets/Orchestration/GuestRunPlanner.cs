@@ -25,7 +25,7 @@ internal sealed record GuestRunOptions(
     string? AppArguments = null);
 
 /// <summary>
-/// Builds the guest winapp command lines that <c>--sandbox</c> forwards.
+/// Builds the guest winapp command lines that <c>--on sandbox</c> forwards.
 /// </summary>
 /// <remarks>
 /// Pure translation, deliberately: the guest runs the ordinary <c>winapp run</c> and
@@ -150,6 +150,6 @@ internal static class GuestRunPlanner
             ExecutionTargetErrorCodes.Unsupported,
             "--debug-output is not available for an unpackaged app running in Windows Sandbox.",
             userAction: "Run it without --debug-output, or make the app packaged so guest winapp can debug it.",
-            example: "winapp run . --sandbox");
+            example: "winapp run . --on sandbox");
     }
 }

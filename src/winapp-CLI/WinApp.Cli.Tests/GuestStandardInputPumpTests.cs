@@ -28,7 +28,7 @@ public class GuestStandardInputPumpTests
     /// Input that is already available before the command starts must still arrive.
     /// </summary>
     /// <remarks>
-    /// This is the ordinary <c>echo hi | winapp sandbox exec ...</c> shape: the bytes exist before
+    /// This is the ordinary <c>echo hi | winapp target exec sandbox ...</c> shape: the bytes exist before
     /// winapp does. They are only deliverable because the pump starts from the operation ID, which
     /// the channel publishes as it sends the request. A pump started any earlier would address an
     /// operation the guest has not heard of, and the guest would drop it.
@@ -208,7 +208,7 @@ public class GuestStandardInputPumpTests
     {
         var commands = new DirectoryInfo(Path.Join(FindRepositoryRoot(), "src", "winapp-CLI", "WinApp.Cli", "Commands"));
 
-        foreach (var file in (string[])["SandboxCommand.cs", "SandboxUiRouter.cs", "RunCommand.Sandbox.cs"])
+        foreach (var file in (string[])["TargetCommand.cs", "ExecutionTargetUiRouter.cs", "RunCommand.Target.cs"])
         {
             var source = await File.ReadAllTextAsync(
                 Path.Join(commands.FullName, file), TestContext.CancellationToken);

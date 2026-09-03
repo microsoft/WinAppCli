@@ -148,7 +148,7 @@ internal interface IDeploymentStateStore
     /// </summary>
     /// <remarks>
     /// Needed by commands that identify a deployment by what it registered rather than by an input
-    /// path — <c>unregister --sandbox</c> is given a manifest, not the folder a run was launched
+    /// path — <c>unregister --on sandbox</c> is given a manifest, not the folder a run was launched
     /// from, so it has to find the deployment that owns that identity.
     /// </remarks>
     /// <exception cref="ExecutionTargetException">A record is corrupt or from a newer schema.</exception>

@@ -10,11 +10,11 @@ using WinApp.Cli.ExecutionTargets.Orchestration;
 namespace WinApp.Cli.Tests;
 
 /// <summary>
-/// UI argv rewriting and artifact copy-back: what `winapp ui ... --sandbox` forwards, and what
+/// UI argv rewriting and artifact copy-back: what `winapp ui ... --on <target>` forwards, and what
 /// comes back.
 /// </summary>
 [TestClass]
-public class SandboxUiRoutingTests
+public class TargetUiRoutingTests
 {
     private const string GuestArtifacts = @"C:\WinAppGuest\artifacts\op1";
 
@@ -24,13 +24,13 @@ public class SandboxUiRoutingTests
     private static readonly string[] InspectApp = ["ui", "inspect", "-a", "MyApp"];
     private static readonly string[] InspectWindow = ["ui", "inspect", "-w", "123456"];
     private static readonly string[] SendKeysAfterSeparator =
-        ["ui", "send-keys", "-a", "MyApp", "--", "--sandbox", "sandbox:literal"];
+        ["ui", "send-keys", "-a", "MyApp", "--", "--on", "sandbox"];
 
-    private static readonly string[][] SandboxFlagSpellings =
+    private static readonly string[][] TargetSelectorSpellings =
     [
-        ["ui", "inspect", "--sandbox=true", "-a", "MyApp"],
-        ["ui", "inspect", "--sandbox:true", "-a", "MyApp"],
-        ["ui", "inspect", "--sandbox", "true", "-a", "MyApp"],
+        ["ui", "inspect", "--on=sandbox", "-a", "MyApp"],
+        ["ui", "inspect", "--on:sandbox", "-a", "MyApp"],
+        ["ui", "inspect", "--on", "sandbox", "-a", "MyApp"],
     ];
 
     private string _root = null!;
@@ -42,7 +42,7 @@ public class SandboxUiRoutingTests
     [TestInitialize]
     public void Setup()
     {
-        _root = TestPaths.TempRoot(nameof(SandboxUiRoutingTests));
+        _root = TestPaths.TempRoot(nameof(TargetUiRoutingTests));
         _guestManaged = TestPaths.Under(_root, "guest");
         _hostOutput = TestPaths.Under(_root, "out");
 
@@ -66,9 +66,9 @@ public class SandboxUiRoutingTests
     // ---- Argv rewriting ------------------------------------------------------------
 
     [TestMethod]
-    public void Rewrite_RemovesTheRoutingFlagAndForwardsEverythingElseVerbatim()
+    public void Rewrite_RemovesTheTargetSelectorAndForwardsEverythingElseVerbatim()
     {
-        var routed = Rewrite(["ui", "inspect", "--sandbox", "-a", "MyApp", "--depth", "8", "--json"]);
+        var routed = Rewrite(["ui", "inspect", "--on", "sandbox", "-a", "MyApp", "--depth", "8", "--json"]);
 
         CollectionAssert.AreEqual(InspectForwarded, routed.Arguments);
 
@@ -76,32 +76,37 @@ public class SandboxUiRoutingTests
     }
 
     [TestMethod]
-    public void Rewrite_RemovesTheFlagInEverySpellingItCanBeWritten()
+    public void Rewrite_RemovesTheSelectorInEverySpellingItCanBeWritten()
     {
-        foreach (var form in SandboxFlagSpellings)
+        foreach (var form in TargetSelectorSpellings)
         {
             var routed = Rewrite(form);
 
-            // A stranded 'true' would arrive at the guest as a positional argument and be parsed as
-            // a selector.
+            // A stranded 'sandbox' would arrive at the target as a positional argument and be
+            // parsed as an element selector.
             CollectionAssert.AreEqual(InspectApp, routed.Arguments, string.Join(' ', form));
         }
     }
 
+    /// <summary>
+    /// An application value is forwarded exactly as typed, because it names an application and
+    /// nothing else. Encoding the target into it is what the <c>sandbox:</c> prefix used to do, and
+    /// what <c>--on</c> replaced.
+    /// </summary>
     [TestMethod]
-    public void Rewrite_StripsTheApplicationTargetPrefixInEverySpelling()
+    public void Rewrite_ForwardsTheApplicationValueUntouched()
     {
-        Assert.AreEqual("MyApp", Rewrite(["ui", "inspect", "-a", "sandbox:MyApp"]).Arguments[3]);
-        Assert.AreEqual("--app=MyApp", Rewrite(["ui", "inspect", "--app=sandbox:MyApp"]).Arguments[2]);
-        Assert.AreEqual("-a:4212", Rewrite(["ui", "inspect", "-a:sandbox:4212"]).Arguments[2]);
+        Assert.AreEqual("MyApp", Rewrite(["ui", "inspect", "-a", "MyApp"]).Arguments[3]);
+        Assert.AreEqual("--app=MyApp", Rewrite(["ui", "inspect", "--app=MyApp"]).Arguments[2]);
+        Assert.AreEqual("sandbox:MyApp", Rewrite(["ui", "inspect", "-a", "sandbox:MyApp"]).Arguments[3]);
     }
 
     [TestMethod]
     public void Rewrite_LeavesANumericWindowAlone()
     {
         // A handle carries no scope. Rewriting or inferring one would resolve a host window against
-        // the guest, or the reverse.
-        var routed = Rewrite(["ui", "inspect", "--sandbox", "-w", "123456"]);
+        // the target, or the reverse.
+        var routed = Rewrite(["ui", "inspect", "--on", "sandbox", "-w", "123456"]);
 
         CollectionAssert.AreEqual(InspectWindow, routed.Arguments);
     }
@@ -110,7 +115,7 @@ public class SandboxUiRoutingTests
     public void Rewrite_RedirectsTheOutputPathIntoGuestStaging()
     {
         var destination = TestPaths.Under(_hostOutput, "result.png");
-        var routed = Rewrite(["ui", "screenshot", "--sandbox", "-a", "MyApp", "-o", destination]);
+        var routed = Rewrite(["ui", "screenshot", "--on", "sandbox", "-a", "MyApp", "-o", destination]);
 
         Assert.IsNotNull(routed.Artifact);
         Assert.AreEqual(destination, routed.Artifact.HostDestination);
@@ -129,7 +134,7 @@ public class SandboxUiRoutingTests
         const string GuestJson =
             """{"filePath":"C:\\WinApp\\artifacts\\op1\\result.png","width":100}""";
 
-        var rewritten = SandboxUiRouter.RewriteOutputPaths(GuestJson, artifact);
+        var rewritten = ExecutionTargetUiRouter.RewriteOutputPaths(GuestJson, artifact);
 
         Assert.AreEqual(
             """{"filePath":"C:\\host output\\result.png","width":100}""",
@@ -143,7 +148,7 @@ public class SandboxUiRoutingTests
     [TestMethod]
     public void Rewrite_DoesNotSplitAnOutputValueAtItsDriveColon()
     {
-        var routed = Rewrite(["ui", "screenshot", "--sandbox", "-o", @"C:\out\result.png"]);
+        var routed = Rewrite(["ui", "screenshot", "--on", "sandbox", "-o", @"C:\out\result.png"]);
 
         Assert.IsNotNull(routed.Artifact);
         Assert.AreEqual(@"C:\out\result.png", routed.Artifact.HostDestination);
@@ -152,7 +157,7 @@ public class SandboxUiRoutingTests
     [TestMethod]
     public void Rewrite_NeverTouchesAnythingAfterASeparator()
     {
-        var routed = Rewrite(["ui", "send-keys", "--sandbox", "-a", "MyApp", "--", "--sandbox", "sandbox:literal"]);
+        var routed = Rewrite(["ui", "send-keys", "--on", "sandbox", "-a", "MyApp", "--", "--on", "sandbox"]);
 
         CollectionAssert.AreEqual(SendKeysAfterSeparator, routed.Arguments);
     }
@@ -161,18 +166,21 @@ public class SandboxUiRoutingTests
     public void Rewrite_OutputPathThatNamesNoFile_IsRefused()
     {
         var failure = Assert.ThrowsExactly<ExecutionTargetException>(() =>
-            Rewrite(["ui", "screenshot", "--sandbox", "-o", @"C:\"]));
+            Rewrite(["ui", "screenshot", "--on", "sandbox", "-o", @"C:\"]));
 
         Assert.AreEqual(ExecutionTargetErrorCodes.ArtifactFailed, failure.Error.Code);
     }
 
+    /// <summary>
+    /// A trailing <c>--on</c> with nothing after it must not eat the token that follows it, because
+    /// there is no token that follows it.
+    /// </summary>
     [TestMethod]
-    public void IsSandboxTarget_RecognisesThePrefixWithoutCaseSensitivity()
+    public void Rewrite_TrailingSelectorWithNoValue_DropsOnlyTheOption()
     {
-        Assert.IsTrue(UiArgvRouter.IsSandboxTarget("sandbox:MyApp"));
-        Assert.IsTrue(UiArgvRouter.IsSandboxTarget("Sandbox:4212"));
-        Assert.IsFalse(UiArgvRouter.IsSandboxTarget("MyApp"));
-        Assert.IsFalse(UiArgvRouter.IsSandboxTarget(null));
+        var routed = Rewrite(["ui", "inspect", "-a", "MyApp", "--on"]);
+
+        CollectionAssert.AreEqual(InspectApp, routed.Arguments);
     }
 
     // ---- Artifact copy-back --------------------------------------------------------

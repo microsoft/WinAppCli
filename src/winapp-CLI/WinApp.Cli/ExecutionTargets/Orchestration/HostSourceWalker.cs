@@ -16,7 +16,7 @@ internal enum HostReparsePolicy
     Reject,
 
     /// <summary>
-    /// Treat the entry as absent. Used by <c>sandbox cp</c>, matching the guest-side rule that
+    /// Treat the entry as absent. Used by <c>target push</c>, matching the guest-side rule that
     /// nothing inside a managed root may redirect elsewhere.
     /// </summary>
     Skip,
@@ -228,7 +228,7 @@ internal static class HostSourceWalker
 
     /// <summary>Whether a path is a link, for callers that hold a single named source.</summary>
     /// <remarks>
-    /// <c>sandbox cp</c> can be pointed straight at one file. That file never goes through
+    /// <c>target push</c> can be pointed straight at one file. That file never goes through
     /// <see cref="EnumerateFiles"/>, so the same rule is applied to it here rather than left to the
     /// directory case alone.
     /// </remarks>

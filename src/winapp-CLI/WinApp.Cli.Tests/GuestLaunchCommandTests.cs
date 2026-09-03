@@ -10,7 +10,7 @@ namespace WinApp.Cli.Tests;
 
 /// <summary>
 /// Proves the SBX-009 follow-up finding is closed: the hidden guest-launch verb -- the unlocked
-/// half of a launching packaged <c>run --sandbox</c>, after registration itself completed under
+/// half of a launching packaged <c>run --on sandbox</c>, after registration itself completed under
 /// the mutation lease -- is structurally incapable of registering, unregistering, or otherwise
 /// mutating package state, under any option combination, including when a mismatch is exactly the
 /// scenario the mutation-lock split was meant to protect against (another deployment sharing the

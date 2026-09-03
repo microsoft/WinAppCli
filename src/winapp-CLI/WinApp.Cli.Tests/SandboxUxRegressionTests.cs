@@ -192,7 +192,7 @@ public class SandboxUxRegressionTests
 
     /// <summary>Read-only verbs neither require an interactive desktop nor assert real input.</summary>
     /// <remarks>
-    /// <c>ui inspect --sandbox</c> reads the UI Automation tree. Routing it as a real-input command
+    /// <c>ui inspect --on sandbox</c> reads the UI Automation tree. Routing it as a real-input command
     /// forced a client reconnect and gated it on an input desktop, which is what made it hang and
     /// then report a bare cancellation.
     /// </remarks>
@@ -206,7 +206,7 @@ public class SandboxUxRegressionTests
     [DataRow("status")]
     public void ReadOnlyUiVerbs_AreNotGatedOnRealInput(string verb)
     {
-        var requirements = SandboxUiRequirements.For(ParseUi(verb));
+        var requirements = TargetUiRequirements.For(ParseUi(verb));
 
         Assert.IsFalse(requirements.RequiresInteractiveDesktop, $"'{verb}' only reads UI Automation state.");
         Assert.IsFalse(requirements.RequiresRealInput, $"'{verb}' injects no input.");
@@ -227,7 +227,7 @@ public class SandboxUxRegressionTests
     [DataRow("scroll")]
     public void InputAndCaptureUiVerbs_StillRequireAnInteractiveDesktop(string verb)
     {
-        var requirements = SandboxUiRequirements.For(ParseUi(verb));
+        var requirements = TargetUiRequirements.For(ParseUi(verb));
 
         Assert.IsTrue(requirements.RequiresInteractiveDesktop, $"'{verb}' needs a connected client.");
         Assert.IsTrue(requirements.RequiresRealInput, $"'{verb}' must re-probe input readiness.");
@@ -246,7 +246,7 @@ public class SandboxUxRegressionTests
         var future = new Command("some-future-verb");
         command.Subcommands.Add(future);
 
-        var requirements = SandboxUiRequirements.For(command.Parse(["some-future-verb"]));
+        var requirements = TargetUiRequirements.For(command.Parse(["some-future-verb"]));
 
         Assert.IsTrue(requirements.RequiresInteractiveDesktop);
         Assert.IsTrue(requirements.RequiresRealInput);
@@ -317,7 +317,7 @@ public class SandboxUxRegressionTests
         var source = await File.ReadAllTextAsync(
             Path.Join(
                 FindRepositoryRoot(),
-                "src", "winapp-CLI", "WinApp.Cli", "Commands", "SandboxUiRouter.cs"),
+                "src", "winapp-CLI", "WinApp.Cli", "Commands", "ExecutionTargetUiRouter.cs"),
             TestContext.CancellationToken);
 
         StringAssert.Contains(
@@ -345,7 +345,7 @@ public class SandboxUxRegressionTests
         var source = await File.ReadAllTextAsync(
             Path.Join(
                 FindRepositoryRoot(),
-                "src", "winapp-CLI", "WinApp.Cli", "Commands", "SandboxUiRouter.cs"),
+                "src", "winapp-CLI", "WinApp.Cli", "Commands", "ExecutionTargetUiRouter.cs"),
             TestContext.CancellationToken);
 
         StringAssert.Contains(
@@ -401,7 +401,7 @@ public class SandboxUxRegressionTests
         try
         {
             var store = new TargetStateStore(new TargetStateDirectoryProvider(root.FullName));
-            var target = ExecutionTargetRef.WindowsSandboxDefault;
+            var target = WindowsSandboxTarget.Default;
 
             store.Commit(
                 target,
@@ -521,13 +521,13 @@ public class SandboxUxRegressionTests
             Cli.Session = GuestSessionAvailability.Ready;
 
             _stateStore.Commit(
-                ExecutionTargetRef.WindowsSandboxDefault,
+                WindowsSandboxTarget.Default,
                 new TargetState
                 {
                     SchemaVersion = 0,
                     Revision = 0,
-                    TargetKind = ExecutionTargetRef.WindowsSandboxDefault.Kind,
-                    TargetId = ExecutionTargetRef.WindowsSandboxDefault.Id,
+                    TargetKind = WindowsSandboxTarget.Default.Kind,
+                    TargetId = WindowsSandboxTarget.Default.Id,
                     InstanceId = InstanceId,
                     BootNonce = "nonce-existing",
                     BootstrappedEpoch = ExecutionTargetEpoch.Create(InstanceId, "nonce-existing").Value,
@@ -545,13 +545,13 @@ public class SandboxUxRegressionTests
 
             Cli.SetRunning(InstanceId);
             _stateStore.Commit(
-                ExecutionTargetRef.WindowsSandboxDefault,
+                WindowsSandboxTarget.Default,
                 new TargetState
                 {
                     SchemaVersion = 0,
                     Revision = 0,
-                    TargetKind = ExecutionTargetRef.WindowsSandboxDefault.Kind,
-                    TargetId = ExecutionTargetRef.WindowsSandboxDefault.Id,
+                    TargetKind = WindowsSandboxTarget.Default.Kind,
+                    TargetId = WindowsSandboxTarget.Default.Id,
                     InstanceId = InstanceId,
                     BootNonce = "nonce-existing",
                 },
@@ -575,12 +575,12 @@ public class SandboxUxRegressionTests
         {
             var epoch = ExecutionTargetEpoch.Create("sandbox-existing", "nonce-existing");
             var bootstrap = Path.Join(
-                _directories.GetTargetRoot(ExecutionTargetRef.WindowsSandboxDefault, create: true).FullName,
+                _directories.GetTargetRoot(WindowsSandboxTarget.Default, create: true).FullName,
                 "bootstrap-" + WindowsSandboxBackend.EpochToken(epoch));
 
             Directory.CreateDirectory(bootstrap);
 
-            var material = GuestBootstrapMaterial.Create(ExecutionTargetRef.WindowsSandboxDefault, epoch, port);
+            var material = GuestBootstrapMaterial.Create(WindowsSandboxTarget.Default, epoch, port);
 
             File.WriteAllText(Path.Join(bootstrap, GuestBootstrapMaterial.FileName), material.ToJson());
         }
@@ -593,7 +593,7 @@ public class SandboxUxRegressionTests
         /// </remarks>
         public GuestBootstrapMaterial? ReadStagedMaterial()
         {
-            var root = _directories.GetTargetRoot(ExecutionTargetRef.WindowsSandboxDefault, create: false);
+            var root = _directories.GetTargetRoot(WindowsSandboxTarget.Default, create: false);
 
             if (!root.Exists)
             {

@@ -107,7 +107,7 @@ internal static class DotNetRuntimeInstaller
     /// </summary>
     /// <remarks>
     /// The authoritative path is the launched process's own environment, which the host sets from
-    /// the report — that is what makes <c>run --sandbox</c> work regardless of what the guest's user
+    /// the report — that is what makes <c>run --on sandbox</c> work regardless of what the guest's user
     /// environment says. This is the additional, durable half: a per-user <c>DOTNET_ROOT</c> so an
     /// app started by hand or through <c>sandbox exec</c> resolves the same runtimes.
     /// <para>

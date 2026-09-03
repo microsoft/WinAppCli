@@ -10,18 +10,20 @@ using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
+using WinApp.Cli.ExecutionTargets.WindowsSandbox;
+
 namespace WinApp.Cli.Tests;
 
 /// <summary>
 /// Proves the SBX-009 packaged-registration mutation-lock gap is closed: a launching
-/// <c>run --sandbox</c> registers the package (a real guest package mutation) inside its own
+/// <c>run --on sandbox</c> registers the package (a real guest package mutation) inside its own
 /// locked call before releasing the lease, so two concurrent runs against the same deployment
 /// never have their registrations overlap, even though the application launch that follows is
 /// deliberately unlocked and may run indefinitely.
 /// </summary>
 /// <remarks>
 /// Driven through <see cref="RunCommand.Handler.ExecuteRunPipelineAsync"/> -- the same internal
-/// entry point <c>winapp run --sandbox</c> reaches after CLI parsing and project/folder
+/// entry point <c>winapp run --on sandbox</c> reaches after CLI parsing and project/folder
 /// resolution -- so the exercised sequence is the production
 /// <c>PrepareAsync -&gt; DeployAsync -&gt; RegisterPackageAsync (locked) -&gt;
 /// ReleaseMutationLease -&gt; launch (unlocked)</c> pipeline, built on the real, file-backed
@@ -115,7 +117,7 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
     }
 
     /// <summary>
-    /// Two concurrent, launching <c>run --sandbox --clean</c> invocations against the same
+    /// Two concurrent, launching <c>run --on sandbox --clean</c> invocations against the same
     /// deployment: registration never overlaps, and the second run's registration proceeds as
     /// soon as the first's is done -- even though the first run's application is still "running".
     /// </summary>
@@ -315,7 +317,7 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
     /// <summary>
     /// H2: the third, host-orchestrated <c>--unregister-on-exit</c> phase targets exactly this
     /// deployment's own layout -- the same <see cref="GuestRunPlanner.BuildUnregisterArguments"/>
-    /// call the standalone <c>winapp unregister --sandbox</c> command already sends -- rather than
+    /// call the standalone <c>winapp unregister --on sandbox</c> command already sends -- rather than
     /// a name-only unregister. It never runs before the application exits.
     /// </summary>
     [TestMethod]
@@ -352,7 +354,7 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
             expectedArguments,
             unregister.Request.Arguments,
             "Unregister-on-exit must send the exact same manifest-scoped unregister request the " +
-            "standalone `winapp unregister --sandbox` command already sends -- never a name-only " +
+            "standalone `winapp unregister --on sandbox` command already sends -- never a name-only " +
             "unregister that could match a different deployment's registration.");
         Assert.AreEqual(
             guestLayoutPath,
@@ -523,7 +525,7 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
         host.Request.Arguments is [WinApp.Cli.ExecutionTargets.Orchestration.GuestLaunchPlanner.Verb, ..];
 
     /// <summary>
-    /// Starts one simulated <c>run --sandbox</c> invocation on its own thread-pool work item.
+    /// Starts one simulated <c>run --on sandbox</c> invocation on its own thread-pool work item.
     /// </summary>
     /// <remarks>
     /// <see cref="ExecutionTargetOrchestrator.PrepareAsync"/> acquires the mutation lock through a
@@ -561,7 +563,7 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
                 projectFile: null,
                 framework: null,
                 noRestore: false,
-                sandbox: true,
+                executionTarget: WindowsSandboxTarget.Default,
                 cancellationToken),
             cancellationToken);
 
@@ -599,7 +601,7 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
         GetRequiredService<Microsoft.Extensions.Logging.ILogger<RunCommand>>());
 
     /// <summary>
-    /// One simulated <c>winapp run --sandbox</c> caller: a real <see cref="RunCommand.Handler"/>
+    /// One simulated <c>winapp run --on sandbox</c> caller: a real <see cref="RunCommand.Handler"/>
     /// wired to a real <see cref="ExecutionTargetOrchestrator"/> and a real, in-process guest
     /// server, whose scripted guest process is the only faked boundary.
     /// </summary>
@@ -739,7 +741,7 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
     private sealed class SingleConnectionFakeBackend(IGuestTransport transport, ExecutionTargetEpoch epoch)
         : IExecutionTargetBackend
     {
-        public ExecutionTargetRef Target => ExecutionTargetRef.WindowsSandboxDefault;
+        public ExecutionTargetRef Target => WindowsSandboxTarget.Default;
 
         public Task<TargetSupportResult> ProbeSupportAsync(CancellationToken cancellationToken) =>
             Task.FromResult(TargetSupportResult.Supported);

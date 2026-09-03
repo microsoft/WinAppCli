@@ -42,7 +42,7 @@ internal interface IWindowsFeatureEnabler
 /// </summary>
 /// <remarks>
 /// <para>
-/// This is the one place winapp changes machine configuration, and <c>--sandbox</c> is what
+/// This is the one place winapp changes machine configuration, and <c>--on sandbox</c> is what
 /// authorises it: a user who asked for Sandbox execution has asked for the prerequisite that makes
 /// it possible. It is still bounded to a single fixed operation — one absolute trusted binary from
 /// the system directory, a fixed verb, and one caller-supplied feature name that is validated as a

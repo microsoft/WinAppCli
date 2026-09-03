@@ -5,7 +5,7 @@ using System.CommandLine;
 
 namespace WinApp.Cli.Commands;
 
-internal class UiCommand : Command, IShortDescription
+internal class UiCommand : Command, IShortDescription, ITargetAwareCommand
 {
     public string ShortDescription => "Inspect and interact with running Windows app UIs";
 
@@ -36,7 +36,6 @@ internal class UiCommand : Command, IShortDescription
     {
         // Recursive, so every verb accepts it and one pre-dispatch interception can act on it
         // rather than twenty-odd handlers each remembering to check.
-        Options.Add(SharedUiOptions.SandboxOption);
 
         Subcommands.Add(statusCommand);
         Subcommands.Add(inspectCommand);

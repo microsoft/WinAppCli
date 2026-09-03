@@ -8,7 +8,7 @@ using WinApp.Cli.ExecutionTargets.Orchestration;
 namespace WinApp.Cli.Tests;
 
 /// <summary>
-/// <c>unregister --sandbox</c> must fail with structured, state-repair guidance when a
+/// <c>unregister --on sandbox</c> must fail with structured, state-repair guidance when a
 /// deployment's registration layout is missing its manifest, rather than handing guest winapp's
 /// <c>--manifest</c> option a path that fails argument parsing and prints usage help.
 /// </summary>

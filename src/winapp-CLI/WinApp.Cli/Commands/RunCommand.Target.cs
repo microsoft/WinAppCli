@@ -23,7 +23,7 @@ internal partial class RunCommand
         /// </summary>
         /// <remarks>
         /// Nothing about this machine changes. Materialization stops before runtime provisioning and
-        /// registration, and the guest performs both — so a <c>--sandbox</c> run leaves no package
+        /// registration, and the guest performs both — so a <c>--on sandbox</c> run leaves no package
         /// registered here and installs no runtime here, which is the entire point of the flag.
         /// <para>
         /// The guest is asked to perform the ordinary <c>winapp run</c>. Every option in the matrix
@@ -31,7 +31,7 @@ internal partial class RunCommand
         /// one that can drift.
         /// </para>
         /// </remarks>
-        private async Task<int> ExecutePackagedSandboxRunAsync(
+        private async Task<int> ExecutePackagedTargetRunAsync(
             DirectoryInfo inputFolder,
             FileInfo? manifest,
             DirectoryInfo? outputAppXDirectory,
@@ -184,7 +184,7 @@ internal partial class RunCommand
             }
             catch (ExecutionTargetException ex)
             {
-                return SandboxOutput.Fail(ansiConsole, isJson, ex.Error);
+                return TargetOutput.Fail(ansiConsole, isJson, ex.Error);
             }
 
             // A non-apphost RunCommand (for example dotnet) carries leading arguments that must
@@ -217,7 +217,7 @@ internal partial class RunCommand
         }
 
         /// <summary>
-        /// The shared half of every <c>run --sandbox</c>: prepare, deploy, run, relay.
+        /// The shared half of every <c>run --on sandbox</c>: prepare, deploy, run, relay.
         /// </summary>
         /// <param name="sourceRoot">Host folder to reconcile into the guest.</param>
         /// <param name="deploymentId">Internal deployment identity.</param>
@@ -293,7 +293,7 @@ internal partial class RunCommand
                 {
                     var familyName = appLauncherService.ComputePackageFamilyName(identity.PackageName, identity.Publisher);
 
-                    state = guestApplicationRunner.CommitPackage(state, new PackageOwnership
+                    state = guestApplicationRunner.CommitPackage(target.Reference, state, new PackageOwnership
                     {
                         PackageName = identity.PackageName,
                         Publisher = identity.Publisher,
@@ -358,7 +358,7 @@ internal partial class RunCommand
                 var ownerEnvironment = GuestOwnerContext.WithOwner(
                     environment: null,
                     GuestOwnerContext.ResolveGuestToken(
-                        ExecutionTargetRef.WindowsSandboxDefault.Id, target.Epoch.Value));
+                        target.Reference.Id, target.Epoch.Value));
 
                 // A per-user .NET installation is discoverable to an apphost through DOTNET_ROOT and
                 // nothing else without machine-wide registration, so the root provisioning created
@@ -390,7 +390,7 @@ internal partial class RunCommand
                     request,
                     new GuestExecCallbacks(
                         OnOperationId: forwardStandardInput
-                            ? GuestStandardInputPump.Attach(target.Channel, cancellationToken)
+                            ? GuestStandardInputPump.Attach(target.Operations, cancellationToken)
                             : null,
                         OnStarted: process =>
                         {
@@ -442,7 +442,7 @@ internal partial class RunCommand
             }
             catch (ExecutionTargetException ex)
             {
-                return SandboxOutput.Fail(ansiConsole, isJson, ex.Error);
+                return TargetOutput.Fail(ansiConsole, isJson, ex.Error);
             }
         }
 
@@ -511,7 +511,7 @@ internal partial class RunCommand
 
             var capturedOutput = isJson ? new MemoryStream() : null;
 
-            var result = await target.Channel.ExecuteAsync(
+            var result = await target.Operations.ExecuteAsync(
                 request,
                 new GuestExecCallbacks(
                     OnStandardOutput: data =>
@@ -567,7 +567,7 @@ internal partial class RunCommand
         /// (non-sandbox) run still uses -- would remove that OTHER deployment's registration instead.
         /// This phase closes that gap by reusing the exact same production guest
         /// <c>winapp unregister --manifest &lt;layout&gt;/appxmanifest.xml</c> verb the standalone
-        /// <c>winapp unregister --sandbox</c> command already sends (see
+        /// <c>winapp unregister --on sandbox</c> command already sends (see
         /// <c>UnregisterCommand.Sandbox.cs</c>): its own install-location check unregisters only when
         /// the currently registered package's location is still exactly this deployment's layout, and
         /// safely skips -- without failing -- when it is not.
@@ -607,7 +607,7 @@ internal partial class RunCommand
             {
                 using var mutationLease = executionTargetOrchestrator.AcquireMutationLease(cancellationToken);
 
-                var result = await target.Channel.ExecuteAsync(
+                var result = await target.Operations.ExecuteAsync(
                     new GuestExecRequest
                     {
                         UseGuestWinapp = true,
@@ -626,7 +626,7 @@ internal partial class RunCommand
                     // Cleared only after the guest reported success, so a failed or skipped
                     // unregister leaves the record that a later command needs to find the package
                     // again.
-                    guestApplicationRunner.ClearPackage(state);
+                    guestApplicationRunner.ClearPackage(target.Reference, state);
                 }
             }
             catch (Exception ex)
@@ -676,7 +676,7 @@ internal partial class RunCommand
                     {
                         var result = await targetRuntimeService.EnsureAsync(
                             target,
-                            ExecutionTargetRef.WindowsSandboxDefault,
+                            target.Reference,
                             sourceRoot,
                             new DirectoryInfo(currentDirectoryProvider.GetCurrentDirectory()),
                             taskContext,
@@ -787,7 +787,7 @@ internal partial class RunCommand
                 throw ExecutionTargetException.Create(
                     ExecutionTargetErrorCodes.Unsupported,
                     $"'{csproj.Name}' launches an executable outside its build output, which cannot be deployed into Windows Sandbox.",
-                    userAction: "Publish the app as self-contained, or run it without --sandbox.",
+                    userAction: "Publish the app as self-contained, or run it without --on sandbox.",
                     context: new Dictionary<string, string> { ["executable"] = Path.GetFileName(full) });
             }
 
@@ -843,8 +843,8 @@ internal partial class RunCommand
                 bytes,
                 new ExecutionTargetInfo
                 {
-                    Kind = ExecutionTargetRef.WindowsSandboxDefault.Kind,
-                    Id = ExecutionTargetRef.WindowsSandboxDefault.Id,
+                    Kind = target.Reference.Kind,
+                    Id = target.Reference.Id,
                     Architecture = target.Capabilities.Architecture,
                     Epoch = target.Epoch.Value,
                 },
@@ -859,10 +859,11 @@ internal partial class RunCommand
             ansiConsole.Profile.Out.Writer.WriteLine(augmented);
         }
 
-        /// <summary>Publishes the additive result for a directly launched unpackaged guest app.</summary>
+        /// <summary>Publishes the additive result for a directly launched unpackaged target app.</summary>
         internal void PublishDirectGuestJson(PreparedTarget target)
         {
             var result = CreateDirectGuestResult(
+                target.Reference,
                 target.Capabilities.Architecture,
                 target.Epoch.Value);
 
@@ -871,20 +872,24 @@ internal partial class RunCommand
         }
 
         internal static RunCommandResult CreateDirectGuestResult(
+            ExecutionTargetRef reference,
             string architecture,
             string epoch)
         {
+            ArgumentNullException.ThrowIfNull(reference);
+
             // The agent starts a containment barrier first, so its ExecStarted PID is the barrier,
-            // not the app. Omitting a target is safer than publishing a copyable PID for the wrong
-            // process; discovery remains `ui list-windows --sandbox` or an explicit app name.
+            // not the app. Omitting a process target is safer than publishing a copyable PID for the
+            // wrong process; discovery remains `ui list-windows --on <target>` or an explicit app
+            // name.
             return new RunCommandResult
             {
                 Sandbox = true,
-                ProcessScope = "sandbox",
+                ProcessScope = reference.Selector,
                 ExecutionTarget = new ExecutionTargetInfo
                 {
-                    Kind = ExecutionTargetRef.WindowsSandboxDefault.Kind,
-                    Id = ExecutionTargetRef.WindowsSandboxDefault.Id,
+                    Kind = reference.Kind,
+                    Id = reference.Id,
                     Architecture = architecture,
                     Epoch = epoch,
                 },
@@ -931,8 +936,13 @@ internal partial class RunCommand
             }
 
             result.Sandbox = true;
-            result.ProcessScope = "sandbox";
             result.ExecutionTarget = executionTarget;
+
+            var selector = string.Equals(executionTarget.Id, ExecutionTargetRef.DefaultId, StringComparison.Ordinal)
+                ? executionTarget.Kind
+                : $"{executionTarget.Kind}:{executionTarget.Id}";
+
+            result.ProcessScope = selector;
 
             // The guest's own process ID when it reported one — that is the application. The agent's
             // child is only the winapp that launched it, and pointing a UI command at that would
@@ -941,7 +951,11 @@ internal partial class RunCommand
 
             if (appProcessId is { } pid)
             {
-                result.AppTarget = $"sandbox:{pid.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+                // Emitted as the two arguments together, never as a bare PID and never as a value
+                // that hides the target inside it. A number on its own would resolve against this
+                // desktop if it were pasted into a UI command without the selector.
+                result.UiTargetArgs =
+                    $"--on {selector} -a {pid.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
             }
 
             return JsonSerializer.Serialize(result, RunCommandJsonContext.Default.RunCommandResult);

@@ -96,7 +96,7 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<TargetRuntimeService>()
             .AddSingleton<TargetDeploymentService>()
             .AddSingleton<GuestApplicationRunner>()
-            .AddSingleton<SandboxUiRouter>()
+            .AddSingleton<ExecutionTargetUiRouter>()
             .AddSingleton<IExecutionTargetBackend, WindowsSandboxBackend>()
             .AddSingleton<ExecutionTargetOrchestrator>();
     }
@@ -170,9 +170,10 @@ internal static class StoreHostBuilderExtensions
                 // Execution-target runtime provisioning: hidden, driven by the host over the channel
                 .UseCommandHandler<GuestRuntimeCommand, GuestRuntimeCommand.Handler>()
                 // Generic execution-target escape hatches
-                .ConfigureCommand<SandboxCommand>()
-                .UseCommandHandler<SandboxExecCommand, SandboxExecCommand.Handler>()
-                .UseCommandHandler<SandboxCopyCommand, SandboxCopyCommand.Handler>()
+                .ConfigureCommand<TargetCommand>()
+                .UseCommandHandler<TargetExecCommand, TargetExecCommand.Handler>()
+                .UseCommandHandler<TargetPushCommand, TargetPushCommand.Handler>()
+                .UseCommandHandler<TargetPullCommand, TargetPullCommand.Handler>()
                 .ConfigureCommand<CompleteCommand>();
     }
 

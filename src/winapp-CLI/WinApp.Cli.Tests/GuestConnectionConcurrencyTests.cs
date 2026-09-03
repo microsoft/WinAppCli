@@ -12,9 +12,9 @@ namespace WinApp.Cli.Tests;
 /// The guarantee that a running application never blocks another workflow, tested as behaviour.
 /// </summary>
 /// <remarks>
-/// The agent used to serve one channel at a time, so a foreground <c>winapp run --sandbox</c> held
+/// The agent used to serve one channel at a time, so a foreground <c>winapp run --on sandbox</c> held
 /// the guest for as long as the application lived and a separate <c>winapp ui list-windows
-/// --sandbox</c> waited behind it indefinitely. Every test here would hang rather than fail under
+/// --on sandbox</c> waited behind it indefinitely. Every test here would hang rather than fail under
 /// that behaviour, which is what makes them a guard rather than a description.
 /// <para>
 /// Concurrency is only half of it. The other half is that nothing which made a single channel safe
@@ -43,7 +43,7 @@ public class GuestConnectionConcurrencyTests
     {
         await using var agent = new ConcurrentGuestAgentHarness();
 
-        // The foreground case exactly: `winapp run --sandbox` without --detach keeps its channel and
+        // The foreground case exactly: `winapp run --on sandbox` without --detach keeps its channel and
         // its operation for as long as the application is on screen.
         await using var application = await agent.ConnectAsync(TestContext.CancellationToken);
         var running = application.Channel.ExecuteAsync(

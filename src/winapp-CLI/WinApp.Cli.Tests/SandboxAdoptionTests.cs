@@ -12,7 +12,7 @@ namespace WinApp.Cli.Tests;
 /// Tests for what happens to a Windows Sandbox winapp did not start.
 /// </summary>
 /// <remarks>
-/// <c>--sandbox</c> takes one over rather than refusing it, so these pin the two halves of that
+/// <c>--on sandbox</c> takes one over rather than refusing it, so these pin the two halves of that
 /// decision: the guest really is prepared — which is a mutation, not a read — and the instance is
 /// never stopped, on any path, including every failure path.
 /// </remarks>
@@ -355,7 +355,7 @@ public class SandboxAdoptionTests
         Assert.AreEqual(
             1,
             harness.Cli.Operations.Count(op => op.StartsWith("connect:", StringComparison.Ordinal)),
-            "Exactly one reconnect: --sandbox fixes what it can, but never stacks clients.");
+            "Exactly one reconnect: --on sandbox fixes what it can, but never stacks clients.");
     }
 
     [TestMethod]
@@ -508,7 +508,7 @@ public class SandboxAdoptionTests
             Cli = new AdoptionSandboxCli();
 
             TargetRoot = directories
-                .GetTargetRoot(ExecutionTargetRef.WindowsSandboxDefault, create: true)
+                .GetTargetRoot(WindowsSandboxTarget.Default, create: true)
                 .FullName;
 
             Cli.CurrentTargetRoot = TargetRoot;
@@ -546,7 +546,7 @@ public class SandboxAdoptionTests
         public string TargetRoot { get; }
 
         /// <summary>The ownership record as another winapp process would read it.</summary>
-        public TargetState? ReadState() => _stateStore.Read(ExecutionTargetRef.WindowsSandboxDefault);
+        public TargetState? ReadState() => _stateStore.Read(WindowsSandboxTarget.Default);
 
         /// <summary>How much fake time the run consumed, for asserting which bound was hit.</summary>
         public TimeSpan Elapsed => _now - new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
@@ -554,13 +554,13 @@ public class SandboxAdoptionTests
         /// <summary>Records an unconfirmed start, so the next prepare recovers rather than creates.</summary>
         public void MarkPendingStart(string instanceId) =>
             _stateStore.Commit(
-                ExecutionTargetRef.WindowsSandboxDefault,
+                WindowsSandboxTarget.Default,
                 new TargetState
                 {
                     SchemaVersion = 0,
                     Revision = 0,
-                    TargetKind = ExecutionTargetRef.WindowsSandboxDefault.Kind,
-                    TargetId = ExecutionTargetRef.WindowsSandboxDefault.Id,
+                    TargetKind = WindowsSandboxTarget.Default.Kind,
+                    TargetId = WindowsSandboxTarget.Default.Id,
                     PendingInstanceId = instanceId,
                     PendingStartedUtc = _now,
                 },

@@ -67,7 +67,7 @@ internal interface IWindowsSandboxCli
     /// Terminates the Sandbox with the given ID.
     /// </summary>
     /// <remarks>
-    /// Deliberately has no production caller. <c>--sandbox</c> reuses and takes over instances but
+    /// Deliberately has no production caller. <c>--on sandbox</c> reuses and takes over instances but
     /// never ends one, because a running Sandbox may hold work winapp cannot see — so stopping is
     /// offered to the user as advisory guidance and exercised by tests, and wiring it into a
     /// failure or cleanup path would break the guarantee the rest of this type is built on.

@@ -36,7 +36,7 @@ internal sealed class TargetArtifactService
     /// interrupted. Nothing is published in any of those cases.
     /// </exception>
     public static async Task PublishAsync(
-        GuestCommandChannel channel,
+        ITargetOperationExecutor channel,
         GuestPathScope scope,
         RoutedArtifact artifact,
         CancellationToken cancellationToken)
@@ -110,7 +110,7 @@ internal sealed class TargetArtifactService
     /// command that already produced its result over that would be a worse trade.
     /// </remarks>
     public static async Task TryRemoveAsync(
-        GuestCommandChannel channel,
+        ITargetOperationExecutor channel,
         GuestPathScope scope,
         CancellationToken cancellationToken)
     {

@@ -3,6 +3,7 @@
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Spectre.Console;
 using System.Text;
 using WinApp.Cli.Commands;
 using WinApp.Cli.Helpers;
@@ -217,22 +218,78 @@ internal static class Program
 
         return await RunWithTelemetryAsync(parsedArgs, isCompleteMode, () =>
         {
-            // One pre-dispatch interception, before any local UI service runs. A `--sandbox` or
-            // `sandbox:` command must not perform UI Automation, window discovery, capture, or
-            // input injection on this desktop, and the only way to guarantee that for every verb
-            // is to divert before the handler exists.
-            if (SandboxUiRouter.ShouldRoute(parsedArgs))
+            // Target selection is settled before anything else, and settled for every command.
+            // A command that cannot honour --on says so, and a selector that names nothing usable
+            // fails here — never silently on this desktop, which is the one outcome the option
+            // exists to prevent.
+            if (ExecutionTargetSelection.Validate(parsedArgs) is { } selectionError)
             {
-                var router = serviceProvider.GetRequiredService<SandboxUiRouter>();
+                return Task.FromResult(TargetOutput.RejectSelection(
+                    serviceProvider.GetRequiredService<IAnsiConsole>(), effectiveJson, selectionError));
+            }
+
+            // System.CommandLine binds an unrecognised option to a nearby optional positional rather
+            // than failing, so `--onn=sandbox` would become a UI element selector and the command
+            // would run here and report success. Rejected before dispatch for every command except
+            // `run`, whose own handler already reports the same mistake with the passthrough advice
+            // its `--` separator needs and in its own --json shape.
+            if (parsedArgs.CommandResult.Command is not RunCommand &&
+                WindowsCommandLine.FindOptionLikePositionals(parsedArgs) is { Count: > 0 } stray)
+            {
+                return Task.FromResult(RejectOptionLikePositionals(parsedArgs, stray, effectiveJson));
+            }
+
+            // One pre-dispatch interception, before any local UI service runs. A command the user
+            // sent to another target must not perform UI Automation, window discovery, capture, or
+            // input injection on this desktop, and the only way to guarantee that for every verb is
+            // to divert before the handler exists.
+            if (ExecutionTargetUiRouter.ShouldRoute(parsedArgs))
+            {
+                var router = serviceProvider.GetRequiredService<ExecutionTargetUiRouter>();
                 return router.RouteAsync(
                     args,
-                    SandboxUiRequirements.For(parsedArgs),
+                    TargetUiRequirements.For(parsedArgs),
                     effectiveJson,
                     CancellationToken.None);
             }
 
             return parsedArgs.InvokeAsync();
         });
+    }
+
+    /// <summary>
+    /// Reports positional values that were really misspelt options, and returns the exit code.
+    /// </summary>
+    /// <remarks>
+    /// Rendered in whichever error shape the invoked command promises, so a <c>--json</c> caller
+    /// still gets a parseable document rather than a bare line on stderr.
+    /// </remarks>
+    private static int RejectOptionLikePositionals(
+        System.CommandLine.ParseResult parsedArgs,
+        IReadOnlyList<string> stray,
+        bool effectiveJson)
+    {
+        var message = stray.Count == 1
+            ? $"Unrecognized option '{stray[0]}'."
+            : $"Unrecognized options: {string.Join(", ", stray.Select(token => $"'{token}'"))}.";
+
+        var advice = "Check the spelling, or put the value after '--' if it really is an argument.";
+
+        if (effectiveJson && IsUiDescendant(parsedArgs))
+        {
+            UiJsonError.Emit(true, UiJsonError.CodeInvalidArguments, $"{message} {advice}");
+        }
+        else if (effectiveJson && IsFindUi(parsedArgs))
+        {
+            EmitFindUiJsonError($"{message} {advice}");
+        }
+        else
+        {
+            Console.Error.WriteLine(message);
+            Console.Error.WriteLine(advice);
+        }
+
+        return NewCommand.ExitInvalidArgs;
     }
 
     /// <summary>

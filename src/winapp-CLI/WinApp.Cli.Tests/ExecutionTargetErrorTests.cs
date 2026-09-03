@@ -44,6 +44,7 @@ public class ExecutionTargetErrorTests
         "sandbox_setup_requires_restart",
         "sandbox_setup_failed",
         "sandbox_setup_incomplete",
+        "target_invalid",
     ];
 
     [TestMethod]
@@ -57,14 +58,22 @@ public class ExecutionTargetErrorTests
     }
 
     [TestMethod]
-    public void AllCodes_AreUniqueAndSandboxPrefixed()
+    public void AllCodes_AreUniqueAndCorrectlyNamespaced()
     {
         var codes = ExecutionTargetErrorCodes.All;
 
         Assert.AreEqual(codes.Length, codes.Distinct(StringComparer.Ordinal).Count(), "Codes must be unique.");
+
+        // Two namespaces, and which one a code belongs in is a claim about when it can happen.
+        // A `sandbox_` code means a provider was already selected and something about it failed;
+        // a `target_` code is raised before any provider is chosen. Naming Sandbox in a failure
+        // that has nothing to do with Sandbox would send the reader to the wrong place.
         foreach (var code in codes)
         {
-            StringAssert.StartsWith(code, "sandbox_", $"'{code}' must stay in the sandbox_ namespace.");
+            Assert.IsTrue(
+                code.StartsWith("sandbox_", StringComparison.Ordinal) ||
+                code.StartsWith("target_", StringComparison.Ordinal),
+                $"'{code}' must be either provider-specific (sandbox_) or target-neutral (target_).");
         }
     }
 
@@ -78,7 +87,7 @@ public class ExecutionTargetErrorTests
             Context = new Dictionary<string, string> { ["sandboxId"] = "abc" },
             UserAction = "Close the existing Sandbox if it is safe to do so, then retry.",
             NextCommand = new ExecutionTargetNextCommand { Command = "wsb stop --id abc", Advisory = true },
-            Example = "winapp run . --sandbox",
+            Example = "winapp run . --on sandbox",
         };
 
         var json = ExecutionTargetErrorSerializer.Serialize(error);
@@ -98,7 +107,7 @@ public class ExecutionTargetErrorTests
         Assert.IsTrue(
             errorElement.GetProperty("nextCommand").GetProperty("advisory").GetBoolean(),
             "Commands needing user judgement must be advisory so they are never run automatically.");
-        Assert.AreEqual("winapp run . --sandbox", errorElement.GetProperty("example").GetString());
+        Assert.AreEqual("winapp run . --on sandbox", errorElement.GetProperty("example").GetString());
     }
 
     [TestMethod]

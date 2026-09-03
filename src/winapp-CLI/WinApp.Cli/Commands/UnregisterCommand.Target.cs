@@ -15,7 +15,7 @@ internal partial class UnregisterCommand
     public partial class Handler
     {
         /// <summary>
-        /// Removes exactly one managed guest package registration (spec §"Unregister").
+        /// Removes exactly one managed package registration from the selected target.
         /// </summary>
         /// <remarks>
         /// Two independent proofs of ownership, both required. The host will only act on a
@@ -25,7 +25,7 @@ internal partial class UnregisterCommand
         /// A package a user installed in the guest themselves fails both: winapp never recorded it,
         /// and it is not registered from a managed folder.
         /// </remarks>
-        private async Task<int> UnregisterInSandboxAsync(
+        private async Task<int> UnregisterOnTargetAsync(
             MsixIdentityResult identity,
             bool isJson,
             CancellationToken cancellationToken)
@@ -37,6 +37,7 @@ internal partial class UnregisterCommand
                     cancellationToken);
 
                 var deployment = guestApplicationRunner.FindOwningDeployment(
+                    target.Reference,
                     target.Epoch, identity.PackageName, identity.Publisher);
 
                 if (deployment?.Package is not { } package)
@@ -49,8 +50,9 @@ internal partial class UnregisterCommand
                     else
                     {
                         logger.LogInformation(
-                            "{UISymbol} No package deployed in Windows Sandbox for '{PackageName}'.",
+                            "{UISymbol} No package deployed on {Target} for '{PackageName}'.",
                             UiSymbols.Note,
+                            target.Reference.Selector,
                             identity.PackageName);
                     }
 
@@ -63,12 +65,12 @@ internal partial class UnregisterCommand
                 // without its manifest) fails that parse and prints the guest's usage help instead
                 // of a runtime error. Checking first turns that into the same structured,
                 // state-repair guidance every other failure here gets.
-                var layoutFiles = await target.Channel
+                var layoutFiles = await target.Operations
                     .ListFilesAsync(GuestPaths.LayoutScope(deployment.DeploymentId), cancellationToken);
 
                 EnsureLayoutHasManifest(layoutFiles, deployment.DeploymentId);
 
-                var exitCode = await target.Channel.ExecuteAsync(
+                var exitCode = await target.Operations.ExecuteAsync(
                     new GuestExecRequest
                     {
                         UseGuestWinapp = true,
@@ -88,14 +90,14 @@ internal partial class UnregisterCommand
                 {
                     // Cleared only after the guest reported success, so a failed unregister leaves
                     // the record that a later command needs to find the package again.
-                    guestApplicationRunner.ClearPackage(deployment);
+                    guestApplicationRunner.ClearPackage(target.Reference, deployment);
                 }
 
                 return exitCode.ExitCode;
             }
             catch (ExecutionTargetException ex)
             {
-                return SandboxOutput.Fail(ansiConsole, isJson, ex.Error);
+                return TargetOutput.Fail(ansiConsole, isJson, ex.Error);
             }
         }
 
@@ -130,9 +132,9 @@ internal partial class UnregisterCommand
 
             throw ExecutionTargetException.Create(
                 ExecutionTargetErrorCodes.DeploymentDirty,
-                "The registration layout for this deployment in Windows Sandbox is missing its manifest, so it cannot be unregistered.",
+                "The registration layout for this deployment on the target is missing its manifest, so it cannot be unregistered.",
                 userAction: "Redeploy to repair the layout, then unregister again.",
-                example: "winapp run . --sandbox --clean",
+                example: "winapp run . --on sandbox --clean",
                 context: new Dictionary<string, string> { ["deploymentId"] = deploymentId });
         }
     }

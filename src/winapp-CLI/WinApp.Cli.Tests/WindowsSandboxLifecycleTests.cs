@@ -226,7 +226,7 @@ public class WindowsSandboxLifecycleTests
         Assert.IsFalse(lease.IsWarm);
         Assert.IsFalse(lease.Epoch.IsNone);
 
-        var persisted = _stateStore.Read(ExecutionTargetRef.WindowsSandboxDefault);
+        var persisted = _stateStore.Read(WindowsSandboxTarget.Default);
         Assert.AreEqual("sandbox-a", persisted!.InstanceId);
         Assert.IsFalse(string.IsNullOrWhiteSpace(persisted.BootNonce), "A boot nonce is required to form an epoch.");
         Assert.IsNull(persisted.PendingInstanceId, "A confirmed start must clear its pending marker.");
@@ -286,7 +286,7 @@ public class WindowsSandboxLifecycleTests
         Assert.AreEqual(SandboxInstanceOrigin.RecoveredStart, lease.Origin);
         Assert.IsFalse(lease.IsWarm, "A recovered instance has nothing bootstrapped under its new epoch.");
 
-        var persisted = _stateStore.Read(ExecutionTargetRef.WindowsSandboxDefault);
+        var persisted = _stateStore.Read(WindowsSandboxTarget.Default);
         Assert.AreEqual("assigned-id", persisted!.InstanceId);
         Assert.IsNull(persisted.PendingInstanceId);
     }
@@ -304,7 +304,7 @@ public class WindowsSandboxLifecycleTests
         await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
             () => _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token));
 
-        var pending = _stateStore.Read(ExecutionTargetRef.WindowsSandboxDefault);
+        var pending = _stateStore.Read(WindowsSandboxTarget.Default);
         Assert.AreEqual(
             "assigned-id",
             pending!.PendingInstanceId,
@@ -389,7 +389,7 @@ public class WindowsSandboxLifecycleTests
 
         Assert.AreEqual(ExecutionTargetErrorCodes.StartFailed, failure.Error.Code);
 
-        var persisted = _stateStore.Read(ExecutionTargetRef.WindowsSandboxDefault);
+        var persisted = _stateStore.Read(WindowsSandboxTarget.Default);
         Assert.AreNotEqual(
             "someone-elses-sandbox",
             persisted!.InstanceId,
@@ -418,7 +418,7 @@ public class WindowsSandboxLifecycleTests
     [TestMethod]
     public async Task EnsureInstance_ManualSandboxAlreadyRunning_IsAdoptedAutomatically()
     {
-        // --sandbox is explicit consent to make the one Sandbox Windows allows usable. Refusing
+        // --on sandbox is explicit consent to make the one Sandbox Windows allows usable. Refusing
         // would make the flag unusable exactly when a Sandbox is available.
         _cli.SetRunning("someone-elses-sandbox");
 
@@ -462,7 +462,7 @@ public class WindowsSandboxLifecycleTests
         Assert.IsTrue(failure.Error.NextCommand!.Advisory, "Stopping an unowned Sandbox must be advisory.");
         CollectionAssert.AreEqual(Array.Empty<string>(), _cli.Stopped);
         Assert.IsNull(
-            _stateStore.Read(ExecutionTargetRef.WindowsSandboxDefault)?.InstanceId,
+            _stateStore.Read(WindowsSandboxTarget.Default)?.InstanceId,
             "An unusable instance must not be recorded as owned.");
     }
 
@@ -473,13 +473,13 @@ public class WindowsSandboxLifecycleTests
         // so it establishes no ownership. Excluding that ID anyway would leave zero candidates and
         // report a single running Sandbox as "more than one".
         _stateStore.Commit(
-            ExecutionTargetRef.WindowsSandboxDefault,
+            WindowsSandboxTarget.Default,
             new TargetState
             {
                 SchemaVersion = 0,
                 Revision = 0,
-                TargetKind = ExecutionTargetRef.WindowsSandboxDefault.Kind,
-                TargetId = ExecutionTargetRef.WindowsSandboxDefault.Id,
+                TargetKind = WindowsSandboxTarget.Default.Kind,
+                TargetId = WindowsSandboxTarget.Default.Id,
                 InstanceId = "sandbox-a",
             },
             expectedRevision: 0);
@@ -584,7 +584,7 @@ public class WindowsSandboxLifecycleTests
 
         _lifecycle.InvalidateManagedInstance();
 
-        Assert.IsNull(_stateStore.Read(ExecutionTargetRef.WindowsSandboxDefault));
+        Assert.IsNull(_stateStore.Read(WindowsSandboxTarget.Default));
     }
 
     [TestMethod]
@@ -611,7 +611,7 @@ public class WindowsSandboxLifecycleTests
 
         CollectionAssert.AreEqual(Array.Empty<string>(), _cli.Stopped, "A live Sandbox must never be stopped.");
 
-        var persisted = _stateStore.Read(ExecutionTargetRef.WindowsSandboxDefault);
+        var persisted = _stateStore.Read(WindowsSandboxTarget.Default);
         Assert.AreEqual(
             "sandbox-orphan",
             persisted!.PendingInstanceId,
@@ -667,7 +667,7 @@ public class WindowsSandboxLifecycleTests
                 "The other manager's live Sandbox must not be stopped.");
 
             // The first manager's own record is untouched, so its handles stay fenced on its epoch.
-            var stillOwned = _stateStore.Read(ExecutionTargetRef.WindowsSandboxDefault);
+            var stillOwned = _stateStore.Read(WindowsSandboxTarget.Default);
             Assert.AreEqual(owned.InstanceId, stillOwned!.InstanceId);
             Assert.AreEqual(
                 ExecutionTargetEpoch.Create(stillOwned.InstanceId!, stillOwned.BootNonce!),
@@ -708,9 +708,9 @@ public class WindowsSandboxLifecycleTests
         var created = await _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
 
         // What the backend records once its authenticated agent connection succeeds.
-        var state = _stateStore.Read(ExecutionTargetRef.WindowsSandboxDefault)!;
+        var state = _stateStore.Read(WindowsSandboxTarget.Default)!;
         _stateStore.Commit(
-            ExecutionTargetRef.WindowsSandboxDefault,
+            WindowsSandboxTarget.Default,
             state with { BootstrappedEpoch = created.Epoch.Value },
             state.Revision);
 
@@ -727,9 +727,9 @@ public class WindowsSandboxLifecycleTests
         _lifecycle = NewLifecycle(new Queue<string>(["sandbox-a"]));
         await _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
 
-        var state = _stateStore.Read(ExecutionTargetRef.WindowsSandboxDefault)!;
+        var state = _stateStore.Read(WindowsSandboxTarget.Default)!;
         _stateStore.Commit(
-            ExecutionTargetRef.WindowsSandboxDefault,
+            WindowsSandboxTarget.Default,
             state with { BootstrappedEpoch = "sandbox-a:SOMEOTHERNONCE" },
             state.Revision);
 

@@ -13,8 +13,8 @@ namespace WinApp.Cli.Commands;
 /// </summary>
 /// <remarks>
 /// Exists because the ordinary <c>winapp run</c> registers and launches in a single call: after a
-/// <c>--sandbox</c> run's own locked registration phase releases the mutation lease, a second,
-/// unrelated <c>--sandbox</c> run sharing the same package identity but a different layout can
+/// <c>--on sandbox</c> run's own locked registration phase releases the mutation lease, a second,
+/// unrelated <c>--on sandbox</c> run sharing the same package identity but a different layout can
 /// register in the gap. If the first run's launch phase were the ordinary <c>run</c>, it would
 /// notice the now-mismatched install location and silently fall through to unregister-then-register
 /// -- an unlocked package mutation that also disturbs the second run's registration. This verb

@@ -97,7 +97,7 @@ public class HostSourceWalkerTests
     }
 
     /// <summary>
-    /// <c>sandbox cp</c> must not enumerate — and therefore can never copy — a file that only
+    /// <c>target push</c> must not enumerate — and therefore can never copy — a file that only
     /// exists outside the folder the caller asked to copy.
     /// </summary>
     [TestMethod]
@@ -116,7 +116,7 @@ public class HostSourceWalkerTests
                 return;
             }
 
-            var sources = SandboxCopyService.EnumerateHostSources(
+            var sources = TargetFileTransferService.EnumerateHostSources(
                 root, TestContext.CancellationToken, out _);
 
             Assert.IsFalse(
@@ -152,7 +152,7 @@ public class HostSourceWalkerTests
             }
 
             var failure = Assert.ThrowsExactly<ExecutionTargetException>(
-                () => SandboxCopyService.EnumerateHostSources(link, TestContext.CancellationToken, out _));
+                () => TargetFileTransferService.EnumerateHostSources(link, TestContext.CancellationToken, out _));
 
             Assert.AreEqual(ExecutionTargetErrorCodes.ArtifactFailed, failure.Error.Code);
         }
@@ -243,7 +243,7 @@ public class HostSourceWalkerTests
         }
     }
 
-    /// <summary>The same linked root is refused by <c>sandbox cp</c>.</summary>
+    /// <summary>The same linked root is refused by <c>target push</c>.</summary>
     [TestMethod]
     public void SandboxCopy_RefusesARootThatIsItselfALink()
     {
@@ -262,7 +262,7 @@ public class HostSourceWalkerTests
             }
 
             var failure = Assert.ThrowsExactly<ExecutionTargetException>(
-                () => SandboxCopyService.EnumerateHostSources(
+                () => TargetFileTransferService.EnumerateHostSources(
                     linkedRoot, TestContext.CancellationToken, out _));
 
             Assert.AreEqual(ExecutionTargetErrorCodes.ArtifactFailed, failure.Error.Code);
@@ -417,7 +417,7 @@ public class HostSourceWalkerTests
     }
 
     /// <summary>
-    /// The pre-read re-check refuses a leaf that is a link, which is the guard <c>sandbox cp</c>
+    /// The pre-read re-check refuses a leaf that is a link, which is the guard <c>target push</c>
     /// runs immediately before every file it reads.
     /// </summary>
     [TestMethod]
@@ -542,11 +542,11 @@ public class HostSourceWalkerTests
     }
 
     /// <summary>
-    /// <c>sandbox cp</c> refuses a file swapped for a link after enumeration, end to end.
+    /// <c>target push</c> refuses a file swapped for a link after enumeration, end to end.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Driven through the real <see cref="SandboxCopyService.CopyAsync"/> against a real guest
+    /// Driven through the real <see cref="TargetFileTransferService.CopyAsync"/> against a real guest
     /// command server, so what is proven is that the copy path actually refuses to send the file —
     /// not merely that the guard would have said no if it had been asked.
     /// </para>
@@ -584,9 +584,9 @@ public class HostSourceWalkerTests
                     victim, TestPaths.Under(outside, SecretName), outside));
 
             var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
-                () => SandboxCopyService.CopyAsync(
+                () => TargetFileTransferService.CopyAsync(
                     harness.Channel,
-                    new SandboxCopyRequest(SandboxCopyDirection.ToGuest, root, @"Work\leaf"),
+                    new TargetTransferRequest(TargetTransferDirection.ToTarget, root, @"Work\leaf"),
                     TestContext.CancellationToken));
 
             if (!swapped)
@@ -644,9 +644,9 @@ public class HostSourceWalkerTests
         {
             await using var harness = new CopyHarness(guestManaged, onFirstSend: () => { });
 
-            var result = await SandboxCopyService.CopyAsync(
+            var result = await TargetFileTransferService.CopyAsync(
                 harness.Channel,
-                new SandboxCopyRequest(SandboxCopyDirection.ToGuest, source, guestPath),
+                new TargetTransferRequest(TargetTransferDirection.ToTarget, source, guestPath),
                 TestContext.CancellationToken);
 
             Assert.AreEqual(1, result.Transferred);
@@ -688,9 +688,9 @@ public class HostSourceWalkerTests
         {
             await using var harness = new CopyHarness(guestManaged, onFirstSend: () => { });
 
-            var result = await SandboxCopyService.CopyAsync(
+            var result = await TargetFileTransferService.CopyAsync(
                 harness.Channel,
-                new SandboxCopyRequest(SandboxCopyDirection.ToGuest, root, "Payload"),
+                new TargetTransferRequest(TargetTransferDirection.ToTarget, root, "Payload"),
                 TestContext.CancellationToken);
 
             Assert.AreEqual(2, result.Transferred);
@@ -724,10 +724,10 @@ public class HostSourceWalkerTests
         try
         {
             await using var harness = new CopyHarness(guestManaged, onFirstSend: () => { });
-            var request = new SandboxCopyRequest(SandboxCopyDirection.ToGuest, source, @"Setup\setup.ps1");
+            var request = new TargetTransferRequest(TargetTransferDirection.ToTarget, source, @"Setup\setup.ps1");
 
-            var first = await SandboxCopyService.CopyAsync(harness.Channel, request, TestContext.CancellationToken);
-            var second = await SandboxCopyService.CopyAsync(harness.Channel, request, TestContext.CancellationToken);
+            var first = await TargetFileTransferService.CopyAsync(harness.Channel, request, TestContext.CancellationToken);
+            var second = await TargetFileTransferService.CopyAsync(harness.Channel, request, TestContext.CancellationToken);
 
             Assert.AreEqual(1, first.Transferred);
             Assert.AreEqual(0, second.Transferred, "Identical content must not be re-sent.");

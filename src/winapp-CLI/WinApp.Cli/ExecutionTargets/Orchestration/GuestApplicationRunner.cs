@@ -76,7 +76,7 @@ internal sealed class GuestApplicationRunner(TargetDeploymentService deployments
             .CreateSnapshotAsync(sourceRoot, deploymentId, cancellationToken, IsExcludedFromDeployment)
             .ConfigureAwait(false);
 
-        var existing = deployments.ReadCurrent(ExecutionTargetRef.WindowsSandboxDefault, target.Epoch, deploymentId);
+        var existing = deployments.ReadCurrent(target.Reference, target.Epoch, deploymentId);
 
         // A rerun must never leave the previous launch's instance running alongside the new one,
         // and must never mutate files that instance still has open. This runs before any write,
@@ -86,9 +86,9 @@ internal sealed class GuestApplicationRunner(TargetDeploymentService deployments
         await StopPreviousInstanceAsync(target, existing, cancellationToken).ConfigureAwait(false);
 
         var result = await deployments.ReconcileAsync(
-            ExecutionTargetRef.WindowsSandboxDefault,
+            target.Reference,
             target.Epoch,
-            target.Channel,
+            target.Operations,
             deploymentId,
             snapshot,
             sourceRoot,
@@ -103,7 +103,7 @@ internal sealed class GuestApplicationRunner(TargetDeploymentService deployments
             // this would let a partial, non-transactional directory delete leave a damaged layout
             // behind a state that calls itself clean, which is exactly what let a previous
             // interrupted `--clean` masquerade as healthy.
-            clean ? ct => target.Channel.DeleteScopeAsync(layoutScope, ct) : null).ConfigureAwait(false);
+            clean ? ct => target.Operations.DeleteScopeAsync(layoutScope, ct) : null).ConfigureAwait(false);
 
         TargetDeploymentService.EnsureLaunchable(result.State, target.Epoch);
 
@@ -145,7 +145,7 @@ internal sealed class GuestApplicationRunner(TargetDeploymentService deployments
 
         if (existing.Package is { PackageFamilyName: { } familyName, RegisteredLocation: { } registeredLocation })
         {
-            await target.Channel
+            await target.Operations
                 .StopPackageProcessesAsync(familyName, registeredLocation, cancellationToken)
                 .ConfigureAwait(false);
             return;
@@ -153,7 +153,7 @@ internal sealed class GuestApplicationRunner(TargetDeploymentService deployments
 
         if (existing.ProcessId is { } processId && existing.ProcessStartTicksUtc is { } startTicksUtc)
         {
-            await target.Channel.StopTrackedProcessAsync(processId, startTicksUtc, cancellationToken)
+            await target.Operations.StopTrackedProcessAsync(processId, startTicksUtc, cancellationToken)
                 .ConfigureAwait(false);
         }
     }
@@ -178,7 +178,7 @@ internal sealed class GuestApplicationRunner(TargetDeploymentService deployments
 
         var started = false;
 
-        var result = await target.Channel.ExecuteAsync(
+        var result = await target.Operations.ExecuteAsync(
             request,
             callbacks with
             {
@@ -200,8 +200,8 @@ internal sealed class GuestApplicationRunner(TargetDeploymentService deployments
     }
 
     /// <summary>Records which guest package this deployment owns.</summary>
-    public DeploymentState CommitPackage(DeploymentState state, PackageOwnership package) =>
-        deployments.CommitPackage(ExecutionTargetRef.WindowsSandboxDefault, state, package);
+    public DeploymentState CommitPackage(ExecutionTargetRef target, DeploymentState state, PackageOwnership package) =>
+        deployments.CommitPackage(target, state, package);
 
     /// <summary>
     /// Finds the deployment in this generation that owns <paramref name="packageName"/>.
@@ -214,12 +214,13 @@ internal sealed class GuestApplicationRunner(TargetDeploymentService deployments
     /// not name.
     /// </remarks>
     public DeploymentState? FindOwningDeployment(
+        ExecutionTargetRef target,
         ExecutionTargetEpoch epoch,
         string packageName,
         string publisher)
     {
         var owning = deployments
-            .List(ExecutionTargetRef.WindowsSandboxDefault)
+            .List(target)
             .Where(state => state.IsForEpoch(epoch)
                 && state.Package is { } package
                 && string.Equals(package.PackageName, packageName, StringComparison.OrdinalIgnoreCase)
@@ -242,8 +243,8 @@ internal sealed class GuestApplicationRunner(TargetDeploymentService deployments
     }
 
     /// <summary>Forgets the package a deployment owned, after it has been unregistered.</summary>
-    public DeploymentState ClearPackage(DeploymentState state) =>
-        deployments.CommitPackage(ExecutionTargetRef.WindowsSandboxDefault, state, package: null);
+    public DeploymentState ClearPackage(ExecutionTargetRef target, DeploymentState state) =>
+        deployments.CommitPackage(target, state, package: null);
 
     /// <summary>
     /// Commits the launched process without letting a state race fail a running application.
@@ -258,7 +259,7 @@ internal sealed class GuestApplicationRunner(TargetDeploymentService deployments
         try
         {
             deployments.CommitProcess(
-                ExecutionTargetRef.WindowsSandboxDefault,
+                target.Reference,
                 state,
                 process.ProcessId,
                 process.StartTicksUtc);

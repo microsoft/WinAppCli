@@ -628,7 +628,7 @@ public class MsixServiceIdentityTests : BaseCommandTests
 
     /// <summary>
     /// Developer Mode is a prerequisite for registering a package, and materialization registers
-    /// nothing — so demanding it would fail a <c>--sandbox</c> run on a step it never performs.
+    /// nothing — so demanding it would fail a <c>--on sandbox</c> run on a step it never performs.
     /// </summary>
     [TestMethod]
     public async Task MaterializeLooseLayoutAsync_DevModeDisabled_StillMaterializes()

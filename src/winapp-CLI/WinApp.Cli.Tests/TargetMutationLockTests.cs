@@ -4,6 +4,8 @@
 using WinApp.Cli.ExecutionTargets.Abstractions;
 using WinApp.Cli.ExecutionTargets.Orchestration;
 
+using WinApp.Cli.ExecutionTargets.WindowsSandbox;
+
 namespace WinApp.Cli.Tests;
 
 /// <summary>
@@ -24,7 +26,7 @@ public class TargetMutationLockTests
         _tempRoot = new DirectoryInfo(TestPaths.TempRoot("MutationLock"));
         _tempRoot.Create();
 
-        _target = ExecutionTargetRef.WindowsSandboxDefault;
+        _target = WindowsSandboxTarget.Default;
         _lock = new TargetMutationLock(new TargetStateDirectoryProvider(_tempRoot.FullName));
     }
 

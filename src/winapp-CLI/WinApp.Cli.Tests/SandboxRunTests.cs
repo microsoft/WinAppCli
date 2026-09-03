@@ -7,10 +7,12 @@ using WinApp.Cli.ExecutionTargets.Abstractions;
 using WinApp.Cli.ExecutionTargets.GuestAgent;
 using WinApp.Cli.ExecutionTargets.Orchestration;
 
+using WinApp.Cli.ExecutionTargets.WindowsSandbox;
+
 namespace WinApp.Cli.Tests;
 
 /// <summary>
-/// The <c>run --sandbox</c> and <c>unregister --sandbox</c> orchestration, driven through the real
+/// The <c>run --on sandbox</c> and <c>unregister --on sandbox</c> orchestration, driven through the real
 /// command channel into a real guest server with only the transport faked.
 /// </summary>
 /// <remarks>
@@ -280,7 +282,7 @@ public class SandboxRunTests
         process.Exit(0);
         await run;
 
-        var state = harness.States.Read(ExecutionTargetRef.WindowsSandboxDefault, "dep-1");
+        var state = harness.States.Read(WindowsSandboxTarget.Default, "dep-1");
         Assert.AreEqual(process.ProcessId, state!.ProcessId);
         Assert.AreEqual(process.StartTicksUtc, state.ProcessStartTicksUtc);
     }
@@ -291,7 +293,7 @@ public class SandboxRunTests
         await using var harness = new Harness(_guestManaged, _stateRoot, guestWinapp: null);
 
         var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() =>
-            harness.Target.Channel.ExecuteAsync(
+            harness.Target.Operations.ExecuteAsync(
                 new GuestExecRequest { UseGuestWinapp = true, Arguments = ["run"] },
                 callbacks: null,
                 TestContext.CancellationToken));
@@ -306,7 +308,7 @@ public class SandboxRunTests
         await using var harness = new Harness(_guestManaged, _stateRoot);
 
         var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() =>
-            harness.Target.Channel.ExecuteAsync(
+            harness.Target.Operations.ExecuteAsync(
                 new GuestExecRequest { Arguments = ["--info"] },
                 callbacks: null,
                 TestContext.CancellationToken));
@@ -326,14 +328,14 @@ public class SandboxRunTests
         var deployment = await harness.Runner.DeployAsync(
             harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
 
-        harness.Runner.CommitPackage(deployment.State, Ownership(deployment.LayoutPath));
+        harness.Runner.CommitPackage(WindowsSandboxTarget.Default, deployment.State, Ownership(deployment.LayoutPath));
 
-        var found = harness.Runner.FindOwningDeployment(Epoch, "Contoso.MyApp", "CN=Contoso");
+        var found = harness.Runner.FindOwningDeployment(WindowsSandboxTarget.Default, Epoch, "Contoso.MyApp", "CN=Contoso");
         Assert.AreEqual("dep-1", found!.DeploymentId);
 
         // A package winapp never deployed is not found, which is what keeps unregister from
         // removing something a user installed in the guest themselves.
-        Assert.IsNull(harness.Runner.FindOwningDeployment(Epoch, "Other.App", "CN=Contoso"));
+        Assert.IsNull(harness.Runner.FindOwningDeployment(WindowsSandboxTarget.Default, Epoch, "Other.App", "CN=Contoso"));
     }
 
     [TestMethod]
@@ -346,12 +348,12 @@ public class SandboxRunTests
         var deployment = await harness.Runner.DeployAsync(
             harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
 
-        harness.Runner.CommitPackage(deployment.State, Ownership(deployment.LayoutPath));
+        harness.Runner.CommitPackage(WindowsSandboxTarget.Default, deployment.State, Ownership(deployment.LayoutPath));
 
         // State from a previous generation describes a guest that no longer exists; acting on it
         // would unregister inside a Sandbox that was never asked about.
         var other = ExecutionTargetEpoch.Create("sandbox-1", "nonce-b");
-        Assert.IsNull(harness.Runner.FindOwningDeployment(other, "Contoso.MyApp", "CN=Contoso"));
+        Assert.IsNull(harness.Runner.FindOwningDeployment(WindowsSandboxTarget.Default, other, "Contoso.MyApp", "CN=Contoso"));
     }
 
     [TestMethod]
@@ -366,12 +368,12 @@ public class SandboxRunTests
             var deployment = await harness.Runner.DeployAsync(
                 harness.Target, id, new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
 
-            harness.Runner.CommitPackage(deployment.State, Ownership(deployment.LayoutPath));
+            harness.Runner.CommitPackage(WindowsSandboxTarget.Default, deployment.State, Ownership(deployment.LayoutPath));
         }
 
         // Picking one would unregister an application the user did not name.
         var failure = Assert.ThrowsExactly<ExecutionTargetException>(() =>
-            harness.Runner.FindOwningDeployment(Epoch, "Contoso.MyApp", "CN=Contoso"));
+            harness.Runner.FindOwningDeployment(WindowsSandboxTarget.Default, Epoch, "Contoso.MyApp", "CN=Contoso"));
 
         Assert.AreEqual(ExecutionTargetErrorCodes.TargetAmbiguous, failure.Error.Code);
     }
@@ -386,10 +388,10 @@ public class SandboxRunTests
         var deployment = await harness.Runner.DeployAsync(
             harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
 
-        var owned = harness.Runner.CommitPackage(deployment.State, Ownership(deployment.LayoutPath));
-        harness.Runner.ClearPackage(owned);
+        var owned = harness.Runner.CommitPackage(WindowsSandboxTarget.Default, deployment.State, Ownership(deployment.LayoutPath));
+        harness.Runner.ClearPackage(WindowsSandboxTarget.Default, owned);
 
-        Assert.IsNull(harness.Runner.FindOwningDeployment(Epoch, "Contoso.MyApp", "CN=Contoso"));
+        Assert.IsNull(harness.Runner.FindOwningDeployment(WindowsSandboxTarget.Default, Epoch, "Contoso.MyApp", "CN=Contoso"));
     }
 
     // ---- Stop before redeploy -------------------------------------------------------
@@ -417,7 +419,7 @@ public class SandboxRunTests
         var deployment = await harness.Runner.DeployAsync(
             harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
 
-        harness.Runner.CommitPackage(deployment.State, Ownership(deployment.LayoutPath));
+        harness.Runner.CommitPackage(WindowsSandboxTarget.Default, deployment.State, Ownership(deployment.LayoutPath));
 
         // The guest's simulated live registration: genuinely this deployment's own layout, so its
         // own redeploy below is allowed to stop it.
@@ -459,7 +461,7 @@ public class SandboxRunTests
         // Deployment A: registered and genuinely running from its own layout.
         var depA = await harness.Runner.DeployAsync(
             harness.Target, "dep-a", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
-        harness.Runner.CommitPackage(depA.State, Ownership(depA.LayoutPath));
+        harness.Runner.CommitPackage(WindowsSandboxTarget.Default, depA.State, Ownership(depA.LayoutPath));
         harness.AppLauncher.FakeRegisteredLocation = depA.LayoutPath;
 
         // Deployment B: a different source path, same package identity (Ownership() always uses
@@ -467,7 +469,7 @@ public class SandboxRunTests
         // as it would if B's own registration attempt had failed after this optimistic commit.
         var depB = await harness.Runner.DeployAsync(
             harness.Target, "dep-b", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
-        harness.Runner.CommitPackage(depB.State, Ownership(depB.LayoutPath));
+        harness.Runner.CommitPackage(WindowsSandboxTarget.Default, depB.State, Ownership(depB.LayoutPath));
 
         await WriteHostFileAsync("app.exe", "v2");
 
@@ -495,7 +497,7 @@ public class SandboxRunTests
         var deployment = await harness.Runner.DeployAsync(
             harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
 
-        harness.Runner.CommitPackage(deployment.State, Ownership(deployment.LayoutPath));
+        harness.Runner.CommitPackage(WindowsSandboxTarget.Default, deployment.State, Ownership(deployment.LayoutPath));
         harness.AppLauncher.FakeRegisteredLocation = deployment.LayoutPath;
 
         await WriteHostFileAsync("app.exe", "v2");
@@ -631,7 +633,7 @@ public class SandboxRunTests
         var deployment = await harness.Runner.DeployAsync(
             harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: true, TestContext.CancellationToken);
 
-        var owned = harness.Runner.CommitPackage(deployment.State, Ownership(deployment.LayoutPath));
+        var owned = harness.Runner.CommitPackage(WindowsSandboxTarget.Default, deployment.State, Ownership(deployment.LayoutPath));
         Assert.IsFalse(owned.Dirty);
         harness.AppLauncher.FakeRegisteredLocation = deployment.LayoutPath;
 
@@ -664,7 +666,7 @@ public class SandboxRunTests
         Assert.IsFalse(File.Exists(TestPaths.Under(layoutDirectory, "appxmanifest.xml")));
         Assert.IsTrue(File.Exists(lockedFile));
 
-        var persisted = harness.States.Read(ExecutionTargetRef.WindowsSandboxDefault, "dep-1");
+        var persisted = harness.States.Read(WindowsSandboxTarget.Default, "dep-1");
         Assert.IsTrue(persisted!.Dirty, "A layout cleanup interrupted partway through must leave the deployment dirty.");
 
         // Package ownership must survive the failure too: unregister and the next run both still
@@ -691,7 +693,7 @@ public class SandboxRunTests
         var deployment = await harness.Runner.DeployAsync(
             harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
 
-        var owned = harness.Runner.CommitPackage(deployment.State, Ownership(deployment.LayoutPath));
+        var owned = harness.Runner.CommitPackage(WindowsSandboxTarget.Default, deployment.State, Ownership(deployment.LayoutPath));
         Assert.IsFalse(owned.Dirty, "The persisted state in this scenario claims a healthy, clean deployment.");
 
         // A layout damaged by something other than a normal deploy (a bug elsewhere, manual
@@ -702,7 +704,7 @@ public class SandboxRunTests
         await File.WriteAllTextAsync(
             TestPaths.Under(layoutDirectory, "resources.pri"), "pri", TestContext.CancellationToken);
 
-        var layoutFiles = await harness.Target.Channel.ListFilesAsync(
+        var layoutFiles = await harness.Target.Operations.ListFilesAsync(
             GuestPaths.LayoutScope("dep-1"), TestContext.CancellationToken);
 
         var failure = Assert.ThrowsExactly<ExecutionTargetException>(
@@ -729,7 +731,7 @@ public class SandboxRunTests
         var deployment = await harness.Runner.DeployAsync(
             harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: true, TestContext.CancellationToken);
 
-        harness.Runner.CommitPackage(deployment.State, Ownership(deployment.LayoutPath));
+        harness.Runner.CommitPackage(WindowsSandboxTarget.Default, deployment.State, Ownership(deployment.LayoutPath));
 
         // The package manager's own record of where this deployment registered from, unaffected by
         // whatever winapp has since done to the files themselves -- exactly what
@@ -776,7 +778,7 @@ public class SandboxRunTests
         var deployment = await harness.Runner.DeployAsync(
             harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: true, TestContext.CancellationToken);
 
-        harness.Runner.CommitPackage(deployment.State, Ownership(deployment.LayoutPath));
+        harness.Runner.CommitPackage(WindowsSandboxTarget.Default, deployment.State, Ownership(deployment.LayoutPath));
 
         // Registered from a different deployment's layout entirely -- the mismatch that matters,
         // independent of whether dep-1's own layout still exists.
@@ -812,7 +814,7 @@ public class SandboxRunTests
         var deployment = await harness.Runner.DeployAsync(
             harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
 
-        harness.Runner.CommitPackage(deployment.State, Ownership(deployment.LayoutPath));
+        harness.Runner.CommitPackage(WindowsSandboxTarget.Default, deployment.State, Ownership(deployment.LayoutPath));
 
         await WriteHostFileAsync("app.exe", "v2");
 
@@ -844,7 +846,7 @@ public class SandboxRunTests
         var deployment = await harness.Runner.DeployAsync(
             harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
 
-        harness.Runner.CommitPackage(deployment.State, Ownership(deployment.LayoutPath));
+        harness.Runner.CommitPackage(WindowsSandboxTarget.Default, deployment.State, Ownership(deployment.LayoutPath));
 
         // The query itself succeeds and confirms nothing is registered under that family any more
         // (distinct from a query that failed): safe to treat as nothing to stop.
@@ -924,22 +926,22 @@ public class SandboxRunTests
     [TestMethod]
     public void DirectUnpackagedJsonResult_IsAlwaysAHostScopedEnvelope()
     {
-        var result = RunCommand.Handler.CreateDirectGuestResult(
+        var result = RunCommand.Handler.CreateDirectGuestResult(WindowsSandboxTarget.Default, 
             architecture: "arm64",
             epoch: "epoch-1");
 
         Assert.IsNull(result.ProcessId);
         Assert.IsTrue(result.Sandbox);
         Assert.AreEqual("sandbox", result.ProcessScope);
-        Assert.IsNull(result.AppTarget);
+        Assert.IsNull(result.UiTargetArgs);
         Assert.AreEqual("arm64", result.ExecutionTarget!.Architecture);
         Assert.AreEqual("epoch-1", result.ExecutionTarget.Epoch);
     }
 
     private static ExecutionTargetInfo TargetInfo() => new()
     {
-        Kind = ExecutionTargetRef.WindowsSandboxDefault.Kind,
-        Id = ExecutionTargetRef.WindowsSandboxDefault.Id,
+        Kind = WindowsSandboxTarget.Default.Kind,
+        Id = WindowsSandboxTarget.Default.Id,
         Architecture = "arm64",
         Epoch = Epoch.Value,
     };
@@ -1016,7 +1018,7 @@ public class SandboxRunTests
 
             // The managed root is a guest-side value, so the harness reports a stable one rather
             // than the host temp folder the fake file service actually writes to.
-            Target = new PreparedTarget(_channel, Epoch, Capabilities(), Reused: false, MutationLease: _mutationLease);
+            Target = new PreparedTarget(WindowsSandboxTarget.Default, _channel, Epoch, Capabilities(), Reused: false, MutationLease: _mutationLease);
         }
 
         public FakeGuestProcessHostFactory Processes { get; } = new();
@@ -1055,7 +1057,7 @@ public class SandboxRunTests
     {
         public DirectoryInfo GetTargetRoot(ExecutionTargetRef target, bool create)
         {
-            var directory = new DirectoryInfo(TestPaths.Under(root, target.Slug));
+            var directory = new DirectoryInfo(TestPaths.Under(root, target.StateKey));
 
             if (create)
             {

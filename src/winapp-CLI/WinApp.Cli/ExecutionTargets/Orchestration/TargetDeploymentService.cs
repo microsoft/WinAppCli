@@ -16,7 +16,7 @@ internal sealed record DeploymentResult(string DeploymentId, DeploymentPlan Plan
 /// (spec §"Deployment model", §"Exact in-place reconciliation").
 /// </summary>
 /// <remarks>
-/// Target-neutral by construction: it talks only to <see cref="GuestCommandChannel"/> and knows
+/// Target-neutral by construction: it talks only to <see cref="ITargetOperationExecutor"/> and knows
 /// nothing about Windows Sandbox paths, IDs, or commands. That is what lets the whole sequence —
 /// including the dirty-repair and epoch-invalidation paths — be verified against a fake transport.
 /// <para>
@@ -61,7 +61,7 @@ internal sealed class TargetDeploymentService(IDeploymentStateStore stateStore)
     public async Task<DeploymentResult> ReconcileAsync(
         ExecutionTargetRef target,
         ExecutionTargetEpoch epoch,
-        GuestCommandChannel channel,
+        ITargetOperationExecutor channel,
         string deploymentId,
         DeploymentSnapshot desired,
         DirectoryInfo sourceRoot,
@@ -201,7 +201,7 @@ internal sealed class TargetDeploymentService(IDeploymentStateStore stateStore)
                 ExecutionTargetErrorCodes.DeploymentDirty,
                 "This application has not been deployed into Windows Sandbox yet.",
                 userAction: "Run the command again to deploy it.",
-                example: "winapp run . --sandbox");
+                example: "winapp run . --on sandbox");
         }
 
         if (!state.IsForEpoch(epoch))
@@ -210,7 +210,7 @@ internal sealed class TargetDeploymentService(IDeploymentStateStore stateStore)
                 ExecutionTargetErrorCodes.TargetStale,
                 "This application was deployed into a Windows Sandbox that no longer exists.",
                 userAction: "Run the command again to redeploy it.",
-                example: "winapp run . --sandbox");
+                example: "winapp run . --on sandbox");
         }
 
         if (state.Dirty)
@@ -220,13 +220,13 @@ internal sealed class TargetDeploymentService(IDeploymentStateStore stateStore)
                 "The previous deployment did not finish, so the guest copy is incomplete.",
                 userAction: "Run the command again to redeploy it completely.",
                 context: new Dictionary<string, string> { ["deploymentId"] = state.DeploymentId },
-                example: "winapp run . --sandbox");
+                example: "winapp run . --on sandbox");
         }
     }
 
     /// <summary>Streams one file from the host snapshot into the guest.</summary>
     private static async Task PutAsync(
-        GuestCommandChannel channel,
+        ITargetOperationExecutor channel,
         GuestPathScope scope,
         string sourceRoot,
         DeploymentFile file,
@@ -258,7 +258,7 @@ internal sealed class TargetDeploymentService(IDeploymentStateStore stateStore)
     /// between operations, is only visible by comparing the whole layout afterwards.
     /// </remarks>
     private static async Task VerifyAsync(
-        GuestCommandChannel channel,
+        ITargetOperationExecutor channel,
         GuestPathScope scope,
         DeploymentSnapshot desired,
         CancellationToken cancellationToken)

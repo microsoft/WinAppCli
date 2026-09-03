@@ -203,7 +203,7 @@ public class SandboxLiveAdoptionTests
             Assert.AreEqual(manualId, diagnostics["sandboxId"], "winapp must take over the running instance.");
             Assert.AreEqual("true", diagnostics["sandboxAdopted"]);
 
-            var persisted = stateStore.Read(ExecutionTargetRef.WindowsSandboxDefault);
+            var persisted = stateStore.Read(WindowsSandboxTarget.Default);
             Assert.AreEqual(manualId, persisted!.InstanceId);
             Assert.AreEqual(nameof(SandboxInstanceOrigin.Adopted), persisted.InstanceOrigin);
         }

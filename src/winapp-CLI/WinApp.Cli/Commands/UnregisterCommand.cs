@@ -14,15 +14,13 @@ using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Commands;
 
-internal partial class UnregisterCommand : Command, IShortDescription
+internal partial class UnregisterCommand : Command, IShortDescription, ITargetAwareCommand
 {
     public string ShortDescription => "Unregister a sideloaded development package.";
 
     public static Option<FileInfo> ManifestOption { get; }
     public static Option<bool> ForceOption { get; }
 
-    /// <summary>Unregisters the managed package in the Windows Sandbox instead of on this machine.</summary>
-    public static Option<bool> SandboxOption { get; }
 
     static UnregisterCommand()
     {
@@ -37,17 +35,12 @@ internal partial class UnregisterCommand : Command, IShortDescription
             Description = "Skip the install-location directory check and unregister even if the package was registered from a different project tree"
         };
 
-        SandboxOption = new Option<bool>("--sandbox")
-        {
-            Description = "Unregister the package inside the Windows Sandbox winapp manages, instead of on this machine. Only the exact package this manifest's app was deployed as is removed; a package installed in the Sandbox by anything other than winapp is never touched."
-        };
     }
 
     public UnregisterCommand() : base("unregister", "Unregisters a sideloaded development package. Only removes packages registered in development mode (e.g., via 'winapp run' or 'create-debug-identity').")
     {
         Options.Add(ManifestOption);
         Options.Add(ForceOption);
-        Options.Add(SandboxOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -63,7 +56,7 @@ internal partial class UnregisterCommand : Command, IShortDescription
         {
             var manifest = parseResult.GetValue(ManifestOption);
             var force = parseResult.GetValue(ForceOption);
-            var sandbox = parseResult.GetValue(SandboxOption);
+            var target = ExecutionTargetSelection.Resolve(parseResult);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
             // Resolve manifest
@@ -95,11 +88,11 @@ internal partial class UnregisterCommand : Command, IShortDescription
             var identity = MsixService.ParseAppxManifestAsync(manifestContent);
             var packageName = identity.PackageName;
 
-            // --sandbox never touches this machine's registrations, and this machine's state never
-            // decides what happens in the guest.
-            if (sandbox)
+            // A selected target never touches this machine's registrations, and this machine's
+            // state never decides what happens on that target.
+            if (!target.IsLocal)
             {
-                return await UnregisterInSandboxAsync(identity, isJson, cancellationToken);
+                return await UnregisterOnTargetAsync(identity, isJson, cancellationToken);
             }
 
             // Search for both the exact name and the .debug variant

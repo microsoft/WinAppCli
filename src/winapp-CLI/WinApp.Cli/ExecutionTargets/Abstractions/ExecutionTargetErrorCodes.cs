@@ -27,7 +27,7 @@ internal static class ExecutionTargetErrorCodes
     /// stopped.
     /// </summary>
     /// <remarks>
-    /// <c>--sandbox</c> adopts a running instance rather than refusing one, so this now reports the
+    /// <c>--on sandbox</c> adopts a running instance rather than refusing one, so this now reports the
     /// narrower case where adoption itself was not possible — several instances are listed, or the
     /// candidate could not be resolved or prepared.
     /// </remarks>
@@ -102,6 +102,17 @@ internal static class ExecutionTargetErrorCodes
     public const string SetupIncomplete = "sandbox_setup_incomplete";
 
     /// <summary>
+    /// The value after <c>--on</c>, or the selector a <c>winapp target</c> verb was given, does not
+    /// name a target this build can run against.
+    /// </summary>
+    /// <remarks>
+    /// Target-neutral by design: it is raised before any provider is chosen, so it must not carry a
+    /// provider's name. Every other code in this list describes something that went wrong once a
+    /// specific provider was already selected.
+    /// </remarks>
+    public const string TargetInvalid = "target_invalid";
+
+    /// <summary>
     /// Every released code, in the order the spec lists them. Used by the snapshot test and by
     /// diagnostics that need to present the full set.
     /// </summary>
@@ -130,5 +141,6 @@ internal static class ExecutionTargetErrorCodes
         SetupRequiresRestart,
         SetupFailed,
         SetupIncomplete,
+        TargetInvalid,
     ];
 }

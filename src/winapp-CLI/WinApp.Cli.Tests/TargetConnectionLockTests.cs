@@ -4,6 +4,8 @@
 using WinApp.Cli.ExecutionTargets.Abstractions;
 using WinApp.Cli.ExecutionTargets.Orchestration;
 
+using WinApp.Cli.ExecutionTargets.WindowsSandbox;
+
 namespace WinApp.Cli.Tests;
 
 [TestClass]
@@ -35,7 +37,7 @@ public class TargetConnectionLockTests
     public void Lease_SerializesChannelsAndReleasesOnDispose()
     {
         var connectionLock = new TargetConnectionLock(new FixedProvider(_root));
-        var target = ExecutionTargetRef.WindowsSandboxDefault;
+        var target = WindowsSandboxTarget.Default;
 
         using var first = connectionLock.TryAcquire(target, TimeSpan.FromSeconds(1));
         Assert.IsNotNull(first);
@@ -53,7 +55,7 @@ public class TargetConnectionLockTests
         var connectionLock = new TargetConnectionLock(new FixedProvider(_root));
 
         using var lease = connectionLock.TryAcquire(
-            ExecutionTargetRef.WindowsSandboxDefault,
+            WindowsSandboxTarget.Default,
             TimeSpan.FromSeconds(1));
 
         Assert.IsTrue(File.Exists(Path.Join(_root, TargetConnectionLock.LockFileName)));
