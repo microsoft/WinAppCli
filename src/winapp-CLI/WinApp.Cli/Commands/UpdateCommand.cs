@@ -6,6 +6,7 @@ using System.CommandLine.Invocation;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
+using WinApp.Cli.Telemetry.Events;
 
 namespace WinApp.Cli.Commands;
 
@@ -25,11 +26,19 @@ internal class UpdateCommand : Command, IShortDescription
         IPackageInstallationService packageInstallationService,
         IBuildToolsService buildToolsService,
         IWindowsAppRuntimeService windowsAppRuntimeService,
-        IStatusService statusService) : AsynchronousCommandLineAction
+        IStatusService statusService,
+        ICurrentDirectoryProvider currentDirectoryProvider,
+        IProjectContextDetector projectContextDetector) : AsynchronousCommandLineAction
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
             var setupSdks = parseResult.GetValue(InitCommand.SetupSdksOption) ?? SdkInstallMode.Stable;
+
+            ProjectContextEvent.Log(
+                "update",
+                () => projectContextDetector.DetectDirectory(
+                    currentDirectoryProvider.GetCurrentDirectoryInfo(),
+                    ProjectTargetKind.Workspace));
 
             return await statusService.ExecuteWithStatusAsync("Updating packages and build tools...", async (taskContext, cancellationToken) =>
             {

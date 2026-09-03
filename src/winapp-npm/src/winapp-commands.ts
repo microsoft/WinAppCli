@@ -520,7 +520,7 @@ export interface NewOptions extends CommonOptions {
   name?: string;
   /** Directory to create the app in (default: ./<name>). Created if it doesn't exist. */
   output?: string;
-  /** Template short name (e.g. winui, winui-navview, winui-mvvm, winui-lib, winui-unittest). Run 'winapp new --list' to see all. */
+  /** Template short name. XAML templates: winui, winui-navview, winui-tabview, winui-mvvm, winui-lib, winui-unittest. Experimental Reactor (C#-only, MVU) templates: reactor, reactor-mvu, reactor-navview, reactor-tabview. Run 'winapp new --list' to see all. */
   template?: string;
   /** WinUI template pack version: 'latest' (install newest), 'installed' (keep what's installed), or an explicit version. Default: install latest if none, else prompt to update a stale pack. */
   templateVersion?: string;
@@ -529,7 +529,7 @@ export interface NewOptions extends CommonOptions {
 }
 
 /**
- * Create a new WinUI app from an official Windows App SDK template. Interactive by default: pick a template, then a name (the output directory defaults to ./<name>). Automatically uses defaults in non-interactive environments (use --use-defaults to skip prompts explicitly). Requires the .NET SDK; installs the WinUI template pack on demand (grabbing the latest, or offering to update a stale one) and delegates scaffolding to 'dotnet new'. Use --list to see the available templates. Scaffolds against the installed SDK's target framework and prints a template-specific next step when done (e.g. 'dotnet run' for app templates).
+ * Create a new WinUI app from an official Windows App SDK template. Templates cover both markup-based XAML apps (blank, NavigationView, TabView, MVVM) and the experimental Reactor apps (C#-only, MVU) — pick one interactively, then a name (the output directory defaults to ./<name>). Automatically uses defaults in non-interactive environments (use --use-defaults to skip prompts explicitly). Requires the .NET SDK; installs the WinUI template pack on demand (grabbing the latest, or offering to update a stale one) and delegates scaffolding to 'dotnet new'. Use --list to see the available templates. Scaffolds against the installed SDK's target framework and prints a template-specific next step when done (e.g. 'dotnet run' for app templates).
  */
 export async function newCommand(options: NewOptions = {}): Promise<WinappResult> {
   const args: string[] = ['new'];
