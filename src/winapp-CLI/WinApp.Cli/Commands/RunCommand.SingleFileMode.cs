@@ -680,20 +680,13 @@ internal partial class RunCommand
             }
 
             // Names the layout rather than the identity, so it applies to both forms. `unregister` refuses
-            // to remove a package whose install location it cannot tie to something the caller named; from
-            // a manifest it trusts only the manifest's own directory and the current directory, and a
-            // file-based app's layout is under %TEMP%\dotnet\runfile — neither of those. Without this, the
-            // printed command reports "registered from a different project tree" and removes nothing.
-            if (outputAppXDirectory != null)
-            {
-                tokens.Add("--output-appx-directory");
-                tokens.Add(outputAppXDirectory.FullName);
-            }
-            else if (explicitManifest != null)
-            {
-                tokens.Add("--output-appx-directory");
-                tokens.Add(effectiveLayout.FullName);
-            }
+            // to remove a package whose install location it cannot tie to something the caller named. From
+            // a manifest it trusts only the manifest's own directory and the current directory, and from a
+            // .cs it trusts the verified bin\<config> build root — which a nonstandard OutputPath can
+            // prevent it from resolving at all. Naming the layout outright is the one thing that always
+            // holds, so the printed command works instead of safety-skipping and exiting 0.
+            tokens.Add("--output-appx-directory");
+            tokens.Add((outputAppXDirectory ?? effectiveLayout).FullName);
 
             return WindowsCommandLine.JoinArguments(tokens)
                 ?? $"winapp unregister {singleFile.FullName}";

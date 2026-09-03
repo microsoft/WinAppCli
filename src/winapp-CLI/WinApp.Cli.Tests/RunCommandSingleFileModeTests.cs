@@ -889,6 +889,25 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task SingleFileMode_NonstandardOutputPath_UnregisterCommandStillNamesTheLayout()
+    {
+        // `unregister app.cs` trusts the verified bin\<config> build root, which a nonstandard OutputPath
+        // prevents it from resolving — so without the layout the printed command safety-skips and exits 0,
+        // leaving the registration and its Start-menu entry behind.
+        WidenConsoleForCommandAssertions();
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir);
+        _fakePackageRegistrationService.FakeDevPackages = [];
+        var command = GetRequiredService<RunCommand>();
+
+        await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--detach"]);
+
+        StringAssert.Contains(
+            TestAnsiConsole.Output,
+            $"--output-appx-directory {Path.Join(outputDir.FullName, "AppX")}");
+    }
+
+    [TestMethod]
     public async Task SingleFileMode_ExplicitManifest_UnregisterCommandNamesTheEffectiveLayout()
     {
         // `unregister --manifest` trusts only the manifest's own directory and the current directory, and

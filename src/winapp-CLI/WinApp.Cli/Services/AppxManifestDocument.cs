@@ -542,6 +542,12 @@ internal class AppxManifestDocument
     /// Returns the execution aliases the given application declares, or all of them when
     /// <paramref name="appId"/> is null.
     /// </summary>
+    /// <remarks>
+    /// Matches <c>ExecutionAlias</c> in either the <c>uap5</c> or the <c>desktop</c> namespace, as
+    /// <see cref="MsixService.ExtractExecutionAliases"/> does. Both are valid, and recognizing only
+    /// <c>uap5</c> would read a legacy <c>desktop:ExecutionAlias</c> as "no alias declared" — so winapp
+    /// would stage a second, generated one instead of using the command name the author chose.
+    /// </remarks>
     public IReadOnlyList<string> GetExecutionAliases(string? appId = null)
     {
         var app = FindApplication(appId);
@@ -550,13 +556,12 @@ internal class AppxManifestDocument
             return [];
         }
 
-        return [.. app.Element(DefaultNs + "Extensions")
-            ?.Elements(Uap5Ns + "Extension")
-            .Where(e => string.Equals(e.Attribute("Category")?.Value, "windows.appExecutionAlias", StringComparison.OrdinalIgnoreCase))
-            .Descendants(Uap5Ns + "ExecutionAlias")
+        return [.. app.Descendants()
+            .Where(e => e.Name.LocalName == "ExecutionAlias"
+                && (e.Name.Namespace == Uap5Ns || e.Name.Namespace == DesktopNs))
             .Select(e => e.Attribute("Alias")?.Value)
             .Where(v => !string.IsNullOrEmpty(v))
-            .Select(v => v!) ?? []];
+            .Select(v => v!)];
     }
 
     /// <summary>
