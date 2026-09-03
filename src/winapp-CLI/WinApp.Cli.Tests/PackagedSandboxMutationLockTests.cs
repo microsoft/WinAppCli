@@ -703,6 +703,7 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
                 _console,
                 statusService,
                 projectRunService,
+                new ProjectContextDetector(),
                 orchestrator,
                 runner,
                 runtimeService,

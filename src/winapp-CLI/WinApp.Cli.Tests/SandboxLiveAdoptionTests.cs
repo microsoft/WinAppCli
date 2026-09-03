@@ -59,7 +59,7 @@ public class SandboxLiveAdoptionTests
     public TestContext TestContext { get; set; } = null!;
 
     [TestInitialize]
-    public void RequireGate()
+    public async Task RequireGateAsync()
     {
         if (!string.Equals(
                 Environment.GetEnvironmentVariable(SandboxLiveE2ETests.GateVariable),
@@ -78,6 +78,10 @@ public class SandboxLiveAdoptionTests
                 $"Set {SandboxLiveE2ETests.BinaryVariable} to the architecture-matched NativeAOT winapp.exe "
                 + "built for the guest.");
         }
+
+        // Acquired last, and only once the gate has admitted this test. See the same comment in
+        // SandboxLiveE2ETests: a skipped test does not run cleanup, so it must never hold the lock.
+        await LiveSandboxExclusion.AcquireAsync(TestContext.CancellationToken);
 
         // Taken before this test creates anything, so cleanup can tell the clients it caused from the
         // ones that were already here.
@@ -128,6 +132,9 @@ public class SandboxLiveAdoptionTests
                 Trace.TraceWarning("Could not remove '{0}': {1}", root, ex.Message);
             }
         }
+
+        // Last, so the next live test sees a machine this one has finished with.
+        LiveSandboxExclusion.Release();
     }
 
     /// <summary>

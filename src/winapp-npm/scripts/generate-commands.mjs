@@ -469,7 +469,21 @@ function generate(schema) {
     // Build args array
     L(`  const args: string[] = [${cmdPath.map((p) => `'${p}'`).join(', ')}];`);
 
-    // Positional args
+    // Positional args.
+    //
+    // For a command with no passthrough, they are collected here and emitted after `--`, below.
+    // winapp rejects a positional that starts with a dash, because System.CommandLine would
+    // otherwise let a misspelt option quietly become one — so a caller with a legitimate value
+    // like `-42 degrees` or `-abc` needs the separator, and the wrapper is the only place that can
+    // add it. (`buildUiRecordArgs` in ui-record-guard.ts already does this by hand.)
+    //
+    // A passthrough command keeps the old order: its `--` already belongs to the passthrough
+    // arguments, and a second one would make the first positional look like an app argument.
+    const positionalSink = passthrough ? 'args' : 'positionals';
+    if (!passthrough && positionalArgs.length > 0) {
+      L('  const positionals: string[] = [];');
+    }
+
     for (const arg of positionalArgs) {
       const required = arg.def.arity?.minimum >= 1;
       const variadic = isVariadicArg(arg.def);
@@ -484,17 +498,17 @@ function generate(schema) {
       if (variadic) {
         if (required) {
           L(`  const ${arg.propName}Arr = Array.isArray(${accessor}) ? ${accessor} : [${accessor}];`);
-          L(`  args.push(...${arg.propName}Arr);`);
+          L(`  ${positionalSink}.push(...${arg.propName}Arr);`);
         } else {
           L(`  if (${accessor}) {`);
           L(`    const ${arg.propName}Arr = Array.isArray(${accessor}) ? ${accessor} : [${accessor}];`);
-          L(`    args.push(...${arg.propName}Arr);`);
+          L(`    ${positionalSink}.push(...${arg.propName}Arr);`);
           L('  }');
         }
       } else if (required) {
-        L(`  args.push(${accessor});`);
+        L(`  ${positionalSink}.push(${accessor});`);
       } else {
-        L(`  if (${accessor}) args.push(${accessor});`);
+        L(`  if (${accessor}) ${positionalSink}.push(${accessor});`);
       }
     }
 
@@ -513,6 +527,13 @@ function generate(schema) {
       } else {
         L(`  if (options.${opt.propName}) args.push('${opt.cliName}', options.${opt.propName});`);
       }
+    }
+
+    // Positionals last, behind a separator, so a value that begins with a dash reaches winapp as a
+    // value rather than as an option winapp does not recognise. Only emitted when there is at least
+    // one, so an all-optional command does not grow a trailing `--`.
+    if (!passthrough && positionalArgs.length > 0) {
+      L('  if (positionals.length > 0) args.push(\'--\', ...positionals);');
     }
 
     // Passthrough args. Normalize a single string to a one-element array so a bare-string

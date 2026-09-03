@@ -97,12 +97,14 @@ export interface AzSignOptions extends CommonOptions {
  */
 export async function azSign(options: AzSignOptions): Promise<WinappResult> {
   const args: string[] = ['az-sign'];
-  args.push(options.filePath);
+  const positionals: string[] = [];
+  positionals.push(options.filePath);
   if (options.account) args.push('--account', options.account);
   if (options.metadataFile) args.push('--metadata-file', options.metadataFile);
   if (options.profile) args.push('--profile', options.profile);
   if (options.resourceGroup) args.push('--resource-group', options.resourceGroup);
   if (options.subscription) args.push('--subscription', options.subscription);
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -166,9 +168,11 @@ export interface CertInfoOptions extends CommonOptions {
  */
 export async function certInfo(options: CertInfoOptions): Promise<WinappResult> {
   const args: string[] = ['cert', 'info'];
-  args.push(options.certPath);
+  const positionals: string[] = [];
+  positionals.push(options.certPath);
   if (options.json) args.push('--json');
   if (options.password) args.push('--password', options.password);
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -190,9 +194,11 @@ export interface CertInstallOptions extends CommonOptions {
  */
 export async function certInstall(options: CertInstallOptions): Promise<WinappResult> {
   const args: string[] = ['cert', 'install'];
-  args.push(options.certPath);
+  const positionals: string[] = [];
+  positionals.push(options.certPath);
   if (options.force) args.push('--force');
   if (options.password) args.push('--password', options.password);
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -216,10 +222,12 @@ export interface CreateDebugIdentityOptions extends CommonOptions {
  */
 export async function createDebugIdentity(options: CreateDebugIdentityOptions = {}): Promise<WinappResult> {
   const args: string[] = ['create-debug-identity'];
-  if (options.entrypoint) args.push(options.entrypoint);
+  const positionals: string[] = [];
+  if (options.entrypoint) positionals.push(options.entrypoint);
   if (options.keepIdentity) args.push('--keep-identity');
   if (options.manifest) args.push('--manifest', options.manifest);
   if (options.noInstall) args.push('--no-install');
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -247,12 +255,14 @@ export interface CreateExternalCatalogOptions extends CommonOptions {
  */
 export async function createExternalCatalog(options: CreateExternalCatalogOptions): Promise<WinappResult> {
   const args: string[] = ['create-external-catalog'];
-  args.push(options.inputFolder);
+  const positionals: string[] = [];
+  positionals.push(options.inputFolder);
   if (options.computeFlatHashes) args.push('--compute-flat-hashes');
   if (options.ifExists) args.push('--if-exists', options.ifExists);
   if (options.output) args.push('--output', options.output);
   if (options.recursive) args.push('--recursive');
   if (options.usePageHashes) args.push('--use-page-hashes');
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -272,8 +282,10 @@ export interface EmbedIdentityOptions extends CommonOptions {
  */
 export async function embedIdentity(options: EmbedIdentityOptions): Promise<WinappResult> {
   const args: string[] = ['embed-identity'];
-  args.push(options.target);
+  const positionals: string[] = [];
+  positionals.push(options.target);
   if (options.manifest) args.push('--manifest', options.manifest);
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -303,7 +315,8 @@ export interface FindUiOptions extends CommonOptions {
  */
 export async function findUi(options: FindUiOptions = {}): Promise<WinappResult> {
   const args: string[] = ['find-ui'];
-  if (options.query) args.push(options.query);
+  const positionals: string[] = [];
+  if (options.query) positionals.push(options.query);
   if (options.id) {
     const idArr = Array.isArray(options.id) ? options.id : [options.id];
     for (const v of idArr) args.push('--id', v);
@@ -313,6 +326,7 @@ export async function findUi(options: FindUiOptions = {}): Promise<WinappResult>
   if (options.max !== undefined) args.push('--max', options.max.toString());
   if (options.refresh) args.push('--refresh');
   if (options.source) args.push('--source', options.source);
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -372,7 +386,8 @@ export interface InitOptions extends CommonOptions {
  */
 export async function init(options: InitOptions = {}): Promise<WinappResult> {
   const args: string[] = ['init'];
-  if (options.baseDirectory) args.push(options.baseDirectory);
+  const positionals: string[] = [];
+  if (options.baseDirectory) positionals.push(options.baseDirectory);
   if (options.configDir) args.push('--config-dir', options.configDir);
   if (options.configOnly) args.push('--config-only');
   if (options.exe) args.push('--exe', options.exe);
@@ -385,6 +400,7 @@ export async function init(options: InitOptions = {}): Promise<WinappResult> {
   if (options.setupSdks) args.push('--setup-sdks', options.setupSdks);
   if (options.sparse) args.push('--sparse');
   if (options.useDefaults) args.push('--use-defaults');
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -442,7 +458,8 @@ export interface ManifestGenerateOptions extends CommonOptions {
  */
 export async function manifestGenerate(options: ManifestGenerateOptions = {}): Promise<WinappResult> {
   const args: string[] = ['manifest', 'generate'];
-  if (options.directory) args.push(options.directory);
+  const positionals: string[] = [];
+  if (options.directory) positionals.push(options.directory);
   if (options.description) args.push('--description', options.description);
   if (options.executable) args.push('--executable', options.executable);
   if (options.ifExists) args.push('--if-exists', options.ifExists);
@@ -451,6 +468,7 @@ export async function manifestGenerate(options: ManifestGenerateOptions = {}): P
   if (options.publisherName) args.push('--publisher-name', options.publisherName);
   if (options.template) args.push('--template', options.template);
   if (options.version) args.push('--version', options.version);
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -472,9 +490,11 @@ export interface ManifestUpdateAssetsOptions extends CommonOptions {
  */
 export async function manifestUpdateAssets(options: ManifestUpdateAssetsOptions): Promise<WinappResult> {
   const args: string[] = ['manifest', 'update-assets'];
-  args.push(options.imagePath);
+  const positionals: string[] = [];
+  positionals.push(options.imagePath);
   if (options.lightImage) args.push('--light-image', options.lightImage);
   if (options.manifest) args.push('--manifest', options.manifest);
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -553,8 +573,9 @@ export interface PackageOptions extends CommonOptions {
  */
 export async function packageApp(options: PackageOptions): Promise<WinappResult> {
   const args: string[] = ['package'];
+  const positionals: string[] = [];
   const inputFolderArr = Array.isArray(options.inputFolder) ? options.inputFolder : [options.inputFolder];
-  args.push(...inputFolderArr);
+  positionals.push(...inputFolderArr);
   if (options.cert) args.push('--cert', options.cert);
   if (options.certPassword) args.push('--cert-password', options.certPassword);
   if (options.executable) args.push('--executable', options.executable);
@@ -566,6 +587,7 @@ export async function packageApp(options: PackageOptions): Promise<WinappResult>
   if (options.publisher) args.push('--publisher', options.publisher);
   if (options.selfContained) args.push('--self-contained');
   if (options.skipPri) args.push('--skip-pri');
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -585,8 +607,10 @@ export interface RestoreOptions extends CommonOptions {
  */
 export async function restore(options: RestoreOptions = {}): Promise<WinappResult> {
   const args: string[] = ['restore'];
-  if (options.baseDirectory) args.push(options.baseDirectory);
+  const positionals: string[] = [];
+  if (options.baseDirectory) positionals.push(options.baseDirectory);
   if (options.configDir) args.push('--config-dir', options.configDir);
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -705,10 +729,12 @@ export interface SignOptions extends CommonOptions {
  */
 export async function sign(options: SignOptions): Promise<WinappResult> {
   const args: string[] = ['sign'];
-  args.push(options.filePath);
-  args.push(options.certPath);
+  const positionals: string[] = [];
+  positionals.push(options.filePath);
+  positionals.push(options.certPath);
   if (options.password) args.push('--password', options.password);
   if (options.timestamp) args.push('--timestamp', options.timestamp);
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -785,10 +811,12 @@ export interface TargetPullOptions extends CommonOptions {
  */
 export async function targetPull(options: TargetPullOptions): Promise<WinappResult> {
   const args: string[] = ['target', 'pull'];
-  args.push(options.target);
-  args.push(options.source);
-  args.push(options.destination);
+  const positionals: string[] = [];
+  positionals.push(options.target);
+  positionals.push(options.source);
+  positionals.push(options.destination);
   if (options.json) args.push('--json');
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -812,10 +840,12 @@ export interface TargetPushOptions extends CommonOptions {
  */
 export async function targetPush(options: TargetPushOptions): Promise<WinappResult> {
   const args: string[] = ['target', 'push'];
-  args.push(options.target);
-  args.push(options.source);
-  args.push(options.destination);
+  const positionals: string[] = [];
+  positionals.push(options.target);
+  positionals.push(options.source);
+  positionals.push(options.destination);
   if (options.json) args.push('--json');
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -868,13 +898,15 @@ export interface UiClickOptions extends CommonOptions {
  */
 export async function uiClick(options: UiClickOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'click'];
-  if (options.selector) args.push(options.selector);
+  const positionals: string[] = [];
+  if (options.selector) positionals.push(options.selector);
   if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.double) args.push('--double');
   if (options.json) args.push('--json');
   if (options.right) args.push('--right');
   if (options.window !== undefined) args.push('--window', options.window.toString());
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -908,8 +940,9 @@ export interface UiDragOptions extends CommonOptions {
  */
 export async function uiDrag(options: UiDragOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'drag'];
-  if (options.from) args.push(options.from);
-  if (options.to) args.push(options.to);
+  const positionals: string[] = [];
+  if (options.from) positionals.push(options.from);
+  if (options.to) positionals.push(options.to);
   if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.dwellMs !== undefined) args.push('--dwell-ms', options.dwellMs.toString());
@@ -917,6 +950,7 @@ export async function uiDrag(options: UiDragOptions = {}): Promise<WinappResult>
   if (options.json) args.push('--json');
   if (options.right) args.push('--right');
   if (options.window !== undefined) args.push('--window', options.window.toString());
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -942,11 +976,13 @@ export interface UiFocusOptions extends CommonOptions {
  */
 export async function uiFocus(options: UiFocusOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'focus'];
-  if (options.selector) args.push(options.selector);
+  const positionals: string[] = [];
+  if (options.selector) positionals.push(options.selector);
   if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
   if (options.window !== undefined) args.push('--window', options.window.toString());
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -1001,12 +1037,14 @@ export interface UiGetPropertyOptions extends CommonOptions {
  */
 export async function uiGetProperty(options: UiGetPropertyOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'get-property'];
-  if (options.selector) args.push(options.selector);
+  const positionals: string[] = [];
+  if (options.selector) positionals.push(options.selector);
   if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
   if (options.property) args.push('--property', options.property);
   if (options.window !== undefined) args.push('--window', options.window.toString());
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -1032,11 +1070,13 @@ export interface UiGetValueOptions extends CommonOptions {
  */
 export async function uiGetValue(options: UiGetValueOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'get-value'];
-  if (options.selector) args.push(options.selector);
+  const positionals: string[] = [];
+  if (options.selector) positionals.push(options.selector);
   if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
   if (options.window !== undefined) args.push('--window', options.window.toString());
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -1064,12 +1104,14 @@ export interface UiHoverOptions extends CommonOptions {
  */
 export async function uiHover(options: UiHoverOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'hover'];
-  if (options.selector) args.push(options.selector);
+  const positionals: string[] = [];
+  if (options.selector) positionals.push(options.selector);
   if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.dwellTime !== undefined) args.push('--dwell-time', options.dwellTime.toString());
   if (options.json) args.push('--json');
   if (options.window !== undefined) args.push('--window', options.window.toString());
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -1105,7 +1147,8 @@ export interface UiInspectOptions extends CommonOptions {
  */
 export async function uiInspect(options: UiInspectOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'inspect'];
-  if (options.selector) args.push(options.selector);
+  const positionals: string[] = [];
+  if (options.selector) positionals.push(options.selector);
   if (options.on) args.push('--on', options.on);
   if (options.ancestors) args.push('--ancestors');
   if (options.app) args.push('--app', options.app);
@@ -1115,6 +1158,7 @@ export async function uiInspect(options: UiInspectOptions = {}): Promise<WinappR
   if (options.interactive) args.push('--interactive');
   if (options.json) args.push('--json');
   if (options.window !== undefined) args.push('--window', options.window.toString());
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -1140,11 +1184,13 @@ export interface UiInvokeOptions extends CommonOptions {
  */
 export async function uiInvoke(options: UiInvokeOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'invoke'];
-  if (options.selector) args.push(options.selector);
+  const positionals: string[] = [];
+  if (options.selector) positionals.push(options.selector);
   if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
   if (options.window !== undefined) args.push('--window', options.window.toString());
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -1211,7 +1257,8 @@ export interface UiPenOptions extends CommonOptions {
  */
 export async function uiPen(options: UiPenOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'pen'];
-  if (options.selector) args.push(options.selector);
+  const positionals: string[] = [];
+  if (options.selector) positionals.push(options.selector);
   if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.at) args.push('--at', options.at);
@@ -1223,6 +1270,7 @@ export async function uiPen(options: UiPenOptions = {}): Promise<WinappResult> {
   if (options.tiltX !== undefined) args.push('--tilt-x', options.tiltX.toString());
   if (options.tiltY !== undefined) args.push('--tilt-y', options.tiltY.toString());
   if (options.window !== undefined) args.push('--window', options.window.toString());
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -1286,7 +1334,8 @@ export interface UiScreenshotOptions extends CommonOptions {
  */
 export async function uiScreenshot(options: UiScreenshotOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'screenshot'];
-  if (options.selector) args.push(options.selector);
+  const positionals: string[] = [];
+  if (options.selector) positionals.push(options.selector);
   if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.captureScreen) args.push('--capture-screen');
@@ -1294,6 +1343,7 @@ export async function uiScreenshot(options: UiScreenshotOptions = {}): Promise<W
   if (options.json) args.push('--json');
   if (options.output) args.push('--output', options.output);
   if (options.window !== undefined) args.push('--window', options.window.toString());
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -1325,7 +1375,8 @@ export interface UiScrollOptions extends CommonOptions {
  */
 export async function uiScroll(options: UiScrollOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'scroll'];
-  if (options.selector) args.push(options.selector);
+  const positionals: string[] = [];
+  if (options.selector) positionals.push(options.selector);
   if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.direction) args.push('--direction', options.direction);
@@ -1333,6 +1384,7 @@ export async function uiScroll(options: UiScrollOptions = {}): Promise<WinappRes
   if (options.to) args.push('--to', options.to);
   if (options.wheel !== undefined) args.push('--wheel', options.wheel.toString());
   if (options.window !== undefined) args.push('--window', options.window.toString());
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -1358,11 +1410,13 @@ export interface UiScrollIntoViewOptions extends CommonOptions {
  */
 export async function uiScrollIntoView(options: UiScrollIntoViewOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'scroll-into-view'];
-  if (options.selector) args.push(options.selector);
+  const positionals: string[] = [];
+  if (options.selector) positionals.push(options.selector);
   if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
   if (options.window !== undefined) args.push('--window', options.window.toString());
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -1390,12 +1444,14 @@ export interface UiSearchOptions extends CommonOptions {
  */
 export async function uiSearch(options: UiSearchOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'search'];
-  if (options.selector) args.push(options.selector);
+  const positionals: string[] = [];
+  if (options.selector) positionals.push(options.selector);
   if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
   if (options.max !== undefined) args.push('--max', options.max.toString());
   if (options.window !== undefined) args.push('--window', options.window.toString());
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -1429,7 +1485,8 @@ export interface UiSendKeysOptions extends CommonOptions {
  */
 export async function uiSendKeys(options: UiSendKeysOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'send-keys'];
-  if (options.keys) args.push(options.keys);
+  const positionals: string[] = [];
+  if (options.keys) positionals.push(options.keys);
   if (options.on) args.push('--on', options.on);
   if (options.allowSystemKeys) args.push('--allow-system-keys');
   if (options.app) args.push('--app', options.app);
@@ -1438,6 +1495,7 @@ export async function uiSendKeys(options: UiSendKeysOptions = {}): Promise<Winap
   if (options.verbatim) args.push('--verbatim');
   if (options.via) args.push('--via', options.via);
   if (options.window !== undefined) args.push('--window', options.window.toString());
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -1465,12 +1523,14 @@ export interface UiSetValueOptions extends CommonOptions {
  */
 export async function uiSetValue(options: UiSetValueOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'set-value'];
-  if (options.selector) args.push(options.selector);
-  if (options.value) args.push(options.value);
+  const positionals: string[] = [];
+  if (options.selector) positionals.push(options.selector);
+  if (options.value) positionals.push(options.value);
   if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
   if (options.window !== undefined) args.push('--window', options.window.toString());
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -1539,7 +1599,8 @@ export interface UiTouchOptions extends CommonOptions {
  */
 export async function uiTouch(options: UiTouchOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'touch'];
-  if (options.selector) args.push(options.selector);
+  const positionals: string[] = [];
+  if (options.selector) positionals.push(options.selector);
   if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.at) args.push('--at', options.at);
@@ -1552,6 +1613,7 @@ export async function uiTouch(options: UiTouchOptions = {}): Promise<WinappResul
   if (options.json) args.push('--json');
   if (options.toPoint) args.push('--to-point', options.toPoint);
   if (options.window !== undefined) args.push('--window', options.window.toString());
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 
@@ -1587,7 +1649,8 @@ export interface UiWaitForOptions extends CommonOptions {
  */
 export async function uiWaitFor(options: UiWaitForOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'wait-for'];
-  if (options.selector) args.push(options.selector);
+  const positionals: string[] = [];
+  if (options.selector) positionals.push(options.selector);
   if (options.on) args.push('--on', options.on);
   if (options.app) args.push('--app', options.app);
   if (options.contains) args.push('--contains');
@@ -1597,6 +1660,7 @@ export async function uiWaitFor(options: UiWaitForOptions = {}): Promise<WinappR
   if (options.timeout !== undefined) args.push('--timeout', options.timeout.toString());
   if (options.value) args.push('--value', options.value);
   if (options.window !== undefined) args.push('--window', options.window.toString());
+  if (positionals.length > 0) args.push('--', ...positionals);
   return execCommand(args, options);
 }
 

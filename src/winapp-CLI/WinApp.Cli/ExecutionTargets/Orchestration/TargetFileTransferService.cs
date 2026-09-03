@@ -31,7 +31,17 @@ internal sealed record TargetTransferRequest(
     string TargetPath)
 {
     /// <summary>Validates and normalises the two endpoints a transfer verb was given.</summary>
-    /// <exception cref="ExecutionTargetException">Either endpoint is missing or empty.</exception>
+    /// <remarks>
+    /// Every rule that can be checked from the command line alone is checked here, before the
+    /// caller prepares anything. That ordering is the point: preparing a target starts or adopts a
+    /// Windows Sandbox, takes the mutation lock, and changes machine state, and none of that should
+    /// happen because a path was mistyped. It also keeps the exit code honest — a bad command line
+    /// exits 1 here rather than 70 from somewhere inside the transfer.
+    /// </remarks>
+    /// <exception cref="ExecutionTargetException">
+    /// An endpoint is missing, the target path is not relative to the managed work area, or a push
+    /// names a source that does not exist.
+    /// </exception>
     public static TargetTransferRequest Create(
         TargetTransferDirection direction,
         string? hostPath,
@@ -46,7 +56,45 @@ internal sealed record TargetTransferRequest(
                 example: @"winapp target push sandbox .\setup.ps1 Setup\setup.ps1");
         }
 
-        return new TargetTransferRequest(direction, Path.GetFullPath(hostPath), targetPath);
+        // Throws when the target path is rooted, UNC, or escapes the work root.
+        TargetFileTransferService.NormalizeTargetRelative(targetPath);
+
+        var fullHostPath = Path.GetFullPath(hostPath);
+
+        if (direction != TargetTransferDirection.ToTarget)
+        {
+            // A pull's host side is a destination, so it does not have to exist yet, and only the
+            // target knows whether its own source does.
+            return new TargetTransferRequest(direction, fullHostPath, targetPath);
+        }
+
+        var file = new FileInfo(fullHostPath);
+        var directory = new DirectoryInfo(fullHostPath);
+
+        if (!file.Exists && !directory.Exists)
+        {
+            throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.TargetInvalid,
+                $"'{hostPath}' does not exist on this machine, so there is nothing to copy.",
+                userAction: "Check the path, then retry.",
+                context: new Dictionary<string, string> { ["source"] = fullHostPath });
+        }
+
+        // A link is refused here as well as during the walk. The walk's check is the one that
+        // matters for safety -- it re-proves containment immediately before each file is read, so a
+        // link planted after this point is still caught -- but reaching it means the target has
+        // already been prepared, which costs a Sandbox boot and reports "the target could not be
+        // used" for something that was only ever a bad path.
+        if (HostSourceWalker.IsLink(file.Exists ? file : directory))
+        {
+            throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.TargetInvalid,
+                $"'{hostPath}' is a symbolic link or junction, so it cannot be copied to a target.",
+                userAction: "Name the real folder or file instead.",
+                context: new Dictionary<string, string> { ["source"] = fullHostPath });
+        }
+
+        return new TargetTransferRequest(direction, fullHostPath, targetPath);
     }
 }
 

@@ -6,6 +6,7 @@ using System.CommandLine.Parsing;
 using Microsoft.Extensions.DependencyInjection;
 using WinApp.Cli.Commands;
 using WinApp.Cli.ExecutionTargets.Abstractions;
+using WinApp.Cli.ExecutionTargets.Orchestration;
 using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.Tests;
@@ -312,6 +313,105 @@ public class TargetSelectionParserTests : BaseCommandTests
         Assert.IsTrue(
             WindowsCommandLine.FindOptionLikePositionals(refused).Contains("--weird-name") ||
             refused.Errors.Count > 0);
+    }
+
+    // ---- Transfers reject a bad command line before touching the target ------------
+
+    /// <summary>
+    /// Preparing a target starts or adopts a Windows Sandbox, takes the mutation lock, and changes
+    /// machine state. None of that should happen because a path was mistyped — and the failure a
+    /// caller sees must say "your command line is wrong", not "the target could not be used".
+    /// </summary>
+    [TestMethod]
+    [DataRow(@"C:\Setup\setup.ps1", DisplayName = "drive-absolute target path")]
+    [DataRow(@"\\server\share\setup.ps1", DisplayName = "UNC target path")]
+    [DataRow(@"\rooted\setup.ps1", DisplayName = "rooted target path")]
+    [DataRow(@"..\outside\setup.ps1", DisplayName = "target path leaving the work root")]
+    public void TargetTransfer_UnusableTargetPath_IsRefusedWhileBuildingTheRequest(string targetPath)
+    {
+        Assert.ThrowsExactly<ExecutionTargetException>(() => TargetTransferRequest.Create(
+            TargetTransferDirection.ToTarget, hostPath: ".", targetPath: targetPath));
+    }
+
+    [TestMethod]
+    public void TargetPush_SourceThatDoesNotExist_IsRefusedWhileBuildingTheRequest()
+    {
+        var missing = Path.Join(Path.GetTempPath(), $"winapp-missing-{Guid.NewGuid():n}.txt");
+
+        var failure = Assert.ThrowsExactly<ExecutionTargetException>(() => TargetTransferRequest.Create(
+            TargetTransferDirection.ToTarget, hostPath: missing, targetPath: @"work\file.txt"));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.TargetInvalid, failure.Error.Code);
+    }
+
+    /// <summary>
+    /// A linked source is refused twice: here, so a bad path costs nothing, and again during the
+    /// walk, which is the check that actually holds against a link planted mid-copy.
+    /// </summary>
+    [TestMethod]
+    public void TargetPush_LinkedSource_IsRefusedWhileBuildingTheRequest()
+    {
+        var root = Path.Join(Path.GetTempPath(), $"winapp-link-{Guid.NewGuid():n}");
+        var real = Path.Join(root, "real");
+        var link = Path.Join(root, "link");
+
+        Directory.CreateDirectory(real);
+
+        try
+        {
+            Directory.CreateSymbolicLink(link, real);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Directory.Delete(root, recursive: true);
+            Assert.Inconclusive("Creating a symbolic link needs Developer Mode or elevation.");
+            return;
+        }
+
+        try
+        {
+            var failure = Assert.ThrowsExactly<ExecutionTargetException>(() => TargetTransferRequest.Create(
+                TargetTransferDirection.ToTarget, hostPath: link, targetPath: "work"));
+
+            Assert.AreEqual(ExecutionTargetErrorCodes.TargetInvalid, failure.Error.Code);
+        }
+        finally
+        {
+            Directory.Delete(link);
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// A pull's host side is a destination, so it does not have to exist yet. Only the target side
+    /// is checkable without the target, and only that is checked.
+    /// </summary>
+    [TestMethod]
+    public void TargetPull_DestinationThatDoesNotExistYet_IsAccepted()
+    {
+        var destination = Path.Join(Path.GetTempPath(), $"winapp-pull-{Guid.NewGuid():n}");
+
+        var request = TargetTransferRequest.Create(
+            TargetTransferDirection.FromTarget, hostPath: destination, targetPath: "Results");
+
+        Assert.AreEqual(TargetTransferDirection.FromTarget, request.Direction);
+        Assert.AreEqual(Path.GetFullPath(destination), request.HostPath);
+        Assert.AreEqual("Results", request.TargetPath);
+    }
+
+    /// <summary>The verb decides the direction, and each side keeps the path it was given.</summary>
+    [TestMethod]
+    public void TargetTransfer_MapsEachPathToTheSideItsVerbNames()
+    {
+        var here = Directory.GetCurrentDirectory();
+
+        var push = TargetTransferRequest.Create(TargetTransferDirection.ToTarget, here, @"work\in");
+        Assert.AreEqual(Path.GetFullPath(here), push.HostPath);
+        Assert.AreEqual(@"work\in", push.TargetPath);
+
+        var pull = TargetTransferRequest.Create(TargetTransferDirection.FromTarget, here, @"work\out");
+        Assert.AreEqual(Path.GetFullPath(here), pull.HostPath);
+        Assert.AreEqual(@"work\out", pull.TargetPath);
     }
 
     private ParseResult Parse(string[] arguments) =>

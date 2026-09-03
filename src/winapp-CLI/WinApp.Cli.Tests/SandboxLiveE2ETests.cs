@@ -52,7 +52,7 @@ public partial class SandboxLiveE2ETests
     public TestContext TestContext { get; set; } = null!;
 
     [TestInitialize]
-    public void RequireGate()
+    public async Task RequireGateAsync()
     {
         if (!string.Equals(Environment.GetEnvironmentVariable(GateVariable), "1", StringComparison.Ordinal))
         {
@@ -67,10 +67,20 @@ public partial class SandboxLiveE2ETests
                 $"Set {BinaryVariable} to the architecture-matched NativeAOT winapp.exe built for the guest.");
         }
 
+        // Acquired last, and only once the gate has admitted this test. MSTest treats an
+        // Assert.Inconclusive in initialization as a skip and does not run cleanup for it, so a
+        // test that took the lock and then skipped would never give it back -- and every later live
+        // test would wait on it forever. Nothing above this line can block.
+        await LiveSandboxExclusion.AcquireAsync(TestContext.CancellationToken);
+
         // Taken before the test creates anything, so cleanup can tell the clients it caused from the
         // ones that were already here.
         _clientsBeforeTest = CurrentClientProcessIds();
     }
+
+    /// <summary>Hands the machine's one Sandbox back to whichever live test runs next.</summary>
+    [TestCleanup]
+    public void ReleaseSandboxExclusion() => LiveSandboxExclusion.Release();
 
     /// <summary>
     /// Support probing must be honest about this machine before anything is built or created.
@@ -287,37 +297,37 @@ public partial class SandboxLiveE2ETests
         {
             var launched = await RunCliAsync(
                 [
-                    "run", project, "--on sandbox", "--arch", architecture, "--detach", "--json",
+                    "run", project, "--on", "sandbox", "--arch", architecture, "--detach", "--json",
                 ],
                 timeout.Token);
             AssertCommandSucceeded(launched, "packaged WinUI launch");
             StringAssert.Contains(launched.StandardOutput, "\"Sandbox\": true");
 
             var inspect = await RunCliAsync(
-                ["ui", "inspect", "--on sandbox", "-a", "winui-app", "--interactive"],
+                ["ui", "inspect", "--on", "sandbox", "-a", "winui-app", "--interactive"],
                 timeout.Token);
             AssertCommandSucceeded(inspect, "guest UI inspection");
             StringAssert.Contains(inspect.StandardOutput, "CounterButton");
 
             AssertCommandSucceeded(
                 await RunCliAsync(
-                    ["ui", "set-value", "--on sandbox", "TextInput", "Sandbox hello", "-a", "winui-app"],
+                    ["ui", "set-value", "--on", "sandbox", "TextInput", "Sandbox hello", "-a", "winui-app"],
                     timeout.Token),
                 "guest text input");
             AssertCommandSucceeded(
                 await RunCliAsync(
-                    ["ui", "invoke", "--on sandbox", "FeatureToggle", "-a", "winui-app"],
+                    ["ui", "invoke", "--on", "sandbox", "FeatureToggle", "-a", "winui-app"],
                     timeout.Token),
                 "guest toggle input");
             AssertCommandSucceeded(
                 await RunCliAsync(
-                    ["ui", "invoke", "--on sandbox", "SubmitButton", "-a", "winui-app"],
+                    ["ui", "invoke", "--on", "sandbox", "SubmitButton", "-a", "winui-app"],
                     timeout.Token),
                 "guest submit input");
             AssertCommandSucceeded(
                 await RunCliAsync(
                     [
-                        "ui", "wait-for", "--on sandbox", "ResultDisplay", "-a", "winui-app",
+                        "ui", "wait-for", "--on", "sandbox", "ResultDisplay", "-a", "winui-app",
                         "--property", "Name", "--value", "Submitted: Sandbox hello (Feature: On)",
                         "--timeout", "10000",
                     ],
@@ -325,7 +335,7 @@ public partial class SandboxLiveE2ETests
                 "guest UI postcondition");
 
             var captured = await RunCliAsync(
-                ["ui", "screenshot", "--on sandbox", "-a", "winui-app", "-o", screenshot, "--json"],
+                ["ui", "screenshot", "--on", "sandbox", "-a", "winui-app", "-o", screenshot, "--json"],
                 timeout.Token);
             AssertCommandSucceeded(captured, "guest screenshot");
             Assert.IsTrue(File.Exists(screenshot));
@@ -334,7 +344,7 @@ public partial class SandboxLiveE2ETests
 
             var recorded = await RunCliAsync(
                 [
-                    "ui", "record", "--on sandbox", "-a", "winui-app", "--duration-sec", "2",
+                    "ui", "record", "--on", "sandbox", "-a", "winui-app", "--duration-sec", "2",
                     "-o", recording, "--json",
                 ],
                 timeout.Token);
@@ -348,7 +358,7 @@ public partial class SandboxLiveE2ETests
             await WaitForNoSandboxAsync(timeout.Token);
 
             var recovered = await RunCliAsync(
-                ["sandbox", "exec", "--", "cmd.exe", "/c", "echo", "recovered-after-stop"],
+                ["target", "exec", "sandbox", "--", "cmd.exe", "/c", "echo", "recovered-after-stop"],
                 timeout.Token);
             AssertCommandSucceeded(recovered, "external-stop recovery");
             StringAssert.Contains(recovered.StandardOutput, "recovered-after-stop");
@@ -388,7 +398,7 @@ public partial class SandboxLiveE2ETests
             // 'sort' consumes standard input until EOF and writes it back, so an empty result means
             // either nothing was forwarded or end of input was never signalled.
             var result = await RunCliAsync(
-                ["sandbox", "exec", "--", "cmd", "/c", "sort"],
+                ["target", "exec", "sandbox", "--", "cmd", "/c", "sort"],
                 timeout.Token,
                 standardInput: marker + Environment.NewLine);
 
