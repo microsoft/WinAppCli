@@ -4,6 +4,7 @@
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using WinApp.Cli.Services;
+using WinApp.Cli.Telemetry.Events;
 
 namespace WinApp.Cli.Commands;
 
@@ -35,12 +36,21 @@ internal class RestoreCommand : Command, IShortDescription
         Options.Add(ConfigDirOption);
     }
 
-    public class Handler(IWorkspaceSetupService workspaceSetupService, ICurrentDirectoryProvider currentDirectoryProvider) : AsynchronousCommandLineAction
+    public class Handler(
+        IWorkspaceSetupService workspaceSetupService,
+        ICurrentDirectoryProvider currentDirectoryProvider,
+        IProjectContextDetector projectContextDetector) : AsynchronousCommandLineAction
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
             var baseDirectory = parseResult.GetValue(BaseDirectoryArgument) ?? currentDirectoryProvider.GetCurrentDirectoryInfo();
             var configDir = parseResult.GetValue(ConfigDirOption) ?? currentDirectoryProvider.GetCurrentDirectoryInfo();
+
+            ProjectContextEvent.Log(
+                "restore",
+                () => projectContextDetector.DetectDirectories(
+                    [baseDirectory, configDir],
+                    ProjectTargetKind.Workspace));
 
             var options = new WorkspaceSetupOptions
             {
