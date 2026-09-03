@@ -5,6 +5,29 @@ import { spawn } from 'child_process';
 
 export const WINAPP_CLI_CALLER_VALUE = 'nodejs-package';
 
+/** Environment variable naming one logical UI workflow for cooperative desktop turns. */
+export const WINAPP_UI_WORKFLOW_ID = 'WINAPP_UI_WORKFLOW_ID';
+
+/**
+ * Builds the child environment, adding the workflow id when one was supplied.
+ *
+ * The value is applied ONLY to the spawned child's environment — `process.env` is never mutated.
+ * Mutating it would silently enrol every later call in this process, including unrelated ones, into
+ * a workflow the caller only meant for one command, and would race across concurrent calls.
+ */
+function childEnv(workflowId?: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    WINAPP_CLI_CALLER: WINAPP_CLI_CALLER_VALUE,
+  };
+
+  if (workflowId !== undefined) {
+    env[WINAPP_UI_WORKFLOW_ID] = workflowId;
+  }
+
+  return env;
+}
+
 export interface CallWinappCliOptions {
   exitOnError?: boolean;
   /**
@@ -20,6 +43,19 @@ export interface CallWinappCliOptions {
    * Rejects with an `AbortError`.
    */
   signal?: AbortSignal;
+  /**
+   * Groups this call with other `winapp ui` calls that pass the same value into one logical workflow.
+   *
+   * Collision arbitration is always on — every desktop-sensitive `winapp ui` command takes a turn
+   * whether or not you set this. What a workflow id adds is *continuity*: commands sharing one keep the
+   * desktop reserved between invocations for a short idle grace, may overlap with each other (a
+   * recording and the clicks it is recording), and are never interleaved with another workflow's input.
+   *
+   * Without it each call is a self-contained one-shot that releases the desktop the moment it finishes.
+   *
+   * Applied to the spawned child only; `process.env` is never modified.
+   */
+  workflowId?: string;
 }
 
 export interface CallWinappCliResult {
@@ -34,6 +70,11 @@ export interface CallWinappCliCaptureOptions {
    * contract, including what is and is not guaranteed after an abort.
    */
   signal?: AbortSignal;
+  /**
+   * Groups this call into one logical UI workflow. See {@link CallWinappCliOptions.workflowId} for
+   * what continuity buys and why arbitration does not depend on it.
+   */
+  workflowId?: string;
 }
 
 export interface CallWinappCliCaptureResult {
@@ -67,7 +108,7 @@ export function getWinappCliPath(): string {
  * Always captures output and returns it along with the exit code
  */
 export async function callWinappCli(args: string[], options: CallWinappCliOptions = {}): Promise<CallWinappCliResult> {
-  const { exitOnError = false, signal } = options;
+  const { exitOnError = false, signal, workflowId } = options;
   const winappCliPath = getWinappCliPath();
 
   return new Promise((resolve, reject) => {
@@ -76,10 +117,7 @@ export async function callWinappCli(args: string[], options: CallWinappCliOption
       cwd: process.cwd(),
       shell: false,
       signal,
-      env: {
-        ...process.env,
-        WINAPP_CLI_CALLER: WINAPP_CLI_CALLER_VALUE,
-      },
+      env: childEnv(workflowId),
     });
 
     child.on('close', (code) => {
@@ -122,7 +160,7 @@ export async function callWinappCliCapture(
   args: string[],
   options: CallWinappCliCaptureOptions = {}
 ): Promise<CallWinappCliCaptureResult> {
-  const { cwd = process.cwd(), signal } = options;
+  const { cwd = process.cwd(), signal, workflowId } = options;
   const winappCliPath = getWinappCliPath();
 
   return new Promise((resolve, reject) => {
@@ -134,10 +172,7 @@ export async function callWinappCliCapture(
       cwd,
       shell: false,
       signal,
-      env: {
-        ...process.env,
-        WINAPP_CLI_CALLER: WINAPP_CLI_CALLER_VALUE,
-      },
+      env: childEnv(workflowId),
     });
 
     child.stdout.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));

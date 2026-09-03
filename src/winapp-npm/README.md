@@ -105,11 +105,31 @@ finalization.
 
 #### Driving UI from several workflows
 
-`winapp ui` commands that need the physical desktop take cooperative turns. Separate npm calls may
-run under different Node parents, so the CLI cannot infer that they belong together. Set
-`process.env.WINAPP_UI_OWNER_ID` to the same value for every cooperating call (it is forwarded to the
-child automatically); the wrapper never generates one for you. See
-[UI Automation → Coordinating concurrent UI workflows](https://github.com/microsoft/WinAppCli/blob/main/docs/ui-automation.md#coordinating-concurrent-ui-workflows).
+`winapp ui` commands that touch the physical desktop always arbitrate for it — that is on by default
+and cannot be turned off, so two agents can never type into each other's windows.
+
+What is opt-in is *continuity*. Pass the same `workflowId` to every call that belongs to one logical
+workflow and they keep the desktop reserved between invocations for a short idle grace, may overlap
+with each other (a recording and the clicks it is recording), and are never interleaved with another
+workflow's input:
+
+```typescript
+const workflowId = crypto.randomUUID();
+
+await uiClick({ app: 'notepad', selector: 'btn-file-a1b2', workflowId });
+await uiSendKeys({ app: 'notepad', keys: 'hello', workflowId });
+```
+
+`workflowId` is applied to the spawned child only — the wrapper never mutates `process.env`, so it
+cannot leak into unrelated concurrent calls. Setting `WINAPP_UI_WORKFLOW_ID` in the environment works
+too and is inherited by every child.
+
+Without a `workflowId` each call is a self-contained one-shot: it still waits its turn, but releases
+the desktop the moment it finishes. That also means a no-`workflowId` `uiRecord` blocks every other
+workflow for its whole duration — to record and click at the same time, give both calls the same
+`workflowId`.
+
+See [UI Automation → Coordinating concurrent UI workflows](https://github.com/microsoft/WinAppCli/blob/main/docs/ui-automation.md#coordinating-concurrent-ui-workflows).
 
 `uiRecord` still requires a finite positive `durationSec`: `signal` can only stop a recording by
 killing it, which does not produce a valid MP4.

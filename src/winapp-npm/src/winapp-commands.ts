@@ -2,7 +2,7 @@
  * AUTO-GENERATED — DO NOT EDIT
  *
  * Regenerate with:  npm run generate-commands
- * Source schema version: 0.6.1
+ * Source schema version: 0.6.3
  *
  * Programmatic wrappers for all winapp CLI commands.
  * Each function builds the CLI arguments, invokes the native CLI,
@@ -46,6 +46,18 @@ export interface CommonOptions {
    * partial output. Rejects with an `AbortError`.
    */
   signal?: AbortSignal;
+  /**
+   * Groups this call with other `winapp ui` calls passing the same value into one logical workflow.
+   *
+   * Collision arbitration is always on — every desktop-sensitive `winapp ui` command takes a turn
+   * whether or not this is set. A workflow id adds *continuity*: calls sharing one keep the desktop
+   * reserved between invocations for a short idle grace, may overlap with each other (a recording and
+   * the clicks it is recording), and are never interleaved with another workflow's input. Without it,
+   * each call is a self-contained one-shot that releases the desktop as soon as it finishes.
+   *
+   * Applied to the spawned child process only; `process.env` is never modified.
+   */
+  workflowId?: string;
 }
 
 /** Result returned by every command wrapper. */
@@ -78,6 +90,7 @@ function captureOpts(opts: CommonOptions): CallWinappCliCaptureOptions {
   const result: CallWinappCliCaptureOptions = {};
   if (opts.cwd) result.cwd = opts.cwd;
   if (opts.signal) result.signal = opts.signal;
+  if (opts.workflowId !== undefined) result.workflowId = opts.workflowId;
   return result;
 }
 

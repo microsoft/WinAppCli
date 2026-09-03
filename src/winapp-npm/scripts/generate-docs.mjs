@@ -33,10 +33,10 @@ const OUTPUT = resolve(NPM_ROOT, '../../docs/npm-usage.md');
 // ---------------------------------------------------------------------------
 // CommonOptions properties — documented once, skipped in per-function tables
 // ---------------------------------------------------------------------------
-const COMMON_OPTION_NAMES = new Set(['quiet', 'verbose', 'cwd', 'signal']);
+const COMMON_OPTION_NAMES = new Set(['quiet', 'verbose', 'cwd', 'signal', 'workflowId']);
 
 // Rendered wherever a section says which inherited options also apply.
-const COMMON_OPTION_NOTE = '(`quiet`, `verbose`, `cwd`, `signal`)';
+const COMMON_OPTION_NOTE = '(`quiet`, `verbose`, `cwd`, `signal`, `workflowId`)';
 
 // ---------------------------------------------------------------------------
 // Create TypeScript program from tsconfig.json

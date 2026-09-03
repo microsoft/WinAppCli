@@ -260,6 +260,18 @@ function generate(schema) {
   L('   * partial output. Rejects with an `AbortError`.');
   L('   */');
   L('  signal?: AbortSignal;');
+  L('  /**');
+  L('   * Groups this call with other `winapp ui` calls passing the same value into one logical workflow.');
+  L('   *');
+  L('   * Collision arbitration is always on — every desktop-sensitive `winapp ui` command takes a turn');
+  L('   * whether or not this is set. A workflow id adds *continuity*: calls sharing one keep the desktop');
+  L('   * reserved between invocations for a short idle grace, may overlap with each other (a recording and');
+  L('   * the clicks it is recording), and are never interleaved with another workflow\'s input. Without it,');
+  L('   * each call is a self-contained one-shot that releases the desktop as soon as it finishes.');
+  L('   *');
+  L('   * Applied to the spawned child process only; `process.env` is never modified.');
+  L('   */');
+  L('  workflowId?: string;');
   L('}');
   L();
   L('/** Result returned by every command wrapper. */');
@@ -294,6 +306,7 @@ function generate(schema) {
   L('  const result: CallWinappCliCaptureOptions = {};');
   L('  if (opts.cwd) result.cwd = opts.cwd;');
   L('  if (opts.signal) result.signal = opts.signal;');
+  L('  if (opts.workflowId !== undefined) result.workflowId = opts.workflowId;');
   L('  return result;');
   L('}');
   L();
