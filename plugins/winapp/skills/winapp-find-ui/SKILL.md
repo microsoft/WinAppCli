@@ -122,6 +122,22 @@ winapp find-ui "color picker" --json
 - Keep queries **focused** (one feature per query) — the lexical ranker rewards
   specific phrasing. Batch multiple focused queries rather than one broad one.
 
+## Upstream is the source of truth
+
+Gallery and Toolkit samples are reproduced **as published** — winapp does not add
+its own samples to their corpus or rewrite their code. So a result is exactly what
+that repository ships today.
+
+Where a sample has a known pitfall or a pattern isn't covered upstream, the CLI
+says so in the **Important** notes attached to the result (for example, fetching
+any `ItemsRepeater` scenario explains how to build an image grid with
+`UniformGridLayout`, which no Gallery sample demos directly). Read those notes —
+they carry the guidance that isn't in the sample itself.
+
+If a sample looks wrong or missing, it's upstream's to fix — report it on
+[WinUI-Gallery](https://github.com/microsoft/WinUI-Gallery/issues) so every
+consumer benefits, not just winapp.
+
 ## Related skills
 
 - **winapp-ui-automation** — inspect and drive a *running* app's UI tree (a

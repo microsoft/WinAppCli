@@ -92,6 +92,24 @@ public class EmbeddedSnapshotTests
     }
 
     [TestMethod]
+    public void GalleryCorpus_CarriesNoWinappAuthoredSample()
+    {
+        // Gallery samples are served exactly as upstream publishes them. Scenario.Source
+        // becomes the "[gallery]" tag and the "gallery-" id prefix, so anything baked in
+        // here is presented to users — and to the WinUI-Gallery maintainers we are asking
+        // to publish an index (#703) — as content their repository owns. winapp used to
+        // append this sample because no Gallery sample demos UniformGridLayout directly;
+        // that guidance now lives in Notes.cs, where it is labelled as ours.
+        var gallery = EmbeddedSnapshot.TryLoad("gallery")!;
+
+        Assert.IsFalse(
+            gallery.Scenarios.Any(s =>
+                string.Equals(s.HeaderText, "Photo gallery: image grid (UniformGridLayout)", StringComparison.Ordinal)),
+            "a winapp-authored sample is baked into the gallery corpus — upstream it to WinUI-Gallery " +
+            "or put the guidance in Notes.cs instead of merging it into their samples");
+    }
+
+    [TestMethod]
     public void CompressedSnapshot_MatchesTheManifest()
     {
         // Only the Brotli blob is committed now, so there is no readable sibling to diff
