@@ -379,16 +379,22 @@ internal partial class RunCommand
         /// The property is shared verbatim with the NuGet targets so a <c>.cs</c> and a <c>.csproj</c>
         /// spell the same preference the same way. Setting it explicitly overrides the output-type
         /// default in BOTH directions, which is what lets a console app opt out from inside the file.
+        /// A malformed value reads as "no preference" — see
+        /// <see cref="MsBuildPropertyReader.ParseOptionalBoolean"/> — and is warned about, because a typo
+        /// that quietly suppressed a console app's output would be invisible.
         /// </remarks>
-        private static bool? ReadAliasPreference(IReadOnlyDictionary<string, string> properties)
+        private bool? ReadAliasPreference(IReadOnlyDictionary<string, string> properties)
         {
-            if (!properties.TryGetValue(UseExecutionAliasProperty, out var value) ||
-                string.IsNullOrWhiteSpace(value))
+            properties.TryGetValue(UseExecutionAliasProperty, out var raw);
+            var preference = MsBuildPropertyReader.ParseOptionalBoolean(raw, out var malformed);
+            if (malformed)
             {
-                return null;
+                logger.LogWarning(
+                    "{UISymbol} Ignoring '#:property {Property}={Value}': expected 'true' or 'false'.",
+                    UiSymbols.Warning, UseExecutionAliasProperty, raw?.Trim());
             }
 
-            return string.Equals(value.Trim(), "true", StringComparison.OrdinalIgnoreCase);
+            return preference;
         }
 
         /// <summary>

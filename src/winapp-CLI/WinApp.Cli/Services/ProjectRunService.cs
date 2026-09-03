@@ -411,7 +411,7 @@ internal sealed partial class ProjectRunService(
             options.NoRestore,
             string.IsNullOrEmpty(runArguments) ? null : runArguments,
             string.IsNullOrEmpty(outputType) ? null : outputType,
-            ParseOptionalBoolean(GetProp(props, "WinAppRunUseExecutionAlias")));
+            ReadAliasPreference(props));
 
         return new ProjectBuildOutcome(resolution, 0);
     }
@@ -798,17 +798,31 @@ internal sealed partial class ProjectRunService(
         }
     }
 
+    /// <summary>
+    /// Reads the project's <c>WinAppRunUseExecutionAlias</c> preference, warning when it is malformed.
+    /// </summary>
+    /// <remarks>
+    /// A value that is not a valid boolean reads as "no preference", matching the NuGet targets, which
+    /// forward no switch for one. It is warned about rather than accepted silently: the property's whole
+    /// purpose is to override the launch mechanism, and a typo that quietly does nothing is invisible
+    /// until a console app's output goes missing.
+    /// </remarks>
+    private bool? ReadAliasPreference(IReadOnlyDictionary<string, string> props)
+    {
+        var raw = GetProp(props, Commands.RunCommand.Handler.UseExecutionAliasProperty);
+        var preference = MsBuildPropertyReader.ParseOptionalBoolean(raw, out var malformed);
+        if (malformed)
+        {
+            logger.LogWarning(
+                "{UISymbol} Ignoring {Property}='{Value}': expected 'true' or 'false'.",
+                UiSymbols.Warning, Commands.RunCommand.Handler.UseExecutionAliasProperty, raw);
+        }
+
+        return preference;
+    }
+
     private static string GetProp(IReadOnlyDictionary<string, string> props, string name)
         => props.TryGetValue(name, out var value) ? value.Trim() : string.Empty;
-
-    /// <summary>
-    /// Reads an MSBuild boolean that may be undeclared. An unset property evaluates to an empty string,
-    /// which means "no preference" rather than false — the caller then applies its own default.
-    /// </summary>
-    private static bool? ParseOptionalBoolean(string value)
-        => string.IsNullOrWhiteSpace(value)
-            ? null
-            : string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// F1 pre-build probe: runs the side-effect-free evaluate (no <c>-t:Build</c>, no restore) purely to

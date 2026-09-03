@@ -711,6 +711,33 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
     }
 
     [TestMethod]
+    [DoNotParallelize]
+    [DataRow("ture", DisplayName = "typo")]
+    [DataRow("1", DisplayName = "numeric")]
+    [DataRow("yes", DisplayName = "yes is not an MSBuild boolean here")]
+    public async Task SingleFileMode_MalformedUseExecutionAliasProperty_KeepsTheInferredDefault(string value)
+    {
+        // Reading a malformed value as an explicit false would silently drop a console app's output, and
+        // would disagree with the NuGet targets, whose '== true' / '== false' conditions forward NO switch
+        // for a value they do not recognize — the same typo would then mean opposite things through
+        // `dotnet run` and a direct `winapp run`.
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir, "counter.exe",
+            ("OutputType", "Exe"), ("WinAppRunUseExecutionAlias", value));
+        var command = GetRequiredService<RunCommand>();
+
+        var (exitCode, ambientOutput) = await InvokeWithAmbientConsoleCaptureAsync(command, [singleFile.FullName]);
+
+        Assert.AreEqual(0, exitCode, "A malformed preference must not fail the run");
+        XNamespace uap5 = "http://schemas.microsoft.com/appx/manifest/uap/windows10/5";
+        Assert.IsNotNull(
+            LoadGeneratedManifest(outputDir).Root!.Descendants(uap5 + "ExecutionAlias").SingleOrDefault(),
+            "The console default must still apply when the property cannot be read");
+        StringAssert.Contains(ambientOutput, "WinAppRunUseExecutionAlias",
+            "A typo that quietly does nothing is invisible; it has to be reported");
+    }
+
+    [TestMethod]
     public async Task SingleFileMode_UseExecutionAliasProperty_DoesNotOverrideAnExplicitLaunchSwitch()
     {
         // --detach describes a launch model an alias cannot express. A property in a checked-in app must
