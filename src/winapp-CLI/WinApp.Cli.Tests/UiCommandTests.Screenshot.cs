@@ -45,6 +45,10 @@ public partial class UiCommandTests
     {
         // Integer --app → FindWindowsByPid; two windows → composite multi-window capture.
         _fakeUia.WindowsByPidResult = [((nint)11, 4321, "Main"), ((nint)12, 4321, "Dialog")];
+        // Both handles really do belong to the discovered process, which is what the OS reports when
+        // the command revalidates them before capturing.
+        _fakeSystemQuery.ProcessIdByHwnd[11] = 4321;
+        _fakeSystemQuery.ProcessIdByHwnd[12] = 4321;
         _fakeUia.ScreenshotResult = (new byte[4], 1, 1);
         var path = ShotPath();
 
@@ -62,11 +66,47 @@ public partial class UiCommandTests
     }
 
     [TestMethod]
+    public async Task Screenshot_MultiWindow_RecycledHandle_IsSkippedNotComposited()
+    {
+        // Every handle in the composite was discovered before the command queued for the desktop. If
+        // one of those windows closed while waiting and Windows reused its handle, capturing it would
+        // splice an unrelated application's pixels into an image reported as this target's — and the
+        // per-window "captured" flag would claim it succeeded.
+        _fakeUia.WindowsByPidResult = [((nint)31, 4321, "Main"), ((nint)32, 4321, "Doomed")];
+        _fakeSystemQuery.ProcessIdByHwnd[31] = 4321;
+        _fakeSystemQuery.ProcessIdByHwnd[32] = 9999;   // recycled onto an unrelated process
+        _fakeUia.ScreenshotResult = (new byte[4], 1, 1);
+        var path = ShotPath();
+
+        var command = GetRequiredService<UiScreenshotCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-a", "4321", "--json", "-o", path]);
+
+        Assert.AreEqual(0, exitCode, "the surviving window is still captured");
+
+        var output = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        var windows = output.GetProperty("windows").EnumerateArray().ToList();
+        Assert.HasCount(2, windows, "both windows are reported, so the omission is visible");
+
+        var recycled = windows.Single(w => w.GetProperty("hwnd").GetInt64() == 32);
+        Assert.IsFalse(recycled.GetProperty("captured").GetBoolean(),
+            "a recycled handle must never be reported as captured");
+        StringAssert.Contains(recycled.GetProperty("error").GetString()!, "different process");
+
+        var survivor = windows.Single(w => w.GetProperty("hwnd").GetInt64() == 31);
+        Assert.IsTrue(survivor.GetProperty("captured").GetBoolean());
+
+        Assert.AreEqual(1, _fakeDesktopLock.DesktopSectionEnters,
+            "the whole multi-window capture pass must run inside one desktop section");
+    }
+
+    [TestMethod]
     public async Task Screenshot_MultiWindowByName_NonJson_Composites()
     {
         // Exact current-process-name match → real process enumeration hits FindWindowsByPid per process.
         var procName = Process.GetCurrentProcess().ProcessName;
         _fakeUia.WindowsByPidResult = [((nint)21, 100, "A"), ((nint)22, 100, "B")];
+        _fakeSystemQuery.ProcessIdByHwnd[21] = 100;
+        _fakeSystemQuery.ProcessIdByHwnd[22] = 100;
         _fakeUia.ScreenshotResult = (new byte[4], 1, 1);
         var path = ShotPath();
 

@@ -285,6 +285,20 @@ internal sealed partial class UiRecordingService(
             var (encoderW, encoderH, displayW, displayH) = ComputeTargetSize(cropW, cropH, options.MaxEdge);
             var bitrate = (uint)Math.Clamp((long)encoderW * encoderH * options.Fps / 8, 1_000_000, 24_000_000);
 
+            // Last foreground check before any file exists. The earlier one ran right after the
+            // activation delay; selector resolution between the two can take long enough for another
+            // window to steal the foreground, and every screen-DC frame would then be of that window.
+            // It deliberately sits above the encoder rather than next to the first frame read: creating
+            // the encoder creates OutputPath, so refusing after that point would leave an empty MP4 and
+            // break the "no artifact on refusal" contract the CLI states for foreground_not_target.
+            if (options.CaptureScreen && !ForegroundGuard.ForegroundBelongsTo((long)rootHwnd))
+            {
+                throw new ForegroundLostException(
+                    "The target window lost the foreground while the recording was being prepared, so a " +
+                    "screen recording would capture whatever window is actually in front. Bring the " +
+                    "window to the foreground and retry, or record the window directly instead of the screen.");
+            }
+
             // Never replace an existing recording. The CLI refuses up front ("recording never
             // replaces existing artifacts"), but that guard does not travel with the package, and
             // the previous video-only path silently overwrote OutputPath - running the readme

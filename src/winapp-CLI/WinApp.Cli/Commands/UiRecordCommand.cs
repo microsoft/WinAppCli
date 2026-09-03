@@ -45,6 +45,7 @@ internal class UiRecordCommand : Command, IShortDescription
         IUiTargetResolver targetResolver,
         IUiRecordingService recordingService,
         IWindowCapture windowCapture,
+        ISystemUiQuery systemQuery,
         IAnsiConsole ansiConsole,
         IInteractiveDesktopLock desktopLock,
         ILogger<UiRecordCommand> logger) : UiCoordinatedAction(desktopLock, logger)
@@ -263,7 +264,13 @@ internal class UiRecordCommand : Command, IShortDescription
 
                 var (result, coordinationWarning) = await RecordUnderTurnAsync(
                     turn, uiTarget, selector, options, captureScreen, json, quiet,
-                    OnRecordingStarted, linkedCts.Token).ConfigureAwait(false);
+                    OnRecordingStarted, parseResult.InvocationConfiguration.Error, linkedCts.Token).ConfigureAwait(false);
+
+                if (result is null)
+                {
+                    // The target was refused from inside the section and the reason already reported.
+                    return 1;
+                }
 
                 // Merged here rather than inside the helper because RecordCaptureResult is engine-owned
                 // and immutable; the coordination note is a CLI concern layered on top of it.
@@ -435,7 +442,7 @@ internal class UiRecordCommand : Command, IShortDescription
         /// that input cannot interleave on this host.
         /// </para>
         /// </remarks>
-        private async Task<(RecordCaptureResult Result, string? CoordinationWarning)> RecordUnderTurnAsync(
+        private async Task<(RecordCaptureResult? Result, string? CoordinationWarning)> RecordUnderTurnAsync(
             IUiTurn turn,
             UiTarget uiTarget,
             string? selector,
@@ -444,8 +451,15 @@ internal class UiRecordCommand : Command, IShortDescription
             bool json,
             bool quiet,
             Action<bool> onRecordingStarted,
+            TextWriter errorOut,
             CancellationToken ct)
         {
+            // The target was resolved before this command queued for the desktop, so re-confirm it from
+            // inside the section: the window could have closed while waiting and had its handle reused,
+            // and a recording of the wrong application is indistinguishable from a correct one.
+            bool TargetStillValid() => DesktopTargetValidation.TryConfirmTargetWindow(
+                systemQuery, uiTarget.WindowHandle, uiTarget.ProcessId, logger, json, "record", errorOut);
+
             // Mirrors the engine's own selection in UiRecordingService: screen DC when asked for, else WGC
             // when the host supports frame capture, else PrintWindow. Asserted against the result below so
             // this prediction cannot silently drift away from the engine.
@@ -469,6 +483,11 @@ internal class UiRecordCommand : Command, IShortDescription
                 RecordCaptureResult heldResult;
                 await using (await turn.EnterAsync(ct).ConfigureAwait(false))
                 {
+                    if (!TargetStillValid())
+                    {
+                        return (null, null);
+                    }
+
                     heldResult = await recordingService
                         .RecordAsync(uiTarget, selector, options, ct, onRecordingStarted).ConfigureAwait(false);
                 }
@@ -484,10 +503,15 @@ internal class UiRecordCommand : Command, IShortDescription
 
             void OnStarted(bool frameArtifactsActive)
             {
-                // The callback only signals. It never disposes the section: disposal is async and belongs
-                // to this method, and doing it here would block the engine's capture loop on a file lock.
-                onRecordingStarted(frameArtifactsActive);
+                // Signal FIRST. The outer notification writes the "recording started" JSON, and a caller
+                // reading stderr slowly can block that write for an unbounded time. Setting the result
+                // first means the awaiting continuation (scheduled asynchronously, see above) can release
+                // the desktop section even while this engine thread is still stuck in that write —
+                // otherwise one slow reader would hold the desktop lock for every other command.
+                // The callback never disposes the section itself: disposal is async and belongs to this
+                // method, and doing it here would block the engine's capture loop on a file lock.
                 startedTcs.TrySetResult();
+                onRecordingStarted(frameArtifactsActive);
             }
 
             var section = await turn.EnterAsync(ct).ConfigureAwait(false);
@@ -508,6 +532,12 @@ internal class UiRecordCommand : Command, IShortDescription
 
             try
             {
+                if (!TargetStillValid())
+                {
+                    // The finally below releases the section.
+                    return (null, null);
+                }
+
                 var recordTask = recordingService.RecordAsync(uiTarget, selector, options, ct, OnStarted);
 
                 // Race the two ways the desktop stops being needed: the first frame landed, or the

@@ -161,4 +161,35 @@ public class DesktopTargetValidationTests : IDisposable
 
         Assert.IsTrue(Confirm(100, expectedPid: 0));
     }
+
+    // -------------------------------------------------- the silent verdict used for batched handles
+
+    /// <remarks>
+    /// The multi-window screenshot composite validates every handle it is about to capture. Each one
+    /// needs a verdict without writing a top-level error envelope, because a single unreachable window
+    /// is recorded against that window and the remaining ones are still captured — so the classifier
+    /// has to be reusable separately from the reporting.
+    /// </remarks>
+    [TestMethod]
+    public void ClassifierAgreesWithTheReportingCheckOnEveryOutcome()
+    {
+        _systemQuery.ProcessIdByHwnd[100] = SessionPid;                 // straightforward match
+        _systemQuery.ProcessIdByHwnd[300] = ForeignPid;                 // recycled onto another process
+        _systemQuery.ProcessIdByHwnd[400] = ForeignPid;                 // owned dialog
+        _systemQuery.WindowOwnerByHwnd[400] = 100;
+        // 200 is deliberately unmapped: GetProcessIdForWindow reports 0, i.e. destroyed.
+
+        Assert.AreEqual(DesktopTargetValidation.TargetWindowState.Valid, Classify(100));
+        Assert.AreEqual(DesktopTargetValidation.TargetWindowState.Gone, Classify(200));
+        Assert.AreEqual(DesktopTargetValidation.TargetWindowState.Recycled, Classify(300));
+        Assert.AreEqual(DesktopTargetValidation.TargetWindowState.Valid, Classify(400));
+
+        // A zero handle is a bare-coordinate target, which has no window to confirm.
+        Assert.AreEqual(DesktopTargetValidation.TargetWindowState.Valid, Classify(0));
+
+        Assert.AreEqual(string.Empty, _errorOut.ToString(), "classifying must never emit an error envelope");
+    }
+
+    private DesktopTargetValidation.TargetWindowState Classify(long hwnd, int expectedPid = SessionPid)
+        => DesktopTargetValidation.ClassifyTargetWindow(_systemQuery, hwnd, expectedPid);
 }

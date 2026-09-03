@@ -38,40 +38,76 @@ internal static class DesktopTargetValidation
         string action,
         TextWriter? errorOut = null)
     {
+        switch (ClassifyTargetWindow(systemQuery, hwnd, expectedProcessId))
+        {
+            case TargetWindowState.Gone:
+                logger.LogError(
+                    "{Symbol} The target window closed while this command was waiting for the desktop — refusing to {Action}.",
+                    UiSymbols.Error, action);
+                UiJsonError.Emit(json, UiJsonError.CodeStaleElement,
+                    $"The target window no longer exists — refusing to {action}. Re-resolve the target and retry.",
+                    errorOut: errorOut,
+                    recoveryHint: "Another workflow may have closed the window while this command waited for the desktop. Re-run the discovery step (ui list-windows / ui search) and retry.");
+                return false;
+
+            case TargetWindowState.Recycled:
+                logger.LogError(
+                    "{Symbol} The target window handle now belongs to a different process — refusing to {Action}.",
+                    UiSymbols.Error, action);
+                UiJsonError.Emit(json, UiJsonError.CodeStaleElement,
+                    $"The target window handle now belongs to a different process — refusing to {action}. Re-resolve the target and retry.",
+                    errorOut: errorOut,
+                    recoveryHint: "The original window exited while this command waited for the desktop and Windows reused its handle. Re-run the discovery step and retry.");
+                return false;
+
+            default:
+                return true;
+        }
+    }
+
+    /// <summary>Outcome of re-checking a resolved window handle just before acting on it.</summary>
+    internal enum TargetWindowState
+    {
+        /// <summary>Still the window the command resolved.</summary>
+        Valid,
+
+        /// <summary>The window was destroyed while the command waited.</summary>
+        Gone,
+
+        /// <summary>The handle now names a window belonging to an unrelated process.</summary>
+        Recycled,
+    }
+
+    /// <summary>
+    /// The non-emitting core of <see cref="TryConfirmTargetWindow"/>. Callers that validate several
+    /// handles in one pass — the multi-window screenshot composite — need the verdict per handle
+    /// without each one writing a top-level error envelope.
+    /// </summary>
+    internal static TargetWindowState ClassifyTargetWindow(
+        ISystemUiQuery systemQuery,
+        long hwnd,
+        int expectedProcessId)
+    {
         if (hwnd == 0)
         {
             // A bare-coordinate target has no window to confirm; the foreground guard is the gate there.
-            return true;
+            return TargetWindowState.Valid;
         }
 
         var actualProcessId = systemQuery.GetProcessIdForWindow(hwnd);
         if (actualProcessId == 0)
         {
-            logger.LogError(
-                "{Symbol} The target window closed while this command was waiting for the desktop — refusing to {Action}.",
-                UiSymbols.Error, action);
-            UiJsonError.Emit(json, UiJsonError.CodeStaleElement,
-                $"The target window no longer exists — refusing to {action}. Re-resolve the target and retry.",
-                errorOut: errorOut,
-                recoveryHint: "Another workflow may have closed the window while this command waited for the desktop. Re-run the discovery step (ui list-windows / ui search) and retry.");
-            return false;
+            return TargetWindowState.Gone;
         }
 
         if (expectedProcessId > 0
             && actualProcessId != (uint)expectedProcessId
             && !IsOwnedByExpectedProcess(systemQuery, hwnd, expectedProcessId))
         {
-            logger.LogError(
-                "{Symbol} The target window handle now belongs to a different process — refusing to {Action}.",
-                UiSymbols.Error, action);
-            UiJsonError.Emit(json, UiJsonError.CodeStaleElement,
-                $"The target window handle now belongs to a different process — refusing to {action}. Re-resolve the target and retry.",
-                errorOut: errorOut,
-                recoveryHint: "The original window exited while this command waited for the desktop and Windows reused its handle. Re-run the discovery step and retry.");
-            return false;
+            return TargetWindowState.Recycled;
         }
 
-        return true;
+        return TargetWindowState.Valid;
     }
 
     /// <summary>

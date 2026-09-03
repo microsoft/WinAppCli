@@ -444,6 +444,29 @@ public partial class UiCommandTests
     // ------------------------------------------- pre-start recording cancellation must not renew grace
 
     [TestMethod]
+    public async Task WaitFor_Cancelled_DoesNotReportItselfAsACompletedCommand()
+    {
+        // wait-for is the one polling command, so it is the one most likely to be interrupted: an agent
+        // that gives up on a slow app presses Ctrl+C mid-wait. Catching the cancellation and returning
+        // an exit code told the coordinator the command had completed, which renewed the owner's idle
+        // grace and kept foreign waiters queued behind a workflow that had already stopped. Worse, with
+        // --gone the swallowed cancellation could surface as "the element is gone" — a success.
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        var command = GetRequiredService<UiWaitForCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["Button1", "-a", "TestApp", "--json"], cts.Token);
+
+        Assert.IsTrue(_fakeDesktopLock.LastBodyThrew,
+            "the body must propagate the cancellation; returning any exit code makes the coordinator treat "
+                + "an interrupted wait as a completed command and renew the owner's grace");
+        Assert.IsInstanceOfType<OperationCanceledException>(_fakeDesktopLock.LastBodyException);
+        Assert.IsFalse(ConsoleStdErr.ToString().Contains("internal_error", StringComparison.Ordinal),
+            $"a cancellation is not an internal error (exit {exitCode})");
+    }
+
+    [TestMethod]
     public async Task Record_CancelledBeforeCaptureStarted_DoesNotReportItselfAsACompletedCommand()
     {
         // The coordinator decides whether to renew the owner's idle grace from whether the body RETURNED

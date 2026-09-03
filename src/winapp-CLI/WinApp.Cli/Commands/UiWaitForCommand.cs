@@ -124,8 +124,11 @@ internal class UiWaitForCommand : Command, IShortDescription
                     {
                         element = await uiAutomation.FindSingleElementAsync(uiTarget, selector, cancellationToken);
                     }
-                    catch
+                    catch (Exception ex) when (!UiCoordinatedAction.IsCoordinationFault(ex))
                     {
+                        // "Not found yet" is the normal case while polling, so a lookup failure just means
+                        // keep waiting. Cancellation is not a lookup failure: swallowing it here would let
+                        // --gone report the element as gone the moment the user pressed Ctrl+C.
                         element = null;
                     }
 
@@ -236,12 +239,6 @@ internal class UiWaitForCommand : Command, IShortDescription
                 {
                     logger.LogError("'{Selector}' not found after {Timeout}ms", selectorStr, timeout);
                 }
-                return 1;
-            }
-            catch (OperationCanceledException)
-            {
-                logger.LogError("Wait cancelled");
-                UiJsonError.Emit(json, UiJsonError.CodeInternalError, "Wait cancelled");
                 return 1;
             }
             catch (System.Runtime.InteropServices.COMException comEx)

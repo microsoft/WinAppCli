@@ -30,8 +30,8 @@ internal static class UiJsonError
     public const string CodeFrameOutputFailed = "frame_output_failed";
     public const string CodePartialOutput = "partial_output";
 
-    /// <summary><c>WINAPP_UI_OWNER_ID</c> was set but empty/whitespace or over 256 characters.</summary>
-    public const string CodeInvalidUiOwnerId = "invalid_ui_owner_id";
+    /// <summary><c>WINAPP_UI_WORKFLOW_ID</c> was set but empty/whitespace or over 256 characters.</summary>
+    public const string CodeInvalidUiWorkflowId = "invalid_ui_workflow_id";
 
     /// <summary>Desktop turn coordination could not be read, published, or safely recovered.</summary>
     public const string CodeDesktopCoordinationUnavailable = "desktop_coordination_unavailable";

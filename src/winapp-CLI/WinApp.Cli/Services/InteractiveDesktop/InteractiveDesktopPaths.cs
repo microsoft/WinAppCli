@@ -61,6 +61,13 @@ internal sealed class InteractiveDesktopPaths : IInteractiveDesktopPaths
     /// touch the developer's live desktop coordination state. It relocates coordination; it never
     /// disables it, so a test still exercises the real locking protocol.
     /// </summary>
+    /// <remarks>
+    /// Coordination is scoped to whichever directory this resolves to, so every winapp process that
+    /// must cooperate on one desktop has to agree on it. Two processes given different values each
+    /// coordinate correctly within their own namespace and not at all with each other, which is why
+    /// this is an unadvertised test seam rather than a user-facing knob, and why the recovery hints
+    /// below always say "the same directory for every winapp process".
+    /// </remarks>
     internal const string LockDirectoryOverrideVariable = "WINAPP_UI_LOCK_DIRECTORY";
 
     private const string FilePrefix = "interactive-desktop-";
@@ -149,7 +156,7 @@ internal sealed class InteractiveDesktopPaths : IInteractiveDesktopPaths
             throw new UiCoordinationException(
                 UiCoordinationErrorCodes.Unavailable,
                 "The local application data folder could not be resolved, so UI turn coordination has nowhere to store its state.",
-                "Ensure LOCALAPPDATA is set for this user, or set WINAPP_UI_LOCK_DIRECTORY to a fully qualified local directory.");
+                "Ensure LOCALAPPDATA is set for this user, or set WINAPP_UI_LOCK_DIRECTORY to the same fully qualified local directory for every winapp process on this desktop.");
         }
 
         return ValidateLockDirectory(
@@ -166,7 +173,7 @@ internal sealed class InteractiveDesktopPaths : IInteractiveDesktopPaths
             throw new UiCoordinationException(
                 UiCoordinationErrorCodes.Unavailable,
                 $"The UI coordination directory resolved from {source} is not a fully qualified path.",
-                "Set WINAPP_UI_LOCK_DIRECTORY to a fully qualified local directory such as C:\\Temp\\winapp-locks.");
+                "Set WINAPP_UI_LOCK_DIRECTORY to the same fully qualified local directory for every winapp process on this desktop, such as C:\\Temp\\winapp-locks.");
         }
 
         // Byte-range locking over SMB is advisory and unreliable for the exclusive-share protocol this

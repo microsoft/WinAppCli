@@ -238,6 +238,33 @@ internal class UiScreenshotCommand : Command, IShortDescription
             {
                 var info = UiTargetResolver.GetWindowInfo(w.Hwnd);
                 var title = string.IsNullOrEmpty(w.Title) ? "(no title)" : w.Title;
+
+                // Each handle was discovered before this command waited for the desktop, so any of them
+                // could have closed and had its handle reused since. Capturing an unvalidated handle
+                // would composite another application's pixels into an image reported as this target's.
+                var state = DesktopTargetValidation.ClassifyTargetWindow(systemQuery, w.Hwnd, w.Pid);
+                if (state != DesktopTargetValidation.TargetWindowState.Valid)
+                {
+                    var reason = state == DesktopTargetValidation.TargetWindowState.Gone
+                        ? "The window closed while this command was waiting for the desktop."
+                        : "The window handle now belongs to a different process.";
+                    logger.LogDebug("Skipping HWND {Hwnd}: {Reason}", w.Hwnd, reason);
+                    windowDetails.Add(new UiScreenshotWindowInfo
+                    {
+                        Hwnd = w.Hwnd,
+                        Title = string.IsNullOrEmpty(w.Title) ? null : w.Title,
+                        Label = info.Label,
+                        Captured = false,
+                        Error = reason,
+                    });
+                    if (!json)
+                    {
+                        ansiConsole.MarkupLine($"  [red]✗[/] HWND {w.Hwnd}: \"{Markup.Escape(title)}\" — {Markup.Escape(reason)}");
+                    }
+
+                    continue;
+                }
+
                 try
                 {
                     var windowTarget = new UiTarget

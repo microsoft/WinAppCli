@@ -168,6 +168,7 @@ test('_uiRecordWithCapture: calls capture with correct args and returns result',
     fps: 15,
     output: 'rec.mp4',
     cwd: 'C:\\work',
+    workflowId: 'wf-forwarded',
   };
 
   const result = await _uiRecordWithCapture(opts, mockCapture as Parameters<typeof _uiRecordWithCapture>[1]);
@@ -184,13 +185,35 @@ test('_uiRecordWithCapture: calls capture with correct args and returns result',
   assert.ok(dIdx >= 0, '--duration-sec must be in args');
   assert.equal(capturedArgs[0][dIdx + 1], '5');
 
-  // cwd is forwarded
-  assert.deepEqual(capturedOpts[0], { cwd: 'C:\\work' });
+  // cwd and workflowId are forwarded
+  assert.deepEqual(capturedOpts[0], { cwd: 'C:\\work', workflowId: 'wf-forwarded' });
 
   // Result is correctly mapped
   assert.equal(result.exitCode, 0);
   assert.equal(result.stdout, '{"frames":30}');
   assert.equal(result.stderr, '');
+});
+
+test('_uiRecordWithCapture: workflowId reaches the CLI child environment', async () => {
+  // A recording is the one long-running ui command, so it is the one most likely to be running while
+  // its workflow also clicks. Dropping workflowId here made the recording an anonymous one-shot, which
+  // blocks every other command for its whole duration instead of overlapping with its own workflow.
+  const capturedOpts: unknown[] = [];
+  async function mockCapture(_args: string[], opts: unknown) {
+    capturedOpts.push(opts);
+    return { exitCode: 0, stdout: '', stderr: '' };
+  }
+
+  await _uiRecordWithCapture(
+    { durationSec: 3, workflowId: 'wf-only' },
+    mockCapture as Parameters<typeof _uiRecordWithCapture>[1]
+  );
+
+  assert.deepEqual(
+    capturedOpts[0],
+    { workflowId: 'wf-only' },
+    'workflowId must be forwarded even when no other capture option is set'
+  );
 });
 
 test('_uiRecordWithCapture: no cwd → empty capture options', async () => {

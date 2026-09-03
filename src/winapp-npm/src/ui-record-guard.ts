@@ -119,6 +119,7 @@ export async function uiRecord(options: UiRecordOptions): Promise<WinappResult> 
   const captureOpts: CallWinappCliCaptureOptions = {};
   if (options.cwd) captureOpts.cwd = options.cwd;
   if (options.signal) captureOpts.signal = options.signal;
+  if (options.workflowId) captureOpts.workflowId = options.workflowId;
   const result = await callWinappCliCapture(args, captureOpts);
   return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
 }
@@ -156,6 +157,7 @@ export async function _uiRecordWithCapture(
   const captureOpts: CallWinappCliCaptureOptions = {};
   if (options.cwd) captureOpts.cwd = options.cwd;
   if (options.signal) captureOpts.signal = options.signal;
+  if (options.workflowId) captureOpts.workflowId = options.workflowId;
   const result = await capture(args, captureOpts);
   return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
 }

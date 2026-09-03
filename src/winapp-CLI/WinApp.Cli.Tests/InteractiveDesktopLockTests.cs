@@ -424,7 +424,7 @@ public class InteractiveDesktopLockTests
     }
 
     [TestMethod]
-    public async Task InvalidExplicitOwnerIdFailsBeforeAnyUiSideEffect()
+    public async Task InvalidExplicitWorkflowIdFailsBeforeAnyUiSideEffect()
     {
         Environment.SetEnvironmentVariable(UiOwnerResolver.WorkflowIdVariable, "   ");
 
