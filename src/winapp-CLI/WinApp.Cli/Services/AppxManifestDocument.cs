@@ -483,8 +483,9 @@ internal class AppxManifestDocument
     /// rejects as soon as one device capability precedes one ordinary capability.
     /// </para>
     /// <para>
-    /// Matching is by name only, across namespaces: the same capability declared twice is a schema
-    /// violation regardless of which namespaces were used.
+    /// Matching is by name only, across namespaces, and case-insensitively: the same capability declared
+    /// twice is a schema violation regardless of which namespaces or spellings were used. This mirrors the
+    /// sparse-manifest check in <c>MsixService</c>.
     /// </para>
     /// </remarks>
     public void EnsureCapability(AppxCapability capability)
@@ -514,7 +515,7 @@ internal class AppxManifestDocument
         }
 
         var alreadyDeclared = capabilities.Elements()
-            .Any(e => string.Equals(e.Attribute("Name")?.Value, capability.Name, StringComparison.Ordinal));
+            .Any(e => string.Equals(e.Attribute("Name")?.Value, capability.Name, StringComparison.OrdinalIgnoreCase));
         if (alreadyDeclared)
         {
             return;

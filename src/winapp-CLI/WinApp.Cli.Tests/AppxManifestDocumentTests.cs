@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
@@ -531,6 +532,28 @@ public class AppxManifestDocumentTests
 
         var result = doc.ToXml();
         Assert.AreEqual(1, CountOccurrences(result, "runFullTrust"));
+    }
+
+    [TestMethod]
+    public void EnsureCapability_TypedOverload_SkipsADuplicateSpelledDifferently()
+    {
+        // Two entries for one capability is a schema violation whatever the casing, and the sparse-manifest
+        // check in MsixService already matches case-insensitively — these must not disagree.
+        var xml = """
+            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                     xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities">
+              <Capabilities>
+                <rescap:Capability Name="RunFullTrust" />
+              </Capabilities>
+            </Package>
+            """;
+        var doc = AppxManifestDocument.Parse(xml);
+
+        doc.EnsureCapability(new AppxCapability(
+            "runFullTrust", "Capability", "rescap", AppxManifestDocument.RescapNs));
+
+        var result = doc.ToXml();
+        Assert.AreEqual(1, CountOccurrences(result.ToLowerInvariant(), "runfulltrust"));
     }
 
     [TestMethod]

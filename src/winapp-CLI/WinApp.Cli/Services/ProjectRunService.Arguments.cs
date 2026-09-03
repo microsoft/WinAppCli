@@ -344,12 +344,6 @@ internal sealed partial class ProjectRunService
     }
 
     /// <summary>
-    /// User <c>-p</c> properties forwarded to BOTH single-file passes. Only <c>Configuration</c> is
-    /// reserved, because winapp emits it as <c>-c</c>; everything else — including
-    /// <c>TargetFramework</c> and <c>RuntimeIdentifier</c>, which project mode reserves for its dedicated
-    /// switches — is the user's to set, and passing it identically to both passes keeps them in agreement.
-    /// </summary>
-    /// <summary>
     /// The user <c>-p</c> properties a single-file pass forwards.
     /// </summary>
     /// <remarks>

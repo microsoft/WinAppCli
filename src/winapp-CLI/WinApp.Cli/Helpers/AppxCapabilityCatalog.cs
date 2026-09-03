@@ -68,10 +68,6 @@ internal static partial class AppxCapabilityCatalog
     private static readonly XNamespace FoundationNs = "http://schemas.microsoft.com/appx/manifest/foundation/windows10";
 
     /// <summary>
-    /// Capability name to its documented element/namespace. Only names whose namespace is stated in
-    /// Microsoft's capability documentation appear here.
-    /// </summary>
-    /// <summary>
     /// The foundation <c>&lt;Capability&gt;</c> set, which the AppX schema closes at exactly these names.
     /// </summary>
     /// <remarks>
@@ -81,6 +77,10 @@ internal static partial class AppxCapabilityCatalog
     private static readonly string[] FoundationCapabilityNames =
         ["internetClient", "internetClientServer", "privateNetworkClientServer", "allJoyn", "codeGeneration"];
 
+    /// <summary>
+    /// Capability name to its documented element/namespace. Only names whose namespace is stated in
+    /// Microsoft's capability documentation appear here.
+    /// </summary>
     private static readonly Dictionary<string, AppxCapability> Known = BuildKnown();
 
     private static Dictionary<string, AppxCapability> BuildKnown()
