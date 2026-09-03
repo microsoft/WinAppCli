@@ -27,18 +27,8 @@ internal sealed class FakeInteractiveDesktopLock : IInteractiveDesktopLock
     /// <summary>How many desktop sections are open right now; tests assert this around observable calls.</summary>
     public int OpenDesktopSections { get; private set; }
 
-    /// <summary>How many times a body escalated an observation to <c>DesktopExclusive</c>.</summary>
-    public int Escalations { get; private set; }
-
     /// <summary>Set to throw from <see cref="RunCoordinatedAsync"/>, to cover coordination failures.</summary>
     public UiCoordinationException? ThrowOnRun { get; set; }
-
-    /// <summary>
-    /// Set to throw from <c>EscalateToDesktopExclusiveAsync</c>, covering an escalation that is
-    /// cancelled while queued or refused because coordination is unavailable. Handlers must let these
-    /// escape rather than flattening them into <c>internal_error</c>.
-    /// </summary>
-    public Exception? ThrowOnEscalation { get; set; }
 
     /// <summary>Milliseconds reported as queue wait, so output/telemetry paths can be exercised.</summary>
     public long WaitedMs { get; set; }
@@ -99,18 +89,6 @@ internal sealed class FakeInteractiveDesktopLock : IInteractiveDesktopLock
             return Task.FromResult<IAsyncDisposable>(new FakeSection(owner));
         }
 
-        public Task EscalateToDesktopExclusiveAsync(CancellationToken cancellationToken)
-        {
-            owner.Escalations++;
-
-            if (owner.ThrowOnEscalation is { } failure)
-            {
-                return Task.FromException(failure);
-            }
-
-            Mode = UiTurnMode.DesktopExclusive;
-            return Task.CompletedTask;
-        }
     }
 
     private sealed class FakeSection(FakeInteractiveDesktopLock owner) : IAsyncDisposable

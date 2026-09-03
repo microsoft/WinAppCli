@@ -16,7 +16,7 @@ namespace WinApp.Cli.Tests;
 /// locks (issue #764): admission, the forward barrier, and the desktop-section contract.
 /// </summary>
 [TestClass]
-[DoNotParallelize] // WINAPP_UI_LOCK_DIRECTORY and WINAPP_UI_OWNER_ID are process-wide.
+[DoNotParallelize] // WINAPP_UI_LOCK_DIRECTORY and WINAPP_UI_WORKFLOW_ID are process-wide.
 public class InteractiveDesktopLockTests
 {
     private string _lockDirectory = null!;
@@ -33,12 +33,12 @@ public class InteractiveDesktopLockTests
         _lockDirectory = Path.Combine(Path.GetTempPath(), $"winapp-lock-svc-{Guid.NewGuid():N}");
         _previousLockOverride = Environment.GetEnvironmentVariable(
             InteractiveDesktopPaths.LockDirectoryOverrideVariable);
-        _previousOwnerId = Environment.GetEnvironmentVariable(UiOwnerResolver.OwnerIdVariable);
+        _previousOwnerId = Environment.GetEnvironmentVariable(UiOwnerResolver.WorkflowIdVariable);
 
         Environment.SetEnvironmentVariable(
             InteractiveDesktopPaths.LockDirectoryOverrideVariable, _lockDirectory);
         // A stable explicit owner keeps these tests independent of the test host's parent process.
-        Environment.SetEnvironmentVariable(UiOwnerResolver.OwnerIdVariable, "interactive-desktop-lock-tests");
+        Environment.SetEnvironmentVariable(UiOwnerResolver.WorkflowIdVariable, "interactive-desktop-lock-tests");
 
         var inspector = new ProcessInspector();
         _paths = new InteractiveDesktopPaths(inspector);
@@ -49,7 +49,7 @@ public class InteractiveDesktopLockTests
             _store,
             _paths,
             _participants,
-            new UiOwnerResolver(inspector),
+            new UiOwnerResolver(),
             inspector,
             new TickCountClock(),
             new FakePollDelay(),
@@ -62,7 +62,7 @@ public class InteractiveDesktopLockTests
     {
         Environment.SetEnvironmentVariable(
             InteractiveDesktopPaths.LockDirectoryOverrideVariable, _previousLockOverride);
-        Environment.SetEnvironmentVariable(UiOwnerResolver.OwnerIdVariable, _previousOwnerId);
+        Environment.SetEnvironmentVariable(UiOwnerResolver.WorkflowIdVariable, _previousOwnerId);
         UiCoordinationTelemetryScope.Clear();
 
         try
@@ -151,7 +151,7 @@ public class InteractiveDesktopLockTests
 
         var summary = UiCoordinationTelemetryScope.Current;
         Assert.IsNotNull(summary);
-        Assert.AreEqual(UiOwnerKind.Explicit, summary!.IdentitySource);
+        Assert.AreEqual(UiOwnerKind.Workflow, summary!.IdentitySource);
         Assert.AreEqual(UiTurnMode.DesktopExclusive, summary.Mode);
         Assert.AreEqual(UiCoordinationOutcome.Completed, summary.Outcome);
 
@@ -225,7 +225,7 @@ public class InteractiveDesktopLockTests
         {
             var state = InteractiveDesktopState.CreateFresh();
             state.TurnId = 7;
-            state.Owner = new OwnerRecord { Kind = UiOwnerKind.Explicit, Key = "some-other-workflow" };
+            state.Owner = new OwnerRecord { Kind = UiOwnerKind.Workflow, Key = "some-other-workflow" };
             state.TurnStartedTick64 = 0;
             state.IdleExpiresTick64 = 1; // already elapsed, so this command takes the turn over
             _store.Publish(state);
@@ -269,7 +269,7 @@ public class InteractiveDesktopLockTests
         Assert.AreEqual(InteractiveDesktopLock.CancelledExitCode, exitCode,
             "a cancelled command reports 130, not an internal error");
         StringAssert.Contains(errorWriter.ToString(), "\"code\":\"cancelled\"");
-        Assert.AreEqual(deadlineBefore, ReadOwnerDeadline(),
+        Assert.AreEqual(0, ReadOwnerDeadline(),
             "a command that produced nothing must not renew the owner's idle grace");
     }
 
@@ -288,7 +288,7 @@ public class InteractiveDesktopLockTests
                 UiCoordinationErrorCodes.Unavailable, "active.lock could not be opened")));
 
         Assert.AreEqual(UiCoordinationErrorCodes.Unavailable, ex.Code);
-        Assert.AreEqual(deadlineBefore, ReadOwnerDeadline(),
+        Assert.AreEqual(0, ReadOwnerDeadline(),
             "a command that never ran must not renew the owner's idle grace");
     }
 
@@ -426,7 +426,7 @@ public class InteractiveDesktopLockTests
     [TestMethod]
     public async Task InvalidExplicitOwnerIdFailsBeforeAnyUiSideEffect()
     {
-        Environment.SetEnvironmentVariable(UiOwnerResolver.OwnerIdVariable, "   ");
+        Environment.SetEnvironmentVariable(UiOwnerResolver.WorkflowIdVariable, "   ");
 
         var ran = false;
         var ex = await Assert.ThrowsExactlyAsync<UiCoordinationException>(() =>
@@ -436,7 +436,7 @@ public class InteractiveDesktopLockTests
                 return Task.FromResult(0);
             }));
 
-        Assert.AreEqual(UiCoordinationErrorCodes.InvalidOwnerId, ex.Code);
+        Assert.AreEqual(UiCoordinationErrorCodes.InvalidWorkflowId, ex.Code);
         Assert.IsFalse(ran, "the command body must never run with an unusable owner identity");
         Assert.IsFalse(_participants.AnyLiveParticipant(), "no lease may be left behind");
     }
@@ -469,7 +469,7 @@ public class InteractiveDesktopLockTests
         var state = InteractiveDesktopState.CreateFresh();
         state.TurnId = 1;
         state.NextTicket = 2;
-        state.Owner = new OwnerRecord { Kind = UiOwnerKind.Explicit, Key = "some-other-workflow" };
+        state.Owner = new OwnerRecord { Kind = UiOwnerKind.Workflow, Key = "some-other-workflow" };
         state.OwnerCommands.Add(new OwnerCommandEntry
         {
             Ticket = 1,
@@ -597,45 +597,6 @@ public class InteractiveDesktopLockTests
     // ------------------------------------------------------ escalation must not swallow coordination
 
     [TestMethod]
-    public async Task EscalationCancelledWhileQueuedExitsOneThirtyAndLeavesNoTrace()
-    {
-        // Exactly what `ui screenshot` does: an observational pass discovers it needs the foreground and
-        // escalates. Here the escalation queues behind another owner and is cancelled.
-        using var foreignLease = OccupyTurnWithAnotherOwner();
-        var deadlineBefore = ReadOwnerDeadline();
-
-        var errorWriter = new StringWriter();
-        var parseResult = ParseWithWriter(errorWriter);
-
-        using var cts = new CancellationTokenSource();
-        var escalated = false;
-        var queued = _coordinator.RunCoordinatedAsync(
-            UiTurnMode.Observe, "ui screenshot", parseResult,
-            async (turn, token) =>
-            {
-                await turn.EscalateToDesktopExclusiveAsync(token);
-                escalated = true;
-                return 0;
-            },
-            cts.Token);
-
-        await Task.Delay(250);
-        await cts.CancelAsync();
-
-        Assert.AreEqual(InteractiveDesktopLock.CancelledExitCode, await queued,
-            "a cancelled escalation is a cancellation, not an internal error");
-        Assert.IsFalse(escalated, "the body never resumed, so it produced no image");
-        StringAssert.Contains(errorWriter.ToString(), "\"code\":\"cancelled\"");
-
-        using var stateLock = _store.AcquireStateLock(CancellationToken.None);
-        var state = _store.Read().State!;
-        Assert.AreEqual(0, state.Waiters.Count, "the escalation's ticket must be removed");
-        Assert.AreEqual(deadlineBefore, state.IdleExpiresTick64,
-            "a command cancelled while queued never ran, so it must renew no grace — neither its own "
-                + "(it never held the turn) nor the current owner's");
-    }
-
-    [TestMethod]
     public async Task AnActiveRecordingThatFinalizesOnCancellationStillRenewsTheGrace()
     {
         // `ui record` observes Ctrl+C deliberately: it stops capturing, finalizes the MP4, and returns
@@ -662,28 +623,6 @@ public class InteractiveDesktopLockTests
             "the recording must actually observe cancellation, or this test proves nothing");
         Assert.IsTrue(ReadOwnerDeadline() > deadlineBeforeRecording,
             "a recording that finalized and returned successfully must renew its owner's idle grace");
-    }
-
-    [TestMethod]
-    public async Task EscalationAgainstUnknownNewerStateReportsCoordinationUnavailable()
-    {
-        _paths.EnsureDirectories();
-        using (var stateLock = _store.AcquireStateLock(CancellationToken.None))
-        {
-            var state = InteractiveDesktopState.CreateFresh();
-            state.Version = int.MaxValue;
-            _store.Publish(state);
-        }
-
-        var ex = await Assert.ThrowsExactlyAsync<UiCoordinationException>(() =>
-            RunAsync(UiTurnMode.Observe, "ui screenshot", async (turn, token) =>
-            {
-                await turn.EscalateToDesktopExclusiveAsync(token);
-                return 0;
-            }));
-
-        Assert.AreEqual(UiCoordinationErrorCodes.Unavailable, ex.Code,
-            "escalating against state written by a newer build must fail closed, not run uncoordinated");
     }
 
     private long ReadOwnerDeadline()
@@ -715,102 +654,4 @@ public class InteractiveDesktopLockTests
     /// keeping the lease open would publish liveness for a participant with no state entry, and
     /// completing later would adjust a different owner's turn.
     /// </remarks>
-    [TestMethod]
-    public async Task ObserveWhoseOwnerLapsesDuringAdmissionRunsFullyDetached()
-    {
-        const int parentPid = 4242;
-        const long parentStart = 777_777;
-
-        // Parent-derived ownership, so the fake inspector controls exactly when the turn lapses.
-        Environment.SetEnvironmentVariable(UiOwnerResolver.OwnerIdVariable, null);
-        var inspector = new ParentDiesAfterFirstProbeInspector(parentPid, parentStart);
-        var paths = new InteractiveDesktopPaths(inspector);
-        var participants = new ParticipantRegistry(paths, inspector, NullLogger<ParticipantRegistry>.Instance);
-        var store = new InteractiveDesktopStateStore(
-            paths, participants, new TickCountClock(), NullLogger<InteractiveDesktopStateStore>.Instance);
-        var coordinator = new InteractiveDesktopLock(
-            store, paths, participants, new UiOwnerResolver(inspector), inspector,
-            new TickCountClock(), new FakePollDelay(), new TestConsole(),
-            NullLogger<InteractiveDesktopLock>.Instance);
-
-        paths.EnsureDirectories();
-        using (var stateLock = store.AcquireStateLock(CancellationToken.None))
-        {
-            var state = InteractiveDesktopState.CreateFresh();
-            state.TurnId = 3;
-            state.Owner = new OwnerRecord
-            {
-                Kind = UiOwnerKind.Parent,
-                Key = UiOwnerResolver.ComputeParentKey(parentPid, parentStart),
-                DiagnosticParentPid = parentPid,
-                ParentStartTicksUtc = parentStart,
-            };
-            state.IdleExpiresTick64 = new TickCountClock().NowTicks64 + InteractiveDesktopScheduler.IdleGraceMs;
-            store.Publish(state);
-        }
-
-        var leaseLiveDuringBody = true;
-        var exitCode = await coordinator.RunCoordinatedAsync(
-            UiTurnMode.Observe, "ui inspect", Parse(),
-            (_, _) =>
-            {
-                // The decisive check. By teardown the lease is closed either way, so the only moment the
-                // bug is observable is while the detached body runs: a detached observation must hold no
-                // lease at all, or other processes see liveness for a participant that has no entry.
-                leaseLiveDuringBody = participants.AnyLiveParticipant();
-                return Task.FromResult(0);
-            },
-            CancellationToken.None);
-
-        Assert.AreEqual(0, exitCode, "a detached observation still runs; it simply pins nothing");
-        Assert.IsTrue(
-            inspector.ParentProbes >= 2,
-            "the test is only meaningful if the owner check and the admission both probed the parent");
-        Assert.IsFalse(
-            leaseLiveDuringBody,
-            "the lease opened before admission must be closed as soon as the admission came back detached");
-
-        using (var stateLock = store.AcquireStateLock(CancellationToken.None))
-        {
-            var state = store.Read().State!;
-            Assert.AreEqual(0, state.OwnerCommands.Count,
-                "a detached observation must publish no owner-command entry");
-        }
-
-        Assert.IsFalse(participants.AnyLiveParticipant(),
-            "the lease must also be gone once the command has finished");
-    }
-
-    /// <summary>
-    /// Reports the owning shell as alive for the first probe and gone afterwards, so a turn lapses at a
-    /// precisely known point instead of depending on wall-clock timing.
-    /// </summary>
-    private sealed class ParentDiesAfterFirstProbeInspector(int parentPid, long parentStartTicks) : IProcessInspector
-    {
-        private readonly ProcessInspector _real = new();
-
-        public int ParentProbes { get; private set; }
-
-        public int CurrentProcessId => _real.CurrentProcessId;
-
-        public long CurrentProcessStartTicksUtc => _real.CurrentProcessStartTicksUtc;
-
-        public int CurrentSessionId => _real.CurrentSessionId;
-
-        public int? TryGetParentProcessId() => parentPid;
-
-        public long? TryGetProcessStartTicksUtc(int processId)
-            => processId == parentPid ? parentStartTicks : _real.TryGetProcessStartTicksUtc(processId);
-
-        public bool? IsProcessAlive(int processId, long startTicksUtc)
-        {
-            if (processId != parentPid || startTicksUtc != parentStartTicks)
-            {
-                return _real.IsProcessAlive(processId, startTicksUtc);
-            }
-
-            ParentProbes++;
-            return ParentProbes <= 1;
-        }
-    }
 }

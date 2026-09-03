@@ -15,7 +15,7 @@ namespace WinApp.Cli.Tests;
 /// Unlike the scheduler and store suites, nothing here is faked. A real window (<see cref="UiaTestFixture"/>,
 /// hosted on this test process's UI thread, with a genuine <c>MenuStrip</c> whose drop-down Windows
 /// dismisses on foreground loss) plays the target app, and every agent is a separate real
-/// <c>winapp.exe</c> process carrying its own <c>WINAPP_UI_OWNER_ID</c>. The properties under test —
+/// <c>winapp.exe</c> process carrying its own <c>WINAPP_UI_WORKFLOW_ID</c>. The properties under test —
 /// a transient menu surviving another agent's attempt to act, a reasoning gap handing the turn away,
 /// and a recording pinning its owner — are only meaningful end to end, so they are asserted against
 /// observable desktop state rather than scheduler internals.
@@ -62,7 +62,7 @@ public class InteractiveDesktopRealAppTests : IDisposable
 
         _previousLockOverride = Environment.GetEnvironmentVariable(
             InteractiveDesktopPaths.LockDirectoryOverrideVariable);
-        _previousOwnerId = Environment.GetEnvironmentVariable(UiOwnerResolver.OwnerIdVariable);
+        _previousOwnerId = Environment.GetEnvironmentVariable(UiOwnerResolver.WorkflowIdVariable);
         Environment.SetEnvironmentVariable(
             InteractiveDesktopPaths.LockDirectoryOverrideVariable, _lockDirectory);
 
@@ -111,7 +111,7 @@ public class InteractiveDesktopRealAppTests : IDisposable
 
         Environment.SetEnvironmentVariable(
             InteractiveDesktopPaths.LockDirectoryOverrideVariable, _previousLockOverride);
-        Environment.SetEnvironmentVariable(UiOwnerResolver.OwnerIdVariable, _previousOwnerId);
+        Environment.SetEnvironmentVariable(UiOwnerResolver.WorkflowIdVariable, _previousOwnerId);
 
         foreach (var directory in new[] { _lockDirectory, _scratchDirectory })
         {
@@ -156,7 +156,7 @@ public class InteractiveDesktopRealAppTests : IDisposable
         }
 
         startInfo.Environment[InteractiveDesktopPaths.LockDirectoryOverrideVariable] = _lockDirectory;
-        startInfo.Environment[UiOwnerResolver.OwnerIdVariable] = ownerId;
+        startInfo.Environment[UiOwnerResolver.WorkflowIdVariable] = ownerId;
         startInfo.Environment["WINAPP_CLI_UPDATE_CHECK"] = "0";
 
         var process = Process.Start(startInfo)!;
@@ -195,7 +195,7 @@ public class InteractiveDesktopRealAppTests : IDisposable
     /// The persisted owner key for an explicit owner id. Raw ids never reach disk — <c>state.json</c>
     /// stores only the domain-separated SHA-256 — so tests must compare against the hash.
     /// </summary>
-    private static string KeyOf(string ownerId) => UiOwnerResolver.ComputeExplicitKey(ownerId);
+    private static string KeyOf(string ownerId) => UiOwnerResolver.ComputeWorkflowKey(ownerId);
 
     private async Task<bool> WaitForStateAsync(Func<InteractiveDesktopState, bool> predicate, int timeoutMs = 20_000)
     {

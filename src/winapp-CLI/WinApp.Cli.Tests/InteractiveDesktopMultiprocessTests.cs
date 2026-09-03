@@ -57,11 +57,11 @@ public class InteractiveDesktopMultiprocessTests
         _lockDirectory = Path.Combine(Path.GetTempPath(), $"winapp-mp-{Guid.NewGuid():N}");
         _previousLockOverride = Environment.GetEnvironmentVariable(
             InteractiveDesktopPaths.LockDirectoryOverrideVariable);
-        _previousOwnerId = Environment.GetEnvironmentVariable(UiOwnerResolver.OwnerIdVariable);
+        _previousOwnerId = Environment.GetEnvironmentVariable(UiOwnerResolver.WorkflowIdVariable);
 
         Environment.SetEnvironmentVariable(
             InteractiveDesktopPaths.LockDirectoryOverrideVariable, _lockDirectory);
-        Environment.SetEnvironmentVariable(UiOwnerResolver.OwnerIdVariable, "multiprocess-test-holder");
+        Environment.SetEnvironmentVariable(UiOwnerResolver.WorkflowIdVariable, "multiprocess-test-holder");
 
         var inspector = new ProcessInspector();
         _paths = new InteractiveDesktopPaths(inspector);
@@ -69,7 +69,7 @@ public class InteractiveDesktopMultiprocessTests
         _store = new InteractiveDesktopStateStore(
             _paths, _participants, new TickCountClock(), NullLogger<InteractiveDesktopStateStore>.Instance);
         _coordinator = new InteractiveDesktopLock(
-            _store, _paths, _participants, new UiOwnerResolver(inspector), inspector,
+            _store, _paths, _participants, new UiOwnerResolver(), inspector,
             new TickCountClock(), new FakePollDelay(), new TestConsole(),
             NullLogger<InteractiveDesktopLock>.Instance);
     }
@@ -96,7 +96,7 @@ public class InteractiveDesktopMultiprocessTests
 
         Environment.SetEnvironmentVariable(
             InteractiveDesktopPaths.LockDirectoryOverrideVariable, _previousLockOverride);
-        Environment.SetEnvironmentVariable(UiOwnerResolver.OwnerIdVariable, _previousOwnerId);
+        Environment.SetEnvironmentVariable(UiOwnerResolver.WorkflowIdVariable, _previousOwnerId);
 
         try
         {
@@ -128,7 +128,7 @@ public class InteractiveDesktopMultiprocessTests
             ArgumentList = { "ui", "click", "some-selector", "-a", "winapp-no-such-app-zzz", "--json" },
         };
         startInfo.Environment[InteractiveDesktopPaths.LockDirectoryOverrideVariable] = _lockDirectory;
-        startInfo.Environment[UiOwnerResolver.OwnerIdVariable] = ownerId;
+        startInfo.Environment[UiOwnerResolver.WorkflowIdVariable] = ownerId;
         startInfo.Environment["WINAPP_CLI_UPDATE_CHECK"] = "0";
 
         var child = Process.Start(startInfo)!;
@@ -335,7 +335,7 @@ public class InteractiveDesktopMultiprocessTests
             ArgumentList = { "ui", "list-windows", "--json" },
         };
         startInfo.Environment[InteractiveDesktopPaths.LockDirectoryOverrideVariable] = _lockDirectory;
-        startInfo.Environment[UiOwnerResolver.OwnerIdVariable] = "multiprocess-test-observer";
+        startInfo.Environment[UiOwnerResolver.WorkflowIdVariable] = "multiprocess-test-observer";
         startInfo.Environment["WINAPP_CLI_UPDATE_CHECK"] = "0";
 
         using var observer = Process.Start(startInfo)!;
@@ -394,7 +394,7 @@ public class InteractiveDesktopMultiprocessTests
     }
 
     [TestMethod]
-    public async Task AnInvalidOwnerIdIsRejectedByTheRealBinaryBeforeAnyWork()
+    public async Task AnInvalidWorkflowIdIsRejectedByTheRealBinaryBeforeAnyWork()
     {
         var startInfo = new ProcessStartInfo(_winappPath)
         {
@@ -405,7 +405,7 @@ public class InteractiveDesktopMultiprocessTests
             ArgumentList = { "ui", "click", "some-selector", "-a", "winapp-no-such-app-zzz", "--json" },
         };
         startInfo.Environment[InteractiveDesktopPaths.LockDirectoryOverrideVariable] = _lockDirectory;
-        startInfo.Environment[UiOwnerResolver.OwnerIdVariable] = "   ";
+        startInfo.Environment[UiOwnerResolver.WorkflowIdVariable] = "   ";
         startInfo.Environment["WINAPP_CLI_UPDATE_CHECK"] = "0";
 
         using var child = Process.Start(startInfo)!;
@@ -413,7 +413,7 @@ public class InteractiveDesktopMultiprocessTests
 
         var output = child.StandardError.ReadToEnd() + child.StandardOutput.ReadToEnd();
         Assert.AreEqual(1, child.ExitCode);
-        StringAssert.Contains(output, UiCoordinationErrorCodes.InvalidOwnerId);
+        StringAssert.Contains(output, UiCoordinationErrorCodes.InvalidWorkflowId);
         Assert.IsFalse(_participants.AnyLiveParticipant(), "a rejected command must leave no lease behind");
 
         await Task.CompletedTask;

@@ -140,62 +140,18 @@ public partial class UiCommandTests
     }
 
     [TestMethod]
-    public async Task Screenshot_ClassifiesByWhetherItNeedsTheForeground()
+    public async Task Screenshot_IsAlwaysDesktopExclusive()
     {
         _fakeUia.ScreenshotResult = (new byte[4 * 4 * 4], 4, 4);
         var output = Path.Combine(_tempDirectory.FullName, "shot.png");
         var command = GetRequiredService<UiScreenshotCommand>();
 
         await ParseAndInvokeWithCaptureAsync(command, ["-a", "TestApp", "--output", output, "--json"]);
-        Assert.AreEqual(UiTurnMode.Observe, _fakeDesktopLock.Runs[0].Mode);
+        Assert.AreEqual(UiTurnMode.DesktopExclusive, _fakeDesktopLock.Runs[0].Mode);
 
         _fakeDesktopLock.Runs.Clear();
         await ParseAndInvokeWithCaptureAsync(command, ["-a", "TestApp", "--focus", "--output", output, "--json"]);
         Assert.AreEqual(UiTurnMode.DesktopExclusive, _fakeDesktopLock.Runs[0].Mode);
-    }
-
-    [TestMethod]
-    public async Task Screenshot_LetsACancelledEscalationEscapeInsteadOfReportingAnInternalError()
-    {
-        // The handler's catch-all must not swallow cancellation raised by escalation: the user would see
-        // internal_error instead of a cancellation, and the coordinator would treat the body as having
-        // completed and renew the owner's grace for a command that never captured anything.
-        _fakeUia.ScreenshotResult = (new byte[4 * 4 * 4], 4, 4);
-        _fakeUia.ScreenshotThrow = new WinApp.Cli.Services.DesktopEscalationRequiredException("the target window is minimized");
-        _fakeDesktopLock.ThrowOnEscalation = new OperationCanceledException();
-
-        var command = GetRequiredService<UiScreenshotCommand>();
-        var output = Path.Combine(_tempDirectory.FullName, "cancelled.png");
-        _ = await ParseAndInvokeWithCaptureAsync(
-            command, ["-a", "TestApp", "--output", output, "--json"]);
-
-        var emitted = $"{ConsoleStdOut}{ConsoleStdErr}";
-        Assert.AreEqual(1, _fakeDesktopLock.Escalations, "the observational pass must have forced an escalation");
-        Assert.IsTrue(
-            string.IsNullOrWhiteSpace(emitted),
-            "the handler must report nothing for a cancelled escalation and let it propagate, so the "
-                + $"coordinator can emit the structured cancellation and exit 130. It emitted: {emitted}");
-        Assert.IsFalse(File.Exists(output), "a cancelled capture must publish no image");
-    }
-
-    [TestMethod]
-    public async Task Screenshot_ReportsCoordinationUnavailableRatherThanInternalErrorWhenEscalationFails()
-    {
-        _fakeUia.ScreenshotResult = (new byte[4 * 4 * 4], 4, 4);
-        _fakeUia.ScreenshotThrow = new WinApp.Cli.Services.DesktopEscalationRequiredException("the target window is minimized");
-        _fakeDesktopLock.ThrowOnEscalation = new UiCoordinationException(
-            UiCoordinationErrorCodes.Unavailable, "newer state", "update winapp");
-
-        var command = GetRequiredService<UiScreenshotCommand>();
-        var output = Path.Combine(_tempDirectory.FullName, "unavailable.png");
-
-        var exitCode = await ParseAndInvokeWithCaptureAsync(
-            command, ["-a", "TestApp", "--output", output, "--json"]);
-
-        Assert.AreEqual(1, exitCode);
-        StringAssert.Contains($"{ConsoleStdOut}{ConsoleStdErr}", UiCoordinationErrorCodes.Unavailable,
-            "a coordination failure must keep its own error code and remediation");
-        Assert.IsFalse(File.Exists(output), "no image may be published when escalation was refused");
     }
 
     // ------------------------------------------------- desktop-section placement and revalidation
@@ -296,7 +252,7 @@ public partial class UiCommandTests
     {
         // With no --target the session HWND was captured before the queue wait, so it needs the same
         // check: nothing re-resolves it on the way in.
-        _fakeSession.SessionResult = new UiSessionInfo
+        _fakeTargetResolver.TargetResult = new UiTarget
         {
             ProcessId = 1234,
             ProcessName = "TestApp",
@@ -451,7 +407,7 @@ public partial class UiCommandTests
         // `ui record` opens its desktop section from inside the handler's broad catch-all. Without the
         // IsCoordinationFault filter, an active.lock failure was reported as `internal_error` and — worse
         // — looked to the coordinator like a normal body return, renewing the owner's idle grace.
-        _fakeUia.RecordException = new UiCoordinationException(
+        _fakeRecording.RecordException = new UiCoordinationException(
             UiCoordinationErrorCodes.Unavailable, "The UI desktop lock could not be opened.");
 
         var outputPath = Path.Combine(_tempDirectory.FullName, "coordination-fault.mp4");
@@ -468,7 +424,7 @@ public partial class UiCommandTests
     {
         // The filter must be narrow: only coordination faults escape. An ordinary capture failure keeps
         // its existing handler-owned envelope and never turns into a coordination error.
-        _fakeUia.RecordException = new InvalidOperationException("encoder blew up");
+        _fakeRecording.RecordException = new InvalidOperationException("encoder blew up");
 
         var outputPath = Path.Combine(_tempDirectory.FullName, "ordinary-fault.mp4");
         var command = GetRequiredService<UiRecordCommand>();
@@ -503,7 +459,7 @@ public partial class UiCommandTests
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
 
-        _fakeUia.RecordException = new OperationCanceledException(cts.Token);
+        _fakeRecording.RecordException = new OperationCanceledException(cts.Token);
 
         var outputPath = Path.Combine(_tempDirectory.FullName, "cancelled-pre-start.mp4");
         var command = GetRequiredService<UiRecordCommand>();
@@ -528,8 +484,8 @@ public partial class UiCommandTests
         // The positive half of the same contract, kept explicit so the fix above cannot be "simplified"
         // into propagating every cancellation: an ACTIVE recording observes Ctrl+C, finalizes its MP4 and
         // returns success. That is a completed command and must keep renewing the owner's grace.
-        _fakeUia.RecordResult = new RecordCaptureResult { Frames = 3, Width = 64, Height = 64, Mode = "wgc" };
-        _fakeUia.RecordShouldWaitForCancellation = true;
+        _fakeRecording.RecordResult = new RecordCaptureResult { Frames = 3, Width = 64, Height = 64, Mode = "wgc" };
+        _fakeRecording.RecordShouldWaitForCancellation = true;
 
         using var stdin = new StringReader("stop");
         UiRecordCommand.Handler.s_isInputRedirectedOverride = () => true;
@@ -549,7 +505,7 @@ public partial class UiCommandTests
         {
             UiRecordCommand.Handler.s_isInputRedirectedOverride = null;
             UiRecordCommand.Handler.s_stdinOverride = null;
-            _fakeUia.RecordShouldWaitForCancellation = false;
+            _fakeRecording.RecordShouldWaitForCancellation = false;
         }
     }
 
@@ -571,7 +527,7 @@ public partial class UiCommandTests
 
         // First gate (before focus) passes; the second (after focus) denies, modelling the drift.
         _fakeForeground.DenyOnCallNumber = 2;
-        _fakeForeground.DenyCode = UiJsonError.CodeForegroundNotTarget;
+        _fakeForeground.DenyReason = ForegroundCheck.ForegroundNotTarget;
         _fakeUia.OnFocus = () => { /* a focus handler activates a decoy window */ };
 
         var command = GetRequiredService<UiSendKeysCommand>();

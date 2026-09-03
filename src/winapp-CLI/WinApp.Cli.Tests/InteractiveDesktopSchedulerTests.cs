@@ -18,8 +18,8 @@ public class InteractiveDesktopSchedulerTests
     private FakeLivenessProbe _probe = null!;
     private InteractiveDesktopScheduler _scheduler = null!;
 
-    private static readonly UiOwnerIdentity OwnerA = new(UiOwnerKind.Explicit, "aaaa", null, null);
-    private static readonly UiOwnerIdentity OwnerB = new(UiOwnerKind.Explicit, "bbbb", null, null);
+    private static readonly UiOwnerIdentity OwnerA = new(UiOwnerKind.Workflow, "aaaa");
+    private static readonly UiOwnerIdentity OwnerB = new(UiOwnerKind.Workflow, "bbbb");
 
     [TestInitialize]
     public void Setup()
@@ -422,7 +422,7 @@ public class InteractiveDesktopSchedulerTests
 
         var deadWaiter = Participant(200);
         _scheduler.BeginParticipating(state, _probe, OwnerB, deadWaiter, UiTurnMode.DesktopExclusive);
-        var ownerC = new UiOwnerIdentity(UiOwnerKind.Explicit, "cccc", null, null);
+        var ownerC = new UiOwnerIdentity(UiOwnerKind.Workflow, "cccc");
         var liveWaiter = Participant(300);
         _scheduler.BeginParticipating(state, _probe, ownerC, liveWaiter, UiTurnMode.DesktopExclusive);
 
@@ -491,7 +491,7 @@ public class InteractiveDesktopSchedulerTests
     public void AnonymousOwner_ReceivesNoGraceAndHandsOffImmediately()
     {
         var state = InteractiveDesktopState.CreateFresh();
-        var anonymous = new UiOwnerIdentity(UiOwnerKind.Anonymous, "anon", null, null);
+        var anonymous = new UiOwnerIdentity(UiOwnerKind.Anonymous, "anon");
         var actor = Participant(100);
         _scheduler.BeginParticipating(state, _probe, anonymous, actor, UiTurnMode.DesktopExclusive);
         var waiter = Participant(200);
@@ -502,38 +502,6 @@ public class InteractiveDesktopSchedulerTests
 
         Assert.AreEqual(OwnerB.Key, state.Owner!.Key,
             "a one-command owner has no shell that could issue a follow-up, so it hands off at once");
-    }
-
-    [TestMethod]
-    public void ParentDerivedOwner_ReleasesImmediatelyWhenItsShellIsGone()
-    {
-        var state = InteractiveDesktopState.CreateFresh();
-        var parentOwner = new UiOwnerIdentity(UiOwnerKind.Parent, "parent", 900, 900);
-        var actor = Participant(100);
-        _scheduler.BeginParticipating(state, _probe, parentOwner, actor, UiTurnMode.DesktopExclusive);
-        _probe.Alive.Remove((actor.ProcessId, actor.StartTicksUtc));
-        _scheduler.CompleteCommand(state, _probe, actor, parentOwner, renewGrace: true);
-
-        _probe.DeadParents.Add((900, 900));
-        _scheduler.Normalize(state, _probe);
-
-        Assert.IsNull(state.Owner, "no further command can arrive from a shell that has exited");
-    }
-
-    [TestMethod]
-    public void ParentDerivedOwner_KeepsGraceWhenParentLivenessIsUnknown()
-    {
-        var state = InteractiveDesktopState.CreateFresh();
-        var parentOwner = new UiOwnerIdentity(UiOwnerKind.Parent, "parent", 900, 900);
-        var actor = Participant(100);
-        _scheduler.BeginParticipating(state, _probe, parentOwner, actor, UiTurnMode.DesktopExclusive);
-        _probe.Alive.Remove((actor.ProcessId, actor.StartTicksUtc));
-        _scheduler.CompleteCommand(state, _probe, actor, parentOwner, renewGrace: true);
-
-        _probe.UnknownParents.Add((900, 900));
-        _scheduler.Normalize(state, _probe);
-
-        Assert.IsNotNull(state.Owner, "an unreadable parent must never be treated as a dead one");
     }
 
     // ------------------------------------------------------------------------------ pruning rules
@@ -564,7 +532,7 @@ public class InteractiveDesktopSchedulerTests
         // for dead and nothing can overtake it (spec §19).
         var suspended = Participant(200);
         _scheduler.BeginParticipating(state, _probe, OwnerB, suspended, UiTurnMode.DesktopExclusive);
-        var ownerC = new UiOwnerIdentity(UiOwnerKind.Explicit, "cccc", null, null);
+        var ownerC = new UiOwnerIdentity(UiOwnerKind.Workflow, "cccc");
         _scheduler.BeginParticipating(state, _probe, ownerC, Participant(300), UiTurnMode.DesktopExclusive);
 
         _probe.Alive.Remove((actor.ProcessId, actor.StartTicksUtc));
@@ -591,7 +559,7 @@ public class InteractiveDesktopSchedulerTests
             var waiter = Participant(1_000 + i);
             queued.Add(waiter);
             _scheduler.BeginParticipating(
-                state, _probe, new UiOwnerIdentity(UiOwnerKind.Explicit, $"owner{i}", null, null),
+                state, _probe, new UiOwnerIdentity(UiOwnerKind.Workflow, $"owner{i}"),
                 waiter, UiTurnMode.DesktopExclusive);
         }
 
@@ -613,7 +581,7 @@ public class InteractiveDesktopSchedulerTests
         for (var i = 0; i < InteractiveDesktopScheduler.MaxGlobalWaiters; i++)
         {
             _scheduler.BeginParticipating(
-                state, _probe, new UiOwnerIdentity(UiOwnerKind.Explicit, $"owner{i}", null, null),
+                state, _probe, new UiOwnerIdentity(UiOwnerKind.Workflow, $"owner{i}"),
                 Participant(1_000 + i), UiTurnMode.DesktopExclusive);
         }
 
@@ -670,7 +638,7 @@ public class InteractiveDesktopSchedulerTests
         // Queue order B, B, C: nothing separates the two B commands, so both may be absorbed.
         var firstB = Participant(200);
         var secondB = Participant(201);
-        var ownerC = new UiOwnerIdentity(UiOwnerKind.Explicit, "cccc", null, null);
+        var ownerC = new UiOwnerIdentity(UiOwnerKind.Workflow, "cccc");
         var firstC = Participant(300);
         _scheduler.BeginParticipating(state, _probe, OwnerB, firstB, UiTurnMode.DesktopExclusive);
         _scheduler.BeginParticipating(state, _probe, OwnerB, secondB, UiTurnMode.DesktopExclusive);
@@ -696,7 +664,7 @@ public class InteractiveDesktopSchedulerTests
         // Queue order B, C, B. Absorbing the trailing B would let it run before C even though C has the
         // older ticket, which would break strict global FIFO.
         var firstB = Participant(200);
-        var ownerC = new UiOwnerIdentity(UiOwnerKind.Explicit, "cccc", null, null);
+        var ownerC = new UiOwnerIdentity(UiOwnerKind.Workflow, "cccc");
         var firstC = Participant(300);
         var secondB = Participant(201);
         _scheduler.BeginParticipating(state, _probe, OwnerB, firstB, UiTurnMode.DesktopExclusive);
@@ -721,43 +689,6 @@ public class InteractiveDesktopSchedulerTests
     }
 
     // ---------------------------------------------------------------------------- escalation
-
-    [TestMethod]
-    public void Escalation_ConvertsTheObservationInPlaceWithANewTicket()
-    {
-        var state = InteractiveDesktopState.CreateFresh();
-        var actor = Participant(100);
-        _scheduler.BeginParticipating(state, _probe, OwnerA, actor, UiTurnMode.DesktopExclusive);
-        _probe.Alive.Remove((actor.ProcessId, actor.StartTicksUtc));
-        _scheduler.CompleteCommand(state, _probe, actor, OwnerA, renewGrace: true);
-
-        var screenshot = Participant(101, "ui screenshot");
-        _scheduler.BeginObserve(state, _probe, OwnerA, screenshot);
-        var beforeTicket = state.NextTicket;
-
-        Assert.IsTrue(_scheduler.EscalateObserveToExclusive(state, _probe, screenshot));
-
-        var entry = InteractiveDesktopScheduler.FindOwnerCommand(state, screenshot)!;
-        Assert.AreEqual(UiTurnMode.DesktopExclusive, entry.Mode);
-        Assert.AreEqual(beforeTicket, entry.Ticket,
-            "priority starts at escalation time, not when the observational pass began");
-        Assert.AreEqual(1, state.OwnerCommands.Count,
-            "the same entry is reused, so no intermediate state lacks this command");
-    }
-
-    [TestMethod]
-    public void Escalation_QueuesBehindAnEarlierExclusiveCommand()
-    {
-        var state = InteractiveDesktopState.CreateFresh();
-        _scheduler.BeginParticipating(state, _probe, OwnerA, Participant(100), UiTurnMode.DesktopExclusive);
-        var screenshot = Participant(101, "ui screenshot");
-        _scheduler.BeginObserve(state, _probe, OwnerA, screenshot);
-
-        _scheduler.EscalateObserveToExclusive(state, _probe, screenshot);
-
-        Assert.AreEqual(UiCommandStatus.Waiting,
-            InteractiveDesktopScheduler.FindOwnerCommand(state, screenshot)!.Status);
-    }
 
     // -------------------------------------------------------------------------- ticket monotonicity
 
@@ -787,7 +718,7 @@ public class InteractiveDesktopSchedulerTests
         // a deadline far beyond the new uptime; without clamping, the owner that died with the previous
         // boot would hold the desktop until the machine had been up just as long again.
         var state = InteractiveDesktopState.CreateFresh();
-        state.Owner = new OwnerRecord { Kind = UiOwnerKind.Explicit, Key = OwnerA.Key };
+        state.Owner = new OwnerRecord { Kind = UiOwnerKind.Workflow, Key = OwnerA.Key };
         state.TurnId = 7;
         state.IdleExpiresTick64 = _clock.NowTicks64 + (long)TimeSpan.FromDays(5).TotalMilliseconds;
 
@@ -801,7 +732,7 @@ public class InteractiveDesktopSchedulerTests
     public void PriorBootDeadline_PromotesAWaitingOwnerImmediately()
     {
         var state = InteractiveDesktopState.CreateFresh();
-        state.Owner = new OwnerRecord { Kind = UiOwnerKind.Explicit, Key = OwnerA.Key };
+        state.Owner = new OwnerRecord { Kind = UiOwnerKind.Workflow, Key = OwnerA.Key };
         state.TurnId = 7;
         state.NextTicket = 1;
         state.IdleExpiresTick64 = _clock.NowTicks64 + (long)TimeSpan.FromDays(5).TotalMilliseconds;
@@ -845,7 +776,7 @@ public class InteractiveDesktopSchedulerTests
         var graceBefore = state.IdleExpiresTick64;
         Assert.IsNotNull(state.Owner);
 
-        var anonymous = new UiOwnerIdentity(UiOwnerKind.Anonymous, "anon", null, null);
+        var anonymous = new UiOwnerIdentity(UiOwnerKind.Anonymous, "anon");
         var stranger = Participant(200);
         _scheduler.BeginParticipating(state, _probe, anonymous, stranger, UiTurnMode.DesktopExclusive);
         _probe.Alive.Remove((stranger.ProcessId, stranger.StartTicksUtc));
@@ -898,6 +829,139 @@ public class InteractiveDesktopSchedulerTests
             "a burst from the owner keeps renewing its own grace");
     }
 
+
+    [TestMethod]
+    public void WorkflowOwner_KeepsFourSecondGraceAfterCompletion()
+    {
+        var state = InteractiveDesktopState.CreateFresh();
+        var actor = Participant(100);
+
+        _scheduler.BeginParticipating(state, _probe, OwnerA, actor, UiTurnMode.DesktopExclusive);
+        _probe.Alive.Remove((actor.ProcessId, actor.StartTicksUtc));
+        _scheduler.CompleteCommand(state, _probe, actor, OwnerA, renewGrace: true);
+
+        Assert.AreEqual(_clock.NowTicks64 + InteractiveDesktopScheduler.IdleGraceMs, state.IdleExpiresTick64);
+        Assert.AreEqual(OwnerA.Key, state.Owner!.Key);
+    }
+
+    [TestMethod]
+    public void AnonymousOwner_SetsDeadlineToNowOnCompletion()
+    {
+        var state = InteractiveDesktopState.CreateFresh();
+        var anonymous = new UiOwnerIdentity(UiOwnerKind.Anonymous, "anon-a");
+        var actor = Participant(100);
+
+        _scheduler.BeginParticipating(state, _probe, anonymous, actor, UiTurnMode.DesktopExclusive);
+        _probe.Alive.Remove((actor.ProcessId, actor.StartTicksUtc));
+        _scheduler.CompleteCommand(state, _probe, actor, anonymous, renewGrace: true);
+
+        Assert.IsNull(state.Owner, "normalization should expire the now-deadline immediately");
+        Assert.AreEqual(0, state.IdleExpiresTick64);
+    }
+
+    [TestMethod]
+    public void UiOwnerResolver_NoWorkflowId_MintsDistinctAnonymousOwners()
+    {
+        var previous = Environment.GetEnvironmentVariable(UiOwnerResolver.WorkflowIdVariable);
+        Environment.SetEnvironmentVariable(UiOwnerResolver.WorkflowIdVariable, null);
+        try
+        {
+            var resolver = new UiOwnerResolver();
+            var first = resolver.Resolve();
+            var second = resolver.Resolve();
+
+            Assert.AreEqual(UiOwnerKind.Anonymous, first.Kind);
+            Assert.AreEqual(UiOwnerKind.Anonymous, second.Kind);
+            Assert.AreNotEqual(first.Key, second.Key);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(UiOwnerResolver.WorkflowIdVariable, previous);
+        }
+    }
+
+    [TestMethod]
+    public void AnonymousTurnShared_BlocksDifferentAnonymousDesktopExclusive()
+    {
+        var state = InteractiveDesktopState.CreateFresh();
+        var recordingOwner = new UiOwnerIdentity(UiOwnerKind.Anonymous, "anon-record");
+        var clickOwner = new UiOwnerIdentity(UiOwnerKind.Anonymous, "anon-click");
+
+        _scheduler.BeginParticipating(state, _probe, recordingOwner, Participant(100, "ui record"), UiTurnMode.TurnShared);
+        var click = _scheduler.BeginParticipating(
+            state, _probe, clickOwner, Participant(200, "ui click"), UiTurnMode.DesktopExclusive);
+
+        Assert.AreEqual(UiAdmission.GlobalWaiter, click.Admission);
+        Assert.AreEqual(recordingOwner.Key, state.Owner!.Key);
+    }
+
+    [TestMethod]
+    public void SameWorkflowTurnSharedAndDesktopExclusiveOverlap()
+    {
+        var state = InteractiveDesktopState.CreateFresh();
+
+        var record = _scheduler.BeginParticipating(
+            state, _probe, OwnerA, Participant(100, "ui record"), UiTurnMode.TurnShared);
+        var click = _scheduler.BeginParticipating(
+            state, _probe, OwnerA, Participant(101, "ui click"), UiTurnMode.DesktopExclusive);
+
+        Assert.AreEqual(UiAdmission.OwnerCommandRunning, record.Admission);
+        Assert.AreEqual(UiAdmission.OwnerCommandRunning, click.Admission);
+        Assert.AreEqual(0, state.Waiters.Count);
+    }
+
+    [TestMethod]
+    public void CurrentOwnerAffinityBeatsForeignWaiterUntilOwnerYields()
+    {
+        var state = InteractiveDesktopState.CreateFresh();
+        var first = Participant(100);
+        _scheduler.BeginParticipating(state, _probe, OwnerA, first, UiTurnMode.DesktopExclusive);
+        var foreignB = Participant(200);
+        _scheduler.BeginParticipating(state, _probe, OwnerB, foreignB, UiTurnMode.DesktopExclusive);
+
+        _probe.Alive.Remove((first.ProcessId, first.StartTicksUtc));
+        _scheduler.CompleteCommand(state, _probe, first, OwnerA, renewGrace: true);
+
+        var returning = _scheduler.BeginParticipating(
+            state, _probe, OwnerA, Participant(101), UiTurnMode.DesktopExclusive);
+        Assert.AreEqual(UiAdmission.OwnerCommandRunning, returning.Admission,
+            "same workflow continuation joins during grace instead of queueing behind a foreign waiter");
+
+        var ownerC = new UiOwnerIdentity(UiOwnerKind.Workflow, "cccc");
+        var foreignC = Participant(300);
+        _scheduler.BeginParticipating(state, _probe, ownerC, foreignC, UiTurnMode.DesktopExclusive);
+
+        foreach (var command in state.OwnerCommands.ToArray())
+        {
+            _probe.Alive.Remove((command.Pid, command.ProcessStartTicksUtc));
+            _scheduler.CompleteCommand(
+                state,
+                _probe,
+                new UiParticipantIdentity(command.Pid, command.ProcessStartTicksUtc, command.Operation),
+                OwnerA,
+                renewGrace: false);
+        }
+
+        Assert.AreEqual(OwnerB.Key, state.Owner!.Key, "foreign waiters remain FIFO after the current owner yields");
+        Assert.IsNotNull(InteractiveDesktopScheduler.FindWaiter(state, foreignC));
+    }
+
+    [TestMethod]
+    public void PersistedGraceSurvivesWithoutLiveLease()
+    {
+        var state = InteractiveDesktopState.CreateFresh();
+        var actor = Participant(100);
+        _scheduler.BeginParticipating(state, _probe, OwnerA, actor, UiTurnMode.DesktopExclusive);
+
+        _probe.Alive.Remove((actor.ProcessId, actor.StartTicksUtc));
+        _scheduler.CompleteCommand(state, _probe, actor, OwnerA, renewGrace: true);
+        _scheduler.Normalize(state, _probe);
+
+        Assert.AreEqual(OwnerA.Key, state.Owner!.Key);
+        Assert.AreEqual(0, state.OwnerCommands.Count);
+    }
+
+
     private sealed class FakeClock : IMonotonicClock
     {
         private long _ticks = 1_000_000;
@@ -921,21 +985,7 @@ public class InteractiveDesktopSchedulerTests
     {
         public HashSet<(int Pid, long Start)> Alive { get; } = [];
 
-        public HashSet<(int Pid, long Start)> DeadParents { get; } = [];
-
-        public HashSet<(int Pid, long Start)> UnknownParents { get; } = [];
-
         public bool IsParticipantLive(int processId, long startTicksUtc)
             => Alive.Contains((processId, startTicksUtc));
-
-        public bool? IsParentAlive(int processId, long startTicksUtc)
-        {
-            if (UnknownParents.Contains((processId, startTicksUtc)))
-            {
-                return null;
-            }
-
-            return !DeadParents.Contains((processId, startTicksUtc));
-        }
     }
 }

@@ -199,9 +199,9 @@ public class InteractiveDesktopStoreTests
     {
         // Ticket 5 appearing in both lists would make two commands share one barrier position.
         WriteRawState("""
-            {"version":1,"turnId":1,"nextTicket":9,"owner":{"kind":"explicit","key":"a"},
+            {"version":1,"turnId":1,"nextTicket":9,"owner":{"kind":"workflow","key":"a"},
              "ownerCommands":[{"ticket":5,"pid":10,"processStartTicksUtc":1,"operation":"ui click","mode":"DesktopExclusive","status":"running"}],
-             "waiters":[{"ticket":5,"ownerKey":"b","ownerKind":"explicit","pid":11,"processStartTicksUtc":2,"operation":"ui click","mode":"DesktopExclusive"}]}
+             "waiters":[{"ticket":5,"ownerKey":"b","ownerKind":"workflow","pid":11,"processStartTicksUtc":2,"operation":"ui click","mode":"DesktopExclusive"}]}
             """);
 
         AssertRecovered();
@@ -212,7 +212,7 @@ public class InteractiveDesktopStoreTests
     {
         // nextTicket 5 would re-issue ticket 5 and collide with the running command.
         WriteRawState("""
-            {"version":1,"turnId":1,"nextTicket":5,"owner":{"kind":"explicit","key":"a"},
+            {"version":1,"turnId":1,"nextTicket":5,"owner":{"kind":"workflow","key":"a"},
              "ownerCommands":[{"ticket":5,"pid":10,"processStartTicksUtc":1,"operation":"ui click","mode":"DesktopExclusive","status":"running"}],
              "waiters":[]}
             """);
@@ -238,7 +238,7 @@ public class InteractiveDesktopStoreTests
         // Observations never serialize as barriers, so a ticket on one is meaningless and would be
         // compared against real barrier tickets.
         WriteRawState("""
-            {"version":1,"turnId":1,"nextTicket":9,"owner":{"kind":"explicit","key":"a"},
+            {"version":1,"turnId":1,"nextTicket":9,"owner":{"kind":"workflow","key":"a"},
              "ownerCommands":[{"ticket":5,"pid":10,"processStartTicksUtc":1,"operation":"ui inspect","mode":"Observe","status":"running"}],
              "waiters":[]}
             """);
@@ -250,7 +250,7 @@ public class InteractiveDesktopStoreTests
     public void Read_OutOfRangeEnumValue_IsCorrupt()
     {
         WriteRawState("""
-            {"version":1,"turnId":1,"nextTicket":9,"owner":{"kind":"explicit","key":"a"},
+            {"version":1,"turnId":1,"nextTicket":9,"owner":{"kind":"workflow","key":"a"},
              "ownerCommands":[{"ticket":5,"pid":10,"processStartTicksUtc":1,"operation":"ui click","mode":42,"status":"running"}],
              "waiters":[]}
             """);
@@ -265,7 +265,7 @@ public class InteractiveDesktopStoreTests
     {
         _paths.EnsureDirectories();
         WriteRawState("""
-            {"version":1,"turnId":3,"nextTicket":9,"owner":{"kind":"explicit","key":"a","futureOwnerField":"keep-me"},
+            {"version":1,"turnId":3,"nextTicket":9,"owner":{"kind":"workflow","key":"a","futureOwnerField":"keep-me"},
              "ownerCommands":[],"waiters":[],"futureRootField":{"nested":true}}
             """);
 
@@ -525,10 +525,6 @@ public class InteractiveDesktopStoreTests
         public int CurrentProcessId => _real.CurrentProcessId;
 
         public long CurrentProcessStartTicksUtc => _real.CurrentProcessStartTicksUtc;
-
-        public int? TryGetParentProcessId() => _real.TryGetParentProcessId();
-
-        public long? TryGetProcessStartTicksUtc(int processId) => _real.TryGetProcessStartTicksUtc(processId);
 
         public bool? IsProcessAlive(int processId, long startTicksUtc) => _real.IsProcessAlive(processId, startTicksUtc);
     }

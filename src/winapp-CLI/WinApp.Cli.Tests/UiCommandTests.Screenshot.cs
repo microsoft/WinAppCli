@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using WinApp.Cli.Commands;
+using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.Tests;
 
@@ -54,6 +55,10 @@ public partial class UiCommandTests
         StringAssert.Contains(TestAnsiConsole.Output, "\"windows\":");
         StringAssert.Contains(TestAnsiConsole.Output, "\"captured\": true");
         Assert.IsTrue(File.Exists(path));
+        Assert.AreEqual(1, _fakeDesktopLock.DesktopSectionEnters,
+            "the whole multi-window capture pass must run inside one desktop section");
+        Assert.AreEqual(0, _fakeDesktopLock.OpenDesktopSections,
+            "the section must be closed before the command reports the written file");
     }
 
     [TestMethod]
@@ -87,6 +92,20 @@ public partial class UiCommandTests
 
         Assert.AreEqual(1, exitCode);
         StringAssert.Contains(TestAnsiConsole.Output, "✗");
+    }
+
+    [TestMethod]
+    public async Task Screenshot_ForegroundLost_WritesNoArtifact()
+    {
+        _fakeUia.ScreenshotThrow = new ForegroundLostException("target lost foreground");
+        var path = ShotPath();
+
+        var command = GetRequiredService<UiScreenshotCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-a", "TestApp", "--capture-screen", "--json", "-o", path]);
+
+        Assert.AreEqual(1, exitCode);
+        AssertJsonErrorCodeIn(ConsoleStdErr.ToString(), UiJsonError.CodeForegroundNotTarget);
+        Assert.IsFalse(File.Exists(path));
     }
 
     [TestMethod]

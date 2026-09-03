@@ -132,7 +132,7 @@ public partial class RealRecordingTests
             Fps = 2,
             MaxEdge = 64,
             CaptureScreen = false,
-        }, NullDesktopSection.Instance, CancellationToken.None, _ => started++);
+        }, CancellationToken.None, _ => started++);
 
         Assert.AreEqual("wgc", result.Mode);
         Assert.AreEqual(2, result.Frames);
@@ -174,7 +174,7 @@ public partial class RealRecordingTests
             Fps = 5,
             MaxEdge = 0,
             CaptureScreen = false,
-        }, NullDesktopSection.Instance, CancellationToken.None);
+        }, CancellationToken.None);
 
         Assert.AreEqual(1, result.Frames, "closed WGC items should drain the cached frame once before finalizing");
         Assert.AreEqual("wgc", result.Mode);
@@ -208,7 +208,7 @@ public partial class RealRecordingTests
             Fps = 1,
             MaxEdge = 64,
             CaptureScreen = true,
-        }, NullDesktopSection.Instance, CancellationToken.None);
+        }, CancellationToken.None);
 
         Assert.AreEqual("screen", result.Mode);
         Assert.AreEqual(1, result.Frames);
@@ -243,7 +243,7 @@ public partial class RealRecordingTests
             Fps = 1,
             MaxEdge = 64,
             CaptureScreen = false,
-        }, NullDesktopSection.Instance, CancellationToken.None);
+        }, CancellationToken.None);
 
         Assert.AreEqual("printwindow", result.Mode);
         Assert.AreEqual(1, result.Frames);
@@ -279,7 +279,7 @@ public partial class RealRecordingTests
             Fps = 2,
             MaxEdge = 64,
             CaptureScreen = false,
-        }, NullDesktopSection.Instance, CancellationToken.None);
+        }, CancellationToken.None);
 
         Assert.AreEqual(2, result.Frames);
         Assert.IsNotNull(result.FrameArtifacts);
@@ -321,7 +321,7 @@ public partial class RealRecordingTests
                 DurationSec = 1,
                 Fps = 1,
                 MaxEdge = 64,
-            }, NullDesktopSection.Instance, CancellationToken.None));
+            }, CancellationToken.None));
 
         Assert.IsNotNull(exception.FramesDirectory);
         StringAssert.StartsWith(exception.FramesDirectory, framesDirectory + ".partial-");
@@ -369,7 +369,7 @@ public partial class RealRecordingTests
                 DurationSec = 1,
                 Fps = 1,
                 MaxEdge = 64,
-            }, NullDesktopSection.Instance, CancellationToken.None));
+            }, CancellationToken.None));
 
         Assert.AreEqual("winning recording", await File.ReadAllTextAsync(output));
         Assert.IsFalse(Directory.Exists(framesDirectory));
@@ -411,7 +411,7 @@ public partial class RealRecordingTests
                 DurationSec = 1,
                 Fps = 1,
                 MaxEdge = 64,
-            }, NullDesktopSection.Instance, CancellationToken.None));
+            }, CancellationToken.None));
 
         StringAssert.Contains(exception.InnerException!.Message, "frame failure");
         Assert.IsFalse(Directory.EnumerateFileSystemEntries(root).Any());
@@ -454,7 +454,7 @@ public partial class RealRecordingTests
             DurationSec = 10,
             Fps = 1,
             MaxEdge = 64,
-        }, NullDesktopSection.Instance, cts.Token);
+        }, cts.Token);
 
         Assert.AreEqual(1, result.Frames);
         Assert.AreEqual(1, frameSink.SampleCount);
@@ -494,7 +494,7 @@ public partial class RealRecordingTests
                 DurationSec = 1,
                 Fps = 1,
                 MaxEdge = 64,
-            }, NullDesktopSection.Instance, CancellationToken.None));
+            }, CancellationToken.None));
 
         Assert.AreEqual(output, exception.VideoPath);
         Assert.IsTrue(File.Exists(output));
@@ -544,7 +544,7 @@ public partial class RealRecordingTests
                 DurationSec = 1,
                 Fps = 1,
                 MaxEdge = 64,
-            }, NullDesktopSection.Instance, CancellationToken.None));
+            }, CancellationToken.None));
 
         Assert.AreEqual(output, exception.VideoPath);
         Assert.IsTrue(File.Exists(output));
@@ -581,7 +581,7 @@ public partial class RealRecordingTests
             DurationSec = 1,
             Fps = 1,
             MaxEdge = 64,
-        }, NullDesktopSection.Instance, CancellationToken.None);
+        }, CancellationToken.None);
 
         Assert.IsNotNull(result.FrameArtifacts);
         Assert.IsTrue(result.FrameArtifacts.Truncated);

@@ -24,7 +24,7 @@ namespace WinApp.Cli.Tests;
 /// </remarks>
 public partial class UiCommandTests
 {
-    private static CaptureForegroundNotTargetException CaptureRefusal()
+    private static ForegroundLostException CaptureRefusal()
         => new("Target window is not in the foreground — refusing to capture the screen.");
 
     [TestMethod]
@@ -46,7 +46,7 @@ public partial class UiCommandTests
     [TestMethod]
     public async Task Record_CaptureScreenForegroundRefused_ReportsForegroundNotTarget()
     {
-        _fakeUia.RecordException = CaptureRefusal();
+        _fakeRecording.RecordException = CaptureRefusal();
 
         var outputPath = Path.Combine(_tempDirectory.FullName, "decoy.mp4");
         var command = GetRequiredService<UiRecordCommand>();

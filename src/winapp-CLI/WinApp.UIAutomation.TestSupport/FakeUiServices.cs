@@ -206,8 +206,12 @@ public class FakeUiAutomationService : IUiAutomation
         {
             throw new InvalidOperationException("Element does not support an actionable pattern (test).");
         }
+        LastInvokedElement = element;
         return Task.FromResult(InvokeResult);
     }
+
+    /// <summary>Last element passed to <see cref="InvokeAsync"/>.</summary>
+    public UiElement? LastInvokedElement { get; private set; }
 
     public Task SetValueAsync(UiTarget uiTarget, UiElement element, string text, CancellationToken ct)
     {
@@ -218,8 +222,16 @@ public class FakeUiAutomationService : IUiAutomation
     public Task FocusAsync(UiTarget uiTarget, UiElement element, CancellationToken ct)
     {
         if (FocusThrow is not null) { throw FocusThrow; }
+        LastFocusedElement = element;
+        OnFocus?.Invoke();
         return Task.CompletedTask;
     }
+
+    /// <summary>Last element passed to <see cref="FocusAsync"/>.</summary>
+    public UiElement? LastFocusedElement { get; private set; }
+
+    /// <summary>Optional callback invoked during <see cref="FocusAsync"/>.</summary>
+    public Action? OnFocus { get; set; }
 
     public Task ScrollIntoViewAsync(UiTarget uiTarget, UiElement element, CancellationToken ct)
     {
@@ -454,6 +466,9 @@ public sealed class FakeSystemUiQuery : ISystemUiQuery
     /// <summary>PID returned by <see cref="GetProcessIdForWindow"/>. Default 0 = "window not found".</summary>
     public uint ProcessIdForWindowResult { get; set; }
 
+    /// <summary>Per-HWND PID lookup; unmapped handles fall back to <see cref="ProcessIdForWindowResult"/>.</summary>
+    public Dictionary<long, uint> ProcessIdByHwnd { get; } = [];
+
     /// <summary>Title returned by <see cref="GetWindowText"/>. Default null = "no/empty title".</summary>
     public string? WindowTextResult { get; set; }
 
@@ -489,7 +504,8 @@ public sealed class FakeSystemUiQuery : ISystemUiQuery
 
     public nint GetForegroundWindow() => ForegroundWindowResult;
 
-    public uint GetProcessIdForWindow(long hwnd) => ProcessIdForWindowResult;
+    public uint GetProcessIdForWindow(long hwnd)
+        => ProcessIdByHwnd.TryGetValue(hwnd, out var pid) ? pid : ProcessIdForWindowResult;
 
     public string? GetWindowText(long hwnd) => WindowTextResult;
 
