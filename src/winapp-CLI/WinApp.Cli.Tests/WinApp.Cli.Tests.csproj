@@ -53,6 +53,9 @@
     <ProjectReference Include="..\WinApp.Cli\WinApp.Cli.csproj" Aliases="global,winappcli" />
     <ProjectReference Include="..\WinApp.UIAutomation.TestSupport\WinApp.UIAutomation.TestSupport.csproj" />
     <ProjectReference Include="..\WinApp.Cli.Fuzz\WinApp.Cli.Fuzz.csproj" />
+    <!-- SampleIndexWriter is build-only (it generates the reference index, which the CLI
+         never does), so its contract tests reach into the baker rather than the product. -->
+    <ProjectReference Include="..\WinApp.Cli.SnapshotBaker\WinApp.Cli.SnapshotBaker.csproj" />
   </ItemGroup>
 
   <ItemGroup>

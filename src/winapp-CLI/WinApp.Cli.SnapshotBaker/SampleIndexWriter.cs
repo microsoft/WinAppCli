@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft Corporation.
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
 namespace WinApp.Cli.Services.Controls;
@@ -23,6 +23,12 @@ using System.Text.Json;
 /// <para>Output is deterministic: controls are ordered by id and no timestamp is written
 /// unless one is asked for, so re-generating against unchanged upstream data produces a
 /// byte-identical file and a drift check compares content rather than noise.</para>
+///
+/// <para>This lives in the build-only baker rather than the shipped CLI on purpose: winapp
+/// <em>reads</em> published indexes at runtime (<see cref="SampleIndexParser"/>, which
+/// <c>ReactorFetcher</c> already uses) and never writes one. Generating an index is a
+/// maintenance task we run to produce the reference artifact, so it stays out of the
+/// product the same way the corpus bake does.</para>
 /// </summary>
 internal static class SampleIndexWriter
 {
@@ -71,7 +77,10 @@ internal static class SampleIndexWriter
             writer.WriteNumber(SampleIndexSchema.SchemaVersion, SampleIndexSchema.Version);
 
             var sourceId = source ?? ordered.FirstOrDefault()?.First().Source;
-            if (!string.IsNullOrEmpty(sourceId)) writer.WriteString(SampleIndexSchema.Source, sourceId);
+            if (!string.IsNullOrEmpty(sourceId))
+            {
+                writer.WriteString(SampleIndexSchema.Source, sourceId);
+            }
 
             if (generatedAtUtc is { } stamp)
             {
@@ -115,7 +124,10 @@ internal static class SampleIndexWriter
         WriteIfPresent(writer, SampleIndexSchema.ApiNamespace, first.ApiNamespace);
         WriteIfPresent(writer, SampleIndexSchema.NuGetPackage, first.NuGetPackage);
         WriteIfPresent(writer, SampleIndexSchema.RelatedControls, first.RelatedControls);
-        if (sharedXmlns is not null) WriteIfPresent(writer, SampleIndexSchema.XmlnsImports, sharedXmlns);
+        if (sharedXmlns is not null)
+        {
+            WriteIfPresent(writer, SampleIndexSchema.XmlnsImports, sharedXmlns);
+        }
 
         // No "usings" is emitted: control-level usings have already been folded into each
         // scenario's C# by the time we hold it, and emitting them as well would make a
@@ -155,11 +167,19 @@ internal static class SampleIndexWriter
             // Only written when it wasn't hoisted to the control above. An explicit empty
             // string is required when this sample has no details but a sibling does —
             // otherwise the reader would fall back to the control value and invent one.
-            if (sharedDetails is null) writer.WriteString(SampleIndexSchema.Details, scenario.Description ?? "");
+            if (sharedDetails is null)
+            {
+                writer.WriteString(SampleIndexSchema.Details, scenario.Description ?? "");
+            }
+
             if (sharedXmlns is null)
             {
                 writer.WriteStartArray(SampleIndexSchema.XmlnsImports);
-                foreach (var import in scenario.XmlnsImports) writer.WriteStringValue(import);
+                foreach (var import in scenario.XmlnsImports)
+                {
+                    writer.WriteStringValue(import);
+                }
+
                 writer.WriteEndArray();
             }
 
@@ -177,22 +197,36 @@ internal static class SampleIndexWriter
         var first = selector(group[0]);
         for (int i = 1; i < group.Count; i++)
         {
-            if (!string.Equals(selector(group[i]), first, StringComparison.Ordinal)) return false;
+            if (!string.Equals(selector(group[i]), first, StringComparison.Ordinal))
+            {
+                return false;
+            }
         }
+
         return true;
     }
 
     private static void WriteIfPresent(Utf8JsonWriter writer, string name, string? value)
     {
-        if (!string.IsNullOrEmpty(value)) writer.WriteString(name, value);
+        if (!string.IsNullOrEmpty(value))
+        {
+            writer.WriteString(name, value);
+        }
     }
 
     private static void WriteIfPresent(Utf8JsonWriter writer, string name, string[] values)
     {
-        if (values.Length == 0) return;
+        if (values.Length == 0)
+        {
+            return;
+        }
 
         writer.WriteStartArray(name);
-        foreach (var value in values) writer.WriteStringValue(value);
+        foreach (var value in values)
+        {
+            writer.WriteStringValue(value);
+        }
+
         writer.WriteEndArray();
     }
 }

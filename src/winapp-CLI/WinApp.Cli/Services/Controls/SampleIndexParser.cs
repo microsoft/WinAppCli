@@ -113,7 +113,6 @@ internal static class SampleIndexParser
                 var header = GetString(sample, SampleIndexSchema.Header);
                 var xaml = GetString(sample, SampleIndexSchema.Xaml);
                 var code = GetString(sample, SampleIndexSchema.Code);
-                var language = GetString(sample, SampleIndexSchema.Language);
 
                 // details/xmlnsImports are control-level defaults a sample may override:
                 // sibling samples of one control legitimately differ (Toolkit gives each
@@ -131,7 +130,7 @@ internal static class SampleIndexParser
                 // Code is pasted into a C# file, so drop it when tagged as another
                 // language rather than emitting, say, C++ as if it were C#.
                 var hasXaml = !string.IsNullOrWhiteSpace(xaml);
-                var hasCode = !string.IsNullOrWhiteSpace(code) && IsCSharp(language);
+                var hasCode = !string.IsNullOrWhiteSpace(code) && IsCSharp(sample);
                 if (!hasXaml && !hasCode) continue;
 
                 // Ids are positional over KEPT samples, so they stay contiguous from 1.
@@ -195,8 +194,14 @@ internal static class SampleIndexParser
     }
 
     // v1 carries C# only. An absent tag means C#; anything else is not usable as C#.
-    private static bool IsCSharp(string language)
-        => language.Length == 0 || language.Equals("csharp", StringComparison.OrdinalIgnoreCase);
+    // Read the property directly rather than through GetString, which collapses "absent"
+    // and "present but not a string" into the same empty value: a tag of the wrong JSON
+    // type is malformed network content, not an omission, so it must not inherit the
+    // absent-means-C# default and be handed to the user as paste-ready C#.
+    private static bool IsCSharp(JsonElement sample)
+        => !sample.TryGetProperty(SampleIndexSchema.Language, out var v)
+            || (v.ValueKind == JsonValueKind.String
+                && string.Equals(v.GetString(), "csharp", StringComparison.OrdinalIgnoreCase));
 
     private static string GetString(JsonElement el, string prop)
         => el.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.String

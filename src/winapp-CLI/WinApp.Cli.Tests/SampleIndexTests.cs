@@ -613,6 +613,42 @@ public class SampleIndexTests
     }
 
     [TestMethod]
+    public void Parse_DropsCodeWhoseLanguageTagIsNotAString()
+    {
+        // A tag of the wrong JSON type is malformed, not absent, so it must not fall
+        // back to the absent-means-C# default and reach the user as pasteable C#.
+        const string Json = """
+        {
+          "schemaVersion": 1,
+          "source": "gallery",
+          "controls": [
+            {
+              "id": "button",
+              "name": "Button",
+              "samples": [
+                { "header": "Numeric tag", "xaml": "<Button />", "code": "auto x = 1;", "language": 42 },
+                { "header": "Null tag", "code": "auto y = 2;", "language": null },
+                { "header": "Empty tag", "code": "auto z = 3;", "language": "" },
+                { "header": "Real C#", "code": "var b = 2;", "language": "csharp" }
+              ]
+            }
+          ]
+        }
+        """;
+
+        var (scenarios, _, _) = SampleIndexParser.Parse(Json, "gallery");
+
+        // Only the XAML of the numeric-tag sample survives; the three malformed
+        // code-only samples drop out entirely, so ids stay contiguous from 1.
+        Assert.AreEqual(2, scenarios.Length);
+        Assert.AreEqual("button-1", scenarios[0].Id);
+        Assert.AreEqual("<Button />", scenarios[0].Xaml);
+        Assert.IsNull(scenarios[0].CSharp);
+        Assert.AreEqual("button-2", scenarios[1].Id);
+        Assert.AreEqual("var b = 2;", scenarios[1].CSharp);
+    }
+
+    [TestMethod]
     public void Parse_DropsAnOversizedUsingsBlockRatherThanCopyingItOntoEverySample()
     {
         // One control-level using longer than the cap, on a control with several samples:
