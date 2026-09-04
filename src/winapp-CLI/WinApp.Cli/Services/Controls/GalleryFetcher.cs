@@ -56,19 +56,25 @@ internal static partial class GalleryFetcher
     [GeneratedRegex(@"SamplePage\d+")]
     private static partial Regex SamplePageNameRegex();
 
-    /// <summary>Fetch fresh scenarios + tags from GitHub. Applies curated
-    /// overrides and injects hand-maintained controls missing from the upstream
-    /// Gallery data.</summary>
+    /// <summary>Fetch fresh scenarios + tags from GitHub.</summary>
+    /// <remarks>
+    /// Which samples exist, and what each one demonstrates, is upstream's to decide. winapp
+    /// adds no scenarios of its own to this corpus and applies no per-sample rewrites of
+    /// upstream's implementation, because everything here is presented to users as Gallery's
+    /// (<c>Scenario.Source</c> becomes the <c>[gallery]</c> tag and the <c>gallery-</c> id
+    /// prefix in <c>find-ui</c> output). Content winapp considers missing or misleading
+    /// belongs upstream in WinUI-Gallery, or in <see cref="Notes"/> as attributed guidance —
+    /// not silently merged into their data under their name. See #703.
+    ///
+    /// This is not a claim that snippets are byte-identical to upstream's files. Extraction
+    /// is uniform and mechanical, and deliberately lossy: content is cleaned
+    /// (<see cref="CleanGalleryContent"/>), C# is compressed, both languages are truncated,
+    /// and event handlers with no emitted code-behind are stripped so the snippet compiles
+    /// on paste. Those transforms apply to every sample by the same rule; what is gone is
+    /// the bespoke, sample-specific editorializing.
+    /// </remarks>
     internal static async Task<(Scenario[] scenarios, Dictionary<string, string[]> tags)> FetchAsync(CancellationToken cancellationToken = default)
-    {
-        var (scenarios, tags) = await FetchFromGitHub(cancellationToken);
-        if (scenarios.Length > 0)
-        {
-            ApplyOverrides(scenarios);
-            scenarios = InjectMissing(scenarios);
-        }
-        return (scenarios, tags);
-    }
+        => await FetchFromGitHub(cancellationToken);
 
     private static async Task<(Scenario[], Dictionary<string, string[]>)> FetchFromGitHub(CancellationToken cancellationToken)
     {
@@ -593,159 +599,6 @@ internal static partial class GalleryFetcher
         // Collapse 3+ consecutive newlines into 2.
         code = Regex.Replace(code, @"\n[\t ]*\n[\t ]*\n+", "\n\n");
         return code.Trim();
-    }
-
-    /// <summary>
-    /// Override Gallery demo code with production-quality snippets where the
-    /// original is known to mislead agents (e.g., TabView using Frame instead of direct content).
-    /// </summary>
-    private static void ApplyOverrides(Scenario[] scenarios)
-    {
-        foreach (var s in scenarios)
-        {
-            if (s.Id == "tabview-1" && s.CSharp != null && s.CSharp.Contains("Frame"))
-            {
-                s.CSharp = """
-                    private void TabView_AddButtonClick(TabView sender, object args)
-                    {
-                        sender.TabItems.Add(CreateNewTab(sender.TabItems.Count));
-                    }
-
-                    private void TabView_TabCloseRequested(TabView sender, TabViewTabCloseRequestedEventArgs args)
-                    {
-                        sender.TabItems.Remove(args.Tab);
-                    }
-
-                    private TabViewItem CreateNewTab(int index)
-                    {
-                        TabViewItem newItem = new TabViewItem();
-                        newItem.Header = $"Document {index}";
-                        newItem.IconSource = new SymbolIconSource() { Symbol = Symbol.Document };
-                        newItem.IsClosable = true;
-
-                        // Content can be any UIElement — TextBox, Grid, UserControl, etc.
-                        var textBox = new TextBox
-                        {
-                            AcceptsReturn = true,
-                            TextWrapping = TextWrapping.Wrap,
-                            HorizontalAlignment = HorizontalAlignment.Stretch,
-                            VerticalAlignment = VerticalAlignment.Stretch,
-                            BorderThickness = new Thickness(0),
-                        };
-                        newItem.Content = textBox;
-
-                        return newItem;
-                    }
-                    """;
-            }
-        }
-    }
-
-    /// <summary>Inject scenarios for controls that have no ControlExample code in the Gallery.</summary>
-    private static Scenario[] InjectMissing(Scenario[] scenarios)
-    {
-        var ids = new HashSet<string>(scenarios.Select(s => s.ControlId));
-        var injected = new List<Scenario>(scenarios);
-
-        if (!ids.Contains("commandbar"))
-        {
-            injected.Add(new Scenario
-            {
-                Id = "commandbar-1",
-                ControlId = "commandbar",
-                ControlName = "CommandBar",
-                HeaderText = "Primary and secondary commands",
-                Xaml = """
-                    <CommandBar DefaultLabelPosition="Right">
-                        <AppBarButton Icon="Add" Label="Add" Click="AddButton_Click"/>
-                        <AppBarButton Icon="Edit" Label="Edit" Click="EditButton_Click"/>
-                        <AppBarButton Icon="Delete" Label="Delete" Click="DeleteButton_Click"/>
-                        <AppBarSeparator/>
-                        <AppBarButton Icon="Refresh" Label="Refresh" Click="RefreshButton_Click"/>
-                        <CommandBar.SecondaryCommands>
-                            <AppBarButton Icon="Setting" Label="Settings"/>
-                            <AppBarButton Icon="Help" Label="About"/>
-                        </CommandBar.SecondaryCommands>
-                    </CommandBar>
-                    """,
-                // Minimal code-behind so the wired Click handlers above resolve — the
-                // snippet must compile as pasted. Fill in each body with real logic.
-                CSharp = """
-                    private void AddButton_Click(object sender, RoutedEventArgs e) { }
-                    private void EditButton_Click(object sender, RoutedEventArgs e) { }
-                    private void DeleteButton_Click(object sender, RoutedEventArgs e) { }
-                    private void RefreshButton_Click(object sender, RoutedEventArgs e) { }
-                    """
-            });
-        }
-
-        // ItemsRepeater + UniformGridLayout for an image/photo grid is a very common
-        // need (media galleries, photo organizers) but every upstream UniformGridLayout
-        // sample in WinUI Gallery happens to demo something else (DataTemplateSelector,
-        // SelectorBar, connected animation, etc.) so the layout is buried in noise.
-        // Inject a clean canonical example so agents can copy it directly.
-        // Pick the next free {controlId}-N suffix so the ID stays consistent with
-        // the auto-numbered scenarios from the same control.
-        var nextRepeaterIdx = injected
-            .Where(s => s.ControlId == "itemsrepeater")
-            .Select(s =>
-            {
-                var dash = s.Id.LastIndexOf('-');
-                return (dash > 0 && int.TryParse(s.Id[(dash + 1)..], out var n)) ? n : 0;
-            })
-            .DefaultIfEmpty(0)
-            .Max() + 1;
-        injected.Add(new Scenario
-        {
-            Id = $"itemsrepeater-{nextRepeaterIdx}",
-            ControlId = "itemsrepeater",
-            ControlName = "ItemsRepeater",
-            HeaderText = "Photo gallery: image grid (UniformGridLayout)",
-            Description = "Canonical pattern for displaying a grid of images/thumbnails: ItemsRepeater + UniformGridLayout, wrapped in a ScrollView for scrolling. Use this instead of GridView+ItemsWrapGrid when you want the modern WinUI 3 collection layout.",
-            Xaml = """
-                <!--
-                  ItemsRepeater is a layout primitive: it has NO selection and NO scrolling.
-                  Wrap it in a ScrollView (or ScrollViewer) for scrolling.
-                  UniformGridLayout sizes every cell uniformly — set MinItemWidth/Height
-                  and the layout fills available width with as many columns as fit.
-                -->
-                <ScrollView>
-                    <ItemsRepeater ItemsSource="{x:Bind Items, Mode=OneWay}">
-                        <ItemsRepeater.Layout>
-                            <UniformGridLayout MinItemWidth="200"
-                                               MinItemHeight="200"
-                                               MinRowSpacing="8"
-                                               MinColumnSpacing="8"/>
-                        </ItemsRepeater.Layout>
-                        <ItemsRepeater.ItemTemplate>
-                            <DataTemplate x:DataType="local:PhotoItem">
-                                <Grid Width="200" Height="200"
-                                      Background="{ThemeResource LayerFillColorDefaultBrush}"
-                                      CornerRadius="4">
-                                    <Image Source="{x:Bind Thumbnail}" Stretch="UniformToFill"/>
-                                </Grid>
-                            </DataTemplate>
-                        </ItemsRepeater.ItemTemplate>
-                    </ItemsRepeater>
-                </ScrollView>
-                """,
-            CSharp = """
-                public sealed partial class PhotoItem
-                {
-                    public string Thumbnail { get; set; } = "";
-                }
-
-                // Expose this collection on your page — the XAML binds to it directly
-                // as {x:Bind Items}:
-                // public ObservableCollection<PhotoItem> Items { get; } = new();
-                """,
-            Source = "gallery"
-        });
-
-        // CommunityToolkit controls now come from toolkit-scenarios.json
-        // Only CommandBar needs injection (no ControlExample in WinUI Gallery)
-
-        return injected.ToArray();
     }
 }
 

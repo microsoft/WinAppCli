@@ -112,6 +112,7 @@ internal static class Notes
         ],
         ["ItemsRepeater"] = [
             "ItemsRepeater is a layout primitive — NO selection, NO scrolling. Wrap in ScrollViewer.",
+            "Image/photo grid: UniformGridLayout (MinItemWidth/MinItemHeight) inside ItemsRepeater, wrapped in ScrollView. No Gallery sample shows this directly — the ones using UniformGridLayout are demoing other features. Use ItemsView/GridView instead when you need selection.",
             "x:Bind OneWay binding needs INPC source — see Binding entry."
         ],
         ["ItemsView"] = [
