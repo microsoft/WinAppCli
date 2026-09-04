@@ -124,19 +124,26 @@ winapp find-ui "color picker" --json
 
 ## Upstream is the source of truth
 
-Gallery and Toolkit samples are reproduced **as published** — winapp does not add
-its own samples to their corpus or rewrite their code. So a result is exactly what
-that repository ships today.
+Which samples exist is upstream's call. winapp adds no samples of its own to the
+Gallery or Toolkit corpus and does not rewrite an individual sample's
+implementation to its own taste.
+
+Snippets are still processed: they're cleaned, truncated to a readable length, and
+event handlers with no accompanying code-behind are stripped so the snippet
+compiles when pasted. So treat a result as **upstream's sample, mechanically
+extracted** — not as a byte-for-byte copy of the file in their repo.
 
 Where a sample has a known pitfall or a pattern isn't covered upstream, the CLI
 says so in the **Important** notes attached to the result (for example, fetching
 any `ItemsRepeater` scenario explains how to build an image grid with
 `UniformGridLayout`, which no Gallery sample demos directly). Read those notes —
-they carry the guidance that isn't in the sample itself.
+they carry the guidance that isn't in the sample itself, and they're winapp's, not
+upstream's.
 
-If a sample looks wrong or missing, it's upstream's to fix — report it on
+If a sample is missing or genuinely wrong **upstream**, report it on
 [WinUI-Gallery](https://github.com/microsoft/WinUI-Gallery/issues) so every
-consumer benefits, not just winapp.
+consumer benefits. If the defect looks like truncation or a missing handler,
+that's winapp's extraction — report it here instead.
 
 ## Related skills
 

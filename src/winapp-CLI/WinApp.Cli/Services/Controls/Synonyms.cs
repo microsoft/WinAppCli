@@ -271,6 +271,17 @@ internal static class Synonyms
         ["wrap"]            = ["wrappanel", "wraplayout"],
         ["masonry"]         = ["staggeredpanel", "staggeredlayout"],
 
+        // ─── Image grids / galleries ───
+        // A photo grid is the one common layout with no Gallery sample of its own: the
+        // controls that build it (ItemsRepeater + UniformGridLayout, GridView, ItemsView)
+        // are each demoed for something else, so their headers never carry "photo" or
+        // "thumbnail" and a plain lexical match lands on Grid/Image instead. Routing the
+        // vocabulary here is what surfaces the control whose Notes carry the guidance.
+        ["photo"]           = ["itemsrepeater", "gridview", "itemsview"],
+        ["photos"]          = ["itemsrepeater", "gridview", "itemsview"],
+        ["gallery"]         = ["itemsrepeater", "gridview", "itemsview"],
+        ["uniformgrid"]     = ["itemsrepeater", "gridview", "itemsview"],
+
         // ─── Scrolling / virtualization ───
         ["scrollview"]      = ["scrollviewer"],
         ["lazy"]            = ["listview", "itemsrepeater"],
@@ -299,7 +310,10 @@ internal static class Synonyms
         ["audio"]           = ["mediaplayerelement"],
         ["iframe"]          = ["webview2"],
         ["cropping"]        = ["imagecropper"],
-        ["thumbnail"]       = ["image"],
+        // A thumbnail is usually one cell of a grid, so keep Image but also offer the
+        // controls that lay them out — see the image-grid note above.
+        ["thumbnail"]       = ["image", "itemsrepeater", "gridview", "itemsview"],
+        ["thumbnails"]      = ["image", "itemsrepeater", "gridview", "itemsview"],
 
         // ─── Date / time / color ───
 

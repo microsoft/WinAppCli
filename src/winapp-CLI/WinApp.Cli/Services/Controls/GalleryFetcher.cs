@@ -58,13 +58,20 @@ internal static partial class GalleryFetcher
 
     /// <summary>Fetch fresh scenarios + tags from GitHub.</summary>
     /// <remarks>
-    /// What upstream publishes is what winapp serves. Gallery's samples are reproduced as
-    /// fetched — winapp does not inject hand-authored scenarios or rewrite upstream code
-    /// here, because everything in this corpus is presented to users as Gallery's
+    /// Which samples exist, and what each one demonstrates, is upstream's to decide. winapp
+    /// adds no scenarios of its own to this corpus and applies no per-sample rewrites of
+    /// upstream's implementation, because everything here is presented to users as Gallery's
     /// (<c>Scenario.Source</c> becomes the <c>[gallery]</c> tag and the <c>gallery-</c> id
     /// prefix in <c>find-ui</c> output). Content winapp considers missing or misleading
-    /// belongs upstream in WinUI-Gallery, or in the find-ui skill as guidance — not
-    /// silently merged into their data under their name. See #703.
+    /// belongs upstream in WinUI-Gallery, or in <see cref="Notes"/> as attributed guidance —
+    /// not silently merged into their data under their name. See #703.
+    ///
+    /// This is not a claim that snippets are byte-identical to upstream's files. Extraction
+    /// is uniform and mechanical, and deliberately lossy: content is cleaned
+    /// (<see cref="CleanGalleryContent"/>), C# is compressed, both languages are truncated,
+    /// and event handlers with no emitted code-behind are stripped so the snippet compiles
+    /// on paste. Those transforms apply to every sample by the same rule; what is gone is
+    /// the bespoke, sample-specific editorializing.
     /// </remarks>
     internal static async Task<(Scenario[] scenarios, Dictionary<string, string[]> tags)> FetchAsync(CancellationToken cancellationToken = default)
         => await FetchFromGitHub(cancellationToken);
