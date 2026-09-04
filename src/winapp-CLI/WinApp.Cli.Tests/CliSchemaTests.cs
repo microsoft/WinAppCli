@@ -277,4 +277,22 @@ public class CliSchemaTests : BaseCommandTests
         Assert.IsFalse(subcommands.TryGetProperty("complete", out _),
             "Hidden 'complete' command should not appear in CLI schema");
     }
+
+    [TestMethod]
+    public async Task CliSchema_MarksTargetAwareCommandTrees()
+    {
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand, ["--cli-schema"]);
+
+        Assert.AreEqual(0, exitCode);
+        using var jsonDoc = JsonDocument.Parse(TestAnsiConsole.Output);
+        var commands = jsonDoc.RootElement.GetProperty("subcommands");
+
+        Assert.IsTrue(commands.GetProperty("run").GetProperty("targetAware").GetBoolean());
+        Assert.IsTrue(commands.GetProperty("unregister").GetProperty("targetAware").GetBoolean());
+        Assert.IsTrue(commands.GetProperty("ui").GetProperty("subcommands")
+            .GetProperty("click").GetProperty("targetAware").GetBoolean());
+        Assert.IsFalse(commands.GetProperty("cert").TryGetProperty("targetAware", out _));
+    }
 }

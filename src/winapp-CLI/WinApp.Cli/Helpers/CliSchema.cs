@@ -8,6 +8,7 @@ using System.Text.Json.Serialization;
 using System.Buffers;
 using Command = System.CommandLine.Command;
 using CommandResult = System.CommandLine.Parsing.CommandResult;
+using WinApp.Cli.Commands;
 using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Helpers;
@@ -66,7 +67,8 @@ internal static class CliSchema
         string[]? aliases,
         Dictionary<string, ArgumentDetails>? arguments,
         Dictionary<string, OptionDetails>? options,
-        Dictionary<string, CommandDetails>? subcommands);
+        Dictionary<string, CommandDetails>? subcommands,
+        bool? targetAware);
     public record RootCommandDetails(
         string name,
         string version,
@@ -76,8 +78,9 @@ internal static class CliSchema
         string[]? aliases,
         Dictionary<string, ArgumentDetails>? arguments,
         Dictionary<string, OptionDetails>? options,
-        Dictionary<string, CommandDetails>? subcommands
-    ) : CommandDetails(description, hidden, aliases, arguments, options, subcommands);
+        Dictionary<string, CommandDetails>? subcommands,
+        bool? targetAware
+    ) : CommandDetails(description, hidden, aliases, arguments, options, subcommands, targetAware);
 
 
     public static void PrintCliSchema(CommandResult commandResult, TextWriter outputWriter)
@@ -101,7 +104,7 @@ internal static class CliSchema
     {
         var arguments = CreateArgumentsDictionary(command.Arguments);
         var options = CreateOptionsDictionary(command.Options);
-        var subcommands = CreateSubcommandsDictionary(command.Subcommands);
+        var subcommands = CreateSubcommandsDictionary(command.Subcommands, targetAware: false);
 
         // Use only major.minor.patch (3 components) to avoid build number churn in generated docs
         var fullVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version!;
@@ -119,7 +122,8 @@ internal static class CliSchema
             aliases: DetermineAliases(command.Aliases),
             arguments: arguments,
             options: options,
-            subcommands: subcommands
+            subcommands: subcommands,
+            targetAware: null
         );
     }
 
@@ -151,7 +155,9 @@ internal static class CliSchema
         return dict.Count > 0 ? dict : null;
     }
 
-    private static Dictionary<string, CommandDetails>? CreateSubcommandsDictionary(IList<Command> subcommands)
+    private static Dictionary<string, CommandDetails>? CreateSubcommandsDictionary(
+        IList<Command> subcommands,
+        bool targetAware)
     {
         if (subcommands.Count == 0)
         {
@@ -160,7 +166,8 @@ internal static class CliSchema
         var dict = new Dictionary<string, CommandDetails>();
         foreach (var subcommand in subcommands.Where(c => !c.Hidden).OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase))
         {
-            dict[subcommand.Name] = CreateCommandDetails(subcommand);
+            var subcommandTargetAware = targetAware || subcommand is ITargetAwareCommand;
+            dict[subcommand.Name] = CreateCommandDetails(subcommand, subcommandTargetAware);
         }
         return dict.Count > 0 ? dict : null;
     }
@@ -189,13 +196,14 @@ internal static class CliSchema
         return $"{genericTypeName}<{genericTypes}>";
     }
 
-    private static CommandDetails CreateCommandDetails(Command subCommand) => new CommandDetails(
+    private static CommandDetails CreateCommandDetails(Command subCommand, bool targetAware) => new CommandDetails(
                 subCommand.Description?.ReplaceLineEndings("\n"),
                 subCommand.Hidden,
                 DetermineAliases(subCommand.Aliases),
                 CreateArgumentsDictionary(subCommand.Arguments),
                 CreateOptionsDictionary(subCommand.Options),
-                CreateSubcommandsDictionary(subCommand.Subcommands)
+                CreateSubcommandsDictionary(subCommand.Subcommands, targetAware),
+                targetAware ? true : null
             );
 
     /// <summary>

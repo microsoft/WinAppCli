@@ -112,9 +112,6 @@ export async function callWinappCliCapture(
       },
     });
 
-    child.stdout.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
-    child.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
-
     child.on('close', (code) => {
       const stdout = Buffer.concat(stdoutChunks).toString('utf8');
       const stderr = Buffer.concat(stderrChunks).toString('utf8');
@@ -138,5 +135,12 @@ export async function callWinappCliCapture(
     child.on('error', (error) => {
       reject(new Error(`Failed to execute winapp-cli: ${error.message}`));
     });
+
+    child.stdout.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
+    child.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
+
+    // Captured invocations have no input API. Signal EOF instead of leaving commands that read
+    // standard input blocked indefinitely.
+    child.stdin.end();
   });
 }

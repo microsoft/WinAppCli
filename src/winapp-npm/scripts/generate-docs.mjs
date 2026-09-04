@@ -336,7 +336,7 @@ function generate() {
   L('# NPM Package — Programmatic API');
   L();
   L('TypeScript/JavaScript API reference for `@microsoft/winappcli`.');
-  L('Each CLI command is available as an async function that captures stdout/stderr and returns a typed result.');
+  L('Each CLI command is available as an async capture-only function: stdin is closed immediately, and stdout/stderr are returned in a typed result.');
   L('Helper utilities for MSIX identity, Electron debug identity, and build tools are also exported.');
   L();
 
@@ -375,6 +375,29 @@ function generate() {
     const entry = typeExports.find((t) => t.name === tName);
     if (entry) emitType(lines, entry.name, entry.symbol, entry.external);
   }
+
+  L('## Execution-target JSON and errors');
+  L();
+  L("`targetExec()` captures the target command's stdout and stderr; it closes stdin immediately and cannot provide interactive input. Its `json` option formats only winapp execution-target failures; the target command's own output and exit code are preserved. An execution-target infrastructure failure exits `70`.");
+  L();
+  L('`targetPush({ json: true })` and `targetPull({ json: true })` return this JSON object in `result.stdout`:');
+  L();
+  L('```json');
+  L('{');
+  L('  "executionTarget": { "kind": "sandbox", "id": "default", "epoch": "opaque-instance-token" },');
+  L('  "transferred": 1,');
+  L('  "skipped": 0,');
+  L('  "bytes": 1234,');
+  L('  "targetPath": "C:\\\\WinApp\\\\work\\\\destination"');
+  L('}');
+  L('```');
+  L();
+  L('`targetPath` is present only for `targetPush()` and is the resolved target location. `targetPull()` omits it because its destination is already local. Input errors exit `1`; infrastructure errors exit `70`. In either failure case, the native CLI writes this envelope to stderr, and the rejected npm error retains its captured `stdout` and `stderr` properties:');
+  L();
+  L('```json');
+  L('{ "error": { "code": "target_invalid", "message": "…", "context": {}, "userAction": "…", "nextCommand": { "command": "…", "advisory": false }, "validValues": [], "example": "…" } }');
+  L('```');
+  L();
 
   // --- CLI command wrappers ---
   L('## CLI command wrappers');

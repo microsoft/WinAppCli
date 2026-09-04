@@ -7,7 +7,7 @@ ms.custom: mslearn
 # NPM Package — Programmatic API
 
 TypeScript/JavaScript API reference for `@microsoft/winappcli`.
-Each CLI command is available as an async function that captures stdout/stderr and returns a typed result.
+Each CLI command is available as an async capture-only function: stdin is closed immediately, and stdout/stderr are returned in a typed result.
 Helper utilities for MSIX identity, Electron debug identity, and build tools are also exported.
 
 ## Installation
@@ -54,6 +54,28 @@ Result returned by every command wrapper.
 | `exitCode` | `number` | Yes | Process exit code (always 0 on success – non-zero throws). |
 | `stdout` | `string` | Yes | Captured standard output. |
 | `stderr` | `string` | Yes | Captured standard error. |
+
+## Execution-target JSON and errors
+
+`targetExec()` captures the target command's stdout and stderr; it closes stdin immediately and cannot provide interactive input. Its `json` option formats only winapp execution-target failures; the target command's own output and exit code are preserved. An execution-target infrastructure failure exits `70`.
+
+`targetPush({ json: true })` and `targetPull({ json: true })` return this JSON object in `result.stdout`:
+
+```json
+{
+  "executionTarget": { "kind": "sandbox", "id": "default", "epoch": "opaque-instance-token" },
+  "transferred": 1,
+  "skipped": 0,
+  "bytes": 1234,
+  "targetPath": "C:\\WinApp\\work\\destination"
+}
+```
+
+`targetPath` is present only for `targetPush()` and is the resolved target location. `targetPull()` omits it because its destination is already local. Input errors exit `1`; infrastructure errors exit `70`. In either failure case, the native CLI writes this envelope to stderr, and the rejected npm error retains its captured `stdout` and `stderr` properties:
+
+```json
+{ "error": { "code": "target_invalid", "message": "…", "context": {}, "userAction": "…", "nextCommand": { "command": "…", "advisory": false }, "validValues": [], "example": "…" } }
+```
 
 ## CLI command wrappers
 
@@ -405,7 +427,7 @@ function packageApp(options: PackageOptions): Promise<WinappResult>
 
 ### `restore()`
 
-Use after cloning a repo or when .winapp/ folder is missing. Reinstalls SDK packages from existing winapp.yaml without changing versions. Requires winapp.yaml (created by 'init'). To check for newer SDK versions, use 'update' instead.
+Use after cloning a repo or when .winapp/ folder is missing. Reinstalls SDK packages without changing versions, reading them from winapp.yaml or, for a .NET project initialized by 'init', from the .csproj via 'dotnet restore'. Requires a project already initialized by 'init'. To check for newer SDK versions, use 'update' instead.
 
 ```typescript
 function restore(options?: RestoreOptions): Promise<WinappResult>
@@ -416,7 +438,7 @@ function restore(options?: RestoreOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `baseDirectory` | `string \| undefined` | No | Base/root directory for the winapp workspace |
-| `configDir` | `string \| undefined` | No | Directory to read configuration from (default: current directory) |
+| `configDir` | `string \| undefined` | No | Directory to read configuration from (default: base-directory) |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
 
@@ -504,7 +526,7 @@ function store(options?: StoreOptions): Promise<WinappResult>
 
 ### `targetExec()`
 
-Run a command on an execution target, as that target's interactive user. Streams stdin, stdout, and stderr, and returns the command's own exit code. Does not provide a full terminal, so interactive console applications may see redirected pipes.
+Run a command on an execution target, as that target's interactive user. This capture-only npm API closes stdin immediately, so it cannot provide interactive input; stdout and stderr are returned in the result. The native CLI command continues to stream stdin, stdout, and stderr.
 
 ```typescript
 function targetExec(options: TargetExecOptions): Promise<WinappResult>
@@ -517,7 +539,7 @@ function targetExec(options: TargetExecOptions): Promise<WinappResult>
 | `target` | `string` | Yes | Execution target to act on. Currently: 'sandbox'. |
 | `targetCwd` | `string \| undefined` | No | Working directory on the target. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `command` | `string \| string[] \| undefined` | No | Executable and arguments to run on the target, e.g. ['dotnet', '--info'] (forwarded after --). |
+| `command` | `string \| [string, ...string[]]` | Yes | Executable and arguments to run on the target, e.g. ['dotnet', '--info'] (forwarded after --). |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
 
@@ -1653,7 +1675,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `baseDirectory` | `string \| undefined` | No | Base/root directory for the winapp workspace |
-| `configDir` | `string \| undefined` | No | Directory to read configuration from (default: current directory) |
+| `configDir` | `string \| undefined` | No | Directory to read configuration from (default: base-directory) |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
@@ -1718,7 +1740,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | `target` | `string` | Yes | Execution target to act on. Currently: 'sandbox'. |
 | `targetCwd` | `string \| undefined` | No | Working directory on the target. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `command` | `string \| string[] \| undefined` | No | Executable and arguments to run on the target, e.g. ['dotnet', '--info'] (forwarded after --). |
+| `command` | `string \| [string, ...string[]]` | Yes | Executable and arguments to run on the target, e.g. ['dotnet', '--info'] (forwarded after --). |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |

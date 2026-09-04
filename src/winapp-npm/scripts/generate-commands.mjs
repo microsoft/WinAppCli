@@ -80,6 +80,8 @@ function cleanDesc(desc) {
 }
 
 const COMMON_OPTIONS = new Set(['--quiet', '--verbose', '--help']);
+// These recursive root controls describe winapp itself rather than an invocation to wrap.
+const NON_WRAPPER_OPTIONS = new Set(['--caller', '--cli-schema']);
 const TS_RESERVED = new Set(['package', 'default', 'export', 'import', 'class', 'function', 'return', 'delete', 'new']);
 
 /**
@@ -112,20 +114,6 @@ const DEPRECATED_ARG_ALIASES = {
 const OPTION_PROP_RENAMES = {
   'target exec': { '--cwd': 'targetCwd' },
 };
-
-/**
- * Command trees that honour `--on`.
- *
- * `--on` is registered recursively on the winapp root so that *every* command parses the token
- * consistently — that is a parser-safety property, not an API one: a command that did not declare
- * it would let System.CommandLine bind `--on sandbox` to a nearby positional argument and then run
- * on this machine while reporting success. Commands outside this list parse `--on` only to reject
- * it, so emitting an `on` property on their wrappers would advertise an option that always fails.
- *
- * Kept in step with `ITargetAwareCommand` in the CLI by
- * `ExecutionTargetSelectionTests.TargetAwareCommands_MatchTheGeneratorList`.
- */
-const TARGET_AWARE_COMMANDS = ['run', 'ui', 'unregister'];
 
 /** The recursive selector option, which only target-aware commands should expose. */
 const TARGET_SELECTOR_OPTION = '--on';
@@ -210,6 +198,11 @@ const PASSTHROUGH_COMMANDS = {
   'target exec': { propName: 'command', description: "Executable and arguments to run on the target, e.g. ['dotnet', '--info'] (forwarded after --).", separator: ' -- ' },
 };
 
+const COMMAND_DESCRIPTION_OVERRIDES = {
+  'target exec':
+    "Run a command on an execution target, as that target's interactive user. This capture-only npm API closes stdin immediately, so it cannot provide interactive input; stdout and stderr are returned in the result. The native CLI command continues to stream stdin, stdout, and stderr.",
+};
+
 // ---------------------------------------------------------------------------
 // Flatten schema into leaf commands
 // ---------------------------------------------------------------------------
@@ -237,14 +230,7 @@ function flattenCommands(node, parentPath = [], inherited = null) {
   const results = [];
   const subs = node.subcommands || {};
 
-  // `--on` is declared once, on the root, so that every command parses it and a misspelling can
-  // never be absorbed by a positional argument. Groups have their recursive options collected on
-  // the way down; the root does not, so the selector is seeded here.
-  //
-  // Only the selector. The root's other recursive options (`--cli-schema`, `--caller`) describe
-  // winapp itself rather than the command, and putting them on every wrapper would offer callers a
-  // property that prints a schema instead of doing what they asked.
-  const inheritedOptions = inherited ?? rootSelectorOption(node);
+  const inheritedOptions = collectRecursiveOptions(node, inherited ?? {});
 
   for (const [name, cmd] of Object.entries(subs)) {
     if (cmd.hidden) continue;
@@ -255,28 +241,19 @@ function flattenCommands(node, parentPath = [], inherited = null) {
     } else {
       results.push({
         path: cmdPath,
-        cmd: inheritRecursiveOptions(cmd, dropUnsupportedSelector(cmdPath, inheritedOptions)),
+        cmd: inheritRecursiveOptions(cmd, dropUnsupportedSelector(cmd, inheritedOptions)),
       });
     }
   }
   return results;
 }
 
-function rootSelectorOption(root) {
-  const selector = (root.options || {})[TARGET_SELECTOR_OPTION];
-  return selector ? { [TARGET_SELECTOR_OPTION]: selector } : {};
-}
-
 /**
- * Removes `--on` from what a leaf inherits unless that leaf can actually honour it.
- *
- * See `TARGET_AWARE_COMMANDS`: the CLI parses the option everywhere so a misspelling cannot be
- * absorbed by a positional argument, but only these trees do anything with it. A wrapper that
- * offered `on` on, say, `certInfo` would be offering a property whose only possible outcome is a
- * non-zero exit.
+ * The CLI schema marks command trees that honour the recursively registered selector. Other
+ * commands still parse it solely to reject it safely, so their wrappers must not advertise it.
  */
-function dropUnsupportedSelector(cmdPath, inherited) {
-  if (TARGET_AWARE_COMMANDS.includes(cmdPath[0]) || !(TARGET_SELECTOR_OPTION in inherited)) {
+function dropUnsupportedSelector(cmd, inherited) {
+  if (cmd.targetAware === true || !(TARGET_SELECTOR_OPTION in inherited)) {
     return inherited;
   }
 
@@ -386,12 +363,16 @@ function generate(schema) {
 
     // Check for passthrough command
     const passthrough = PASSTHROUGH_COMMANDS[cmdPath.join(' ')] || null;
+    const passthroughArgument = passthrough
+      ? Object.entries(cmd.arguments || {}).find(([argName]) => kebabToCamel(argName) === passthrough.propName)?.[1]
+      : null;
+    const passthroughRequired = passthroughArgument?.arity?.minimum >= 1;
 
     // Collect non-common options
     const opts = [];
     const optionRenames = OPTION_PROP_RENAMES[cmdPathStr] || {};
     for (const [optName, optDef] of Object.entries(cmd.options || {})) {
-      if (COMMON_OPTIONS.has(optName)) continue;
+      if (COMMON_OPTIONS.has(optName) || NON_WRAPPER_OPTIONS.has(optName)) continue;
       // Skip if all aliases are common
       if (optDef.aliases?.every((a) => COMMON_OPTIONS.has(a))) continue;
       opts.push({ cliName: optName, def: optDef, propName: optionRenames[optName] || kebabToCamel(optName) });
@@ -444,7 +425,8 @@ function generate(schema) {
       // Accept a single string OR an array. A bare string is normalized to a one-element
       // array before emission (below) so it isn't spread into individual characters — this
       // preserves the string form callers relied on before `run` moved onto this path.
-      L(`  ${passthrough.propName}?: string | string[];`);
+      const type = passthroughRequired ? 'string | [string, ...string[]]' : 'string | string[]';
+      L(`  ${passthrough.propName}${passthroughRequired ? '' : '?'}: ${type};`);
     }
     L('}');
     L();
@@ -462,7 +444,7 @@ function generate(schema) {
 
     const defaultArg = hasRequiredArgs ? '' : ' = {}';
     L('/**');
-    L(` * ${cleanDesc(cmd.description)}`);
+    L(` * ${cleanDesc(COMMAND_DESCRIPTION_OVERRIDES[cmdPathStr] || cmd.description)}`);
     L(' */');
     L(`export async function ${fnName}(options: ${ifaceName}${defaultArg}): Promise<WinappResult> {`);
 
@@ -539,16 +521,31 @@ function generate(schema) {
     // Passthrough args. Normalize a single string to a one-element array so a bare-string
     // argument is forwarded as one token, not spread into individual characters.
     if (passthrough) {
-      L(`  if (options.${passthrough.propName} !== undefined) {`);
-      L(`    const ${passthrough.propName}Arr = Array.isArray(options.${passthrough.propName}) ? options.${passthrough.propName} : [options.${passthrough.propName}];`);
-      if (passthrough.separator === ' -- ') {
-        L(`    if (${passthrough.propName}Arr.length > 0) {`);
-        L(`      args.push('--', ...${passthrough.propName}Arr);`);
-        L('    }');
+      if (passthroughRequired) {
+        L(`  if (options.${passthrough.propName} === undefined) {`);
+        L(`    throw new Error('${fnName} requires a non-empty ${passthrough.propName}.');`);
+        L('  }');
+        L(`  const ${passthrough.propName}Arr = Array.isArray(options.${passthrough.propName}) ? options.${passthrough.propName} : [options.${passthrough.propName}];`);
+        L(`  if (${passthrough.propName}Arr.length === 0) {`);
+        L(`    throw new Error('${fnName} requires a non-empty ${passthrough.propName}.');`);
+        L('  }');
+        if (passthrough.separator === ' -- ') {
+          L(`  args.push('--', ...${passthrough.propName}Arr);`);
+        } else {
+          L(`  args.push(...${passthrough.propName}Arr);`);
+        }
       } else {
-        L(`    args.push(...${passthrough.propName}Arr);`);
+        L(`  if (options.${passthrough.propName} !== undefined) {`);
+        L(`    const ${passthrough.propName}Arr = Array.isArray(options.${passthrough.propName}) ? options.${passthrough.propName} : [options.${passthrough.propName}];`);
+        if (passthrough.separator === ' -- ') {
+          L(`    if (${passthrough.propName}Arr.length > 0) {`);
+          L(`      args.push('--', ...${passthrough.propName}Arr);`);
+          L('    }');
+        } else {
+          L(`    args.push(...${passthrough.propName}Arr);`);
+        }
+        L('  }');
       }
-      L('  }');
     }
 
     L('  return execCommand(args, options);');

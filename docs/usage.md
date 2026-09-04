@@ -1266,6 +1266,22 @@ winapp target exec sandbox --cwd C:\WinApp\work -- powershell -ExecutionPolicy B
 - Does **not** provide a full terminal or ConPTY. Interactive console applications may observe redirected pipes.
 - Arguments, paths, environment, and stream contents are excluded from telemetry entirely.
 
+**JSON errors:** `target exec` has no winapp success object because its stdout belongs to the command it runs. With `--json`, malformed target selection still exits `1`, and target infrastructure failures exit `70`, writing the following error envelope to stderr:
+
+```json
+{
+  "error": {
+    "code": "target_invalid",
+    "message": "…",
+    "context": {},
+    "userAction": "…",
+    "nextCommand": { "command": "…", "advisory": false },
+    "validValues": [],
+    "example": "…"
+  }
+}
+```
+
 #### target push and target pull
 
 Copy files or directories between this machine and the target. The verb is the direction, so neither path carries a marker and neither side can be mistaken for the other.
@@ -1302,6 +1318,24 @@ winapp target exec sandbox --cwd C:\WinApp\work\Setup -- powershell -ExecutionPo
 - Skips files whose content already matches, compared by hash rather than timestamp.
 - Replaces changed files atomically, after verifying size and hash. An interrupted copy never publishes a partial file over one that was correct.
 - Does not expose arbitrary mapped host folders to target applications.
+
+**JSON results:** `--json` writes one success object to stdout:
+
+```json
+{
+  "executionTarget": {
+    "kind": "sandbox",
+    "id": "default",
+    "epoch": "opaque-instance-token"
+  },
+  "transferred": 1,
+  "skipped": 0,
+  "bytes": 1234,
+  "targetPath": "C:\\WinApp\\work\\Setup\\setup.ps1"
+}
+```
+
+`executionTarget` identifies the target instance that performed the copy. `transferred`, `skipped`, and `bytes` are the number of changed files, unchanged files, and transferred bytes. `targetPath` is present only for `target push`; it is the resolved path inside the target. `target pull` omits it because its destination is already local. Invalid target or path input exits `1`; target infrastructure failures exit `70` and write the same `{ "error": { ... } }` envelope shown for [`target exec`](#target-exec) to stderr.
 
 ---
 

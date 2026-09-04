@@ -2,7 +2,7 @@
  * AUTO-GENERATED — DO NOT EDIT
  *
  * Regenerate with:  npm run generate-commands
- * Source schema version: 0.6.3
+ * Source schema version: 1.0.0
  *
  * Programmatic wrappers for all winapp CLI commands.
  * Each function builds the CLI arguments, invokes the native CLI,
@@ -771,23 +771,25 @@ export interface TargetExecOptions extends CommonOptions {
   /** Format output as JSON */
   json?: boolean;
   /** Executable and arguments to run on the target, e.g. ['dotnet', '--info'] (forwarded after --). */
-  command?: string | string[];
+  command: string | [string, ...string[]];
 }
 
 /**
- * Run a command on an execution target, as that target's interactive user. Streams stdin, stdout, and stderr, and returns the command's own exit code. Does not provide a full terminal, so interactive console applications may see redirected pipes.
+ * Run a command on an execution target, as that target's interactive user. This capture-only npm API closes stdin immediately, so it cannot provide interactive input; stdout and stderr are returned in the result. The native CLI command continues to stream stdin, stdout, and stderr.
  */
 export async function targetExec(options: TargetExecOptions): Promise<WinappResult> {
   const args: string[] = ['target', 'exec'];
   args.push(options.target);
   if (options.targetCwd) args.push('--cwd', options.targetCwd);
   if (options.json) args.push('--json');
-  if (options.command !== undefined) {
-    const commandArr = Array.isArray(options.command) ? options.command : [options.command];
-    if (commandArr.length > 0) {
-      args.push('--', ...commandArr);
-    }
+  if (options.command === undefined) {
+    throw new Error('targetExec requires a non-empty command.');
   }
+  const commandArr = Array.isArray(options.command) ? options.command : [options.command];
+  if (commandArr.length === 0) {
+    throw new Error('targetExec requires a non-empty command.');
+  }
+  args.push('--', ...commandArr);
   return execCommand(args, options);
 }
 
