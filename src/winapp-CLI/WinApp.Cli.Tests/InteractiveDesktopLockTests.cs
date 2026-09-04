@@ -17,7 +17,7 @@ namespace WinApp.Cli.Tests;
 /// </summary>
 [TestClass]
 [DoNotParallelize] // WINAPP_UI_LOCK_DIRECTORY and WINAPP_UI_WORKFLOW_ID are process-wide.
-public class InteractiveDesktopLockTests
+public partial class InteractiveDesktopLockTests
 {
     private string _lockDirectory = null!;
     private string? _previousLockOverride;
@@ -26,6 +26,7 @@ public class InteractiveDesktopLockTests
     private ParticipantRegistry _participants = null!;
     private InteractiveDesktopStateStore _store = null!;
     private InteractiveDesktopLock _coordinator = null!;
+    private FakeParticipantSignals _signals = null!;
 
     [TestInitialize]
     public void Setup()
@@ -41,6 +42,7 @@ public class InteractiveDesktopLockTests
         Environment.SetEnvironmentVariable(UiOwnerResolver.WorkflowIdVariable, "interactive-desktop-lock-tests");
 
         var inspector = new ProcessInspector();
+        _signals = new FakeParticipantSignals();
         _paths = new InteractiveDesktopPaths(inspector);
         _participants = new ParticipantRegistry(_paths, inspector, NullLogger<ParticipantRegistry>.Instance);
         _store = new InteractiveDesktopStateStore(
@@ -53,6 +55,7 @@ public class InteractiveDesktopLockTests
             inspector,
             new TickCountClock(),
             new FakePollDelay(),
+            _signals,
             new TestConsole(),
             NullLogger<InteractiveDesktopLock>.Instance);
     }

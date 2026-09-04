@@ -79,7 +79,7 @@ internal sealed class InteractiveDesktopScheduler(IMonotonicClock clock)
         var changed = ClampStaleDeadline(state);
         changed |= PruneDeadParticipants(state, probe);
         changed |= ExpireIdleTurn(state);
-        changed |= PromoteOldestWaiter(state, probe);
+        changed |= PromoteOldestWaiter(state);
         changed |= AbsorbSameOwnerWaiters(state);
         changed |= ApplyOwnerLocalEligibility(state);
         return changed;
@@ -158,7 +158,10 @@ internal sealed class InteractiveDesktopScheduler(IMonotonicClock clock)
 
         Normalize(state, probe);
 
-        var liveWaiters = CountLiveWaiters(state, probe);
+        // Normalize just pruned every dead participant, so the in-memory list IS the live queue. The
+        // cap therefore counts entries rather than re-probing each one: at a full queue that was 64
+        // process handles opened per admission, which is most of what made a deep queue expensive.
+        var liveWaiters = CountWaiters(state);
 
         if (state.Owner is null && liveWaiters == 0)
         {
@@ -209,7 +212,7 @@ internal sealed class InteractiveDesktopScheduler(IMonotonicClock clock)
             UiAdmission.GlobalWaiter,
             ticket,
             UiTurnAction.Queued,
-            QueuePositionOf(state, probe, ticket));
+            QueuePositionOf(state, ticket));
     }
 
     /// <summary>
@@ -266,7 +269,14 @@ internal sealed class InteractiveDesktopScheduler(IMonotonicClock clock)
         => state.Waiters.FirstOrDefault(
             w => w.Pid == participant.ProcessId && w.ProcessStartTicksUtc == participant.StartTicksUtc);
 
-    /// <summary>One-based position of a ticket among live global waiters, for cancellation diagnostics.</summary>
+    /// <summary>
+    /// One-based position of a ticket among live global waiters, for cancellation diagnostics.
+    /// </summary>
+    /// <remarks>
+    /// Probes each waiter ahead, because this overload is reached from cancellation teardown where no
+    /// normalization is guaranteed to have run and the list may still name processes that have exited.
+    /// Inside a transaction that has just normalized, use <see cref="QueuePositionOf(InteractiveDesktopState, long)"/>.
+    /// </remarks>
     public static int? QueuePositionOf(InteractiveDesktopState state, ICoordinationLivenessProbe probe, long ticket)
     {
         var ahead = 0;
@@ -288,9 +298,64 @@ internal sealed class InteractiveDesktopScheduler(IMonotonicClock clock)
         return found ? ahead + 1 : null;
     }
 
+    /// <summary>
+    /// One-based position of a ticket in an already-normalized queue, where every remaining waiter is
+    /// live by construction.
+    /// </summary>
+    public static int? QueuePositionOf(InteractiveDesktopState state, long ticket)
+    {
+        var ahead = 0;
+        foreach (var waiter in state.Waiters.OrderBy(w => w.Ticket))
+        {
+            if (waiter.Ticket == ticket)
+            {
+                return ahead + 1;
+            }
+
+            ahead++;
+        }
+
+        return null;
+    }
+
     /// <summary>Live global waiter count, used for verbose output and the queue cap.</summary>
     public static int CountLiveWaiters(InteractiveDesktopState state, ICoordinationLivenessProbe probe)
         => state.Waiters.Count(w => probe.IsParticipantLive(w.Pid, w.ProcessStartTicksUtc));
+
+    /// <summary>
+    /// Live global waiter count taken straight from a normalized state, without re-probing.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Normalize"/> has already removed every dead participant from the lists it returns, so
+    /// asking the OS again inside the same <c>state.lock</c> transaction can only produce the same
+    /// answer at the cost of one process handle per waiter — the cost that showed up as CPU burn when
+    /// the queue was deep. Callers that have not just normalized must keep using the probing overload.
+    /// </remarks>
+    public static int CountWaiters(InteractiveDesktopState state) => state.Waiters.Count;
+
+    /// <summary>
+    /// The participants a published state says may run right now, keyed by the identity the state file
+    /// carries.
+    /// </summary>
+    /// <remarks>
+    /// Comparing this set before and after a transaction is how newly-runnable commands are found. That
+    /// is deliberately a property of the state rather than of any one transition: promotion, same-owner
+    /// absorption, barrier release, cancellation cleanup and crash pruning all reach the same place, so
+    /// a future transition cannot forget to wake anyone.
+    /// </remarks>
+    public static HashSet<(int Pid, long StartTicksUtc)> RunnableParticipants(InteractiveDesktopState state)
+    {
+        var runnable = new HashSet<(int, long)>();
+        foreach (var command in state.OwnerCommands)
+        {
+            if (command.Status == UiCommandStatus.Running)
+            {
+                runnable.Add((command.Pid, command.ProcessStartTicksUtc));
+            }
+        }
+
+        return runnable;
+    }
 
     private static void AddOwnerCommand(InteractiveDesktopState state, UiParticipantIdentity participant, UiTurnMode mode)
         => state.OwnerCommands.Add(new OwnerCommandEntry
@@ -359,7 +424,7 @@ internal sealed class InteractiveDesktopScheduler(IMonotonicClock clock)
         return true;
     }
 
-    private bool PromoteOldestWaiter(InteractiveDesktopState state, ICoordinationLivenessProbe probe)
+    private bool PromoteOldestWaiter(InteractiveDesktopState state)
     {
         if (state.Owner is not null)
         {
@@ -368,9 +433,11 @@ internal sealed class InteractiveDesktopScheduler(IMonotonicClock clock)
 
         // Strict FIFO by persisted ticket, never by file-lock acquisition order. A suspended live waiter
         // therefore keeps the head of the queue until it resumes or is terminated.
-        var oldest = state.Waiters
-            .OrderBy(w => w.Ticket)
-            .FirstOrDefault(w => probe.IsParticipantLive(w.Pid, w.ProcessStartTicksUtc));
+        //
+        // No liveness re-probe: PruneDeadParticipants ran first in this same normalization, so this list
+        // is already only live waiters, and asking the OS again would cost one process handle per waiter
+        // to learn nothing.
+        var oldest = state.Waiters.MinBy(w => w.Ticket);
 
         if (oldest is null)
         {

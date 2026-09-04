@@ -407,7 +407,7 @@ function packageApp(options: PackageOptions): Promise<WinappResult>
 
 ### `restore()`
 
-Use after cloning a repo or when .winapp/ folder is missing. Reinstalls SDK packages from existing winapp.yaml without changing versions. Requires winapp.yaml (created by 'init'). To check for newer SDK versions, use 'update' instead.
+Use after cloning a repo or when .winapp/ folder is missing. Reinstalls SDK packages without changing versions, reading them from winapp.yaml or, for a .NET project initialized by 'init', from the .csproj via 'dotnet restore'. Requires a project already initialized by 'init'. To check for newer SDK versions, use 'update' instead.
 
 ```typescript
 function restore(options?: RestoreOptions): Promise<WinappResult>
@@ -418,7 +418,7 @@ function restore(options?: RestoreOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `baseDirectory` | `string \| undefined` | No | Base/root directory for the winapp workspace |
-| `configDir` | `string \| undefined` | No | Directory to read configuration from (default: current directory) |
+| `configDir` | `string \| undefined` | No | Directory to read configuration from (default: base-directory) |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`, `workflowId`).*
 
@@ -1604,7 +1604,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `baseDirectory` | `string \| undefined` | No | Base/root directory for the winapp workspace |
-| `configDir` | `string \| undefined` | No | Directory to read configuration from (default: current directory) |
+| `configDir` | `string \| undefined` | No | Directory to read configuration from (default: base-directory) |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |

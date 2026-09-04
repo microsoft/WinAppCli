@@ -38,6 +38,24 @@ internal sealed class UiCoordinationWaitReporter(
     private long _lastReportedAtMs = -1;
 
     /// <summary>
+    /// Whether <see cref="ReportIfDue"/> would print at <paramref name="elapsedMs"/>.
+    /// </summary>
+    /// <remarks>
+    /// Lets a caller skip building diagnostics — which walks the whole queue — on the iterations where
+    /// nothing would be shown. At the old poll rate that waste was invisible; woken only on demand, it
+    /// would be most of the work a waiter does.
+    /// </remarks>
+    public bool IsReportDue(long elapsedMs)
+    {
+        if (!outputMode.AllowsWaitingStatus || elapsedMs < FirstReportAfterMs)
+        {
+            return false;
+        }
+
+        return _lastReportedAtMs < 0 || elapsedMs - _lastReportedAtMs >= RepeatIntervalMs;
+    }
+
+    /// <summary>
     /// Writes a waiting status when one is due. Silent under <c>--json</c> and <c>--quiet</c>, and
     /// silent for the first <see cref="FirstReportAfterMs"/> milliseconds in every mode.
     /// </summary>

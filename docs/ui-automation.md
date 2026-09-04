@@ -107,8 +107,17 @@ record a workflow driving an app. Two caveats:
 
 Errors you may see: `invalid_ui_workflow_id` (the variable is set but empty or over 256 characters),
 `desktop_coordination_unavailable` (coordination state is unreadable and cannot be safely rebuilt, or
-was written by a newer `winapp`), `queue_capacity_exceeded` (64 commands are already waiting), and
-`cancelled` (Ctrl+C while waiting, exit code `130`).
+was written by a newer `winapp`), `queue_capacity_exceeded` (64 commands from **other** workflows are
+already waiting — the limit counts live foreign waiters, not processes you have started, so entries
+belonging to commands that have exited or been killed do not occupy a slot, and your own workflow's
+commands queue behind each other rather than against this limit), and `cancelled` (Ctrl+C while
+waiting, exit code `130`).
+
+A waiting command is woken by whoever releases the desktop rather than by polling for it, so a queue
+costs almost nothing while it waits and handoff is immediate. Each waiter also rechecks on its own
+occasionally, which is what recovers the desktop when a process is killed and never publishes
+anything: the command at the head of the queue looks every half second, and commands behind it —
+which cannot run before the head does anyway — every few seconds.
 
 ## Targeting Apps
 

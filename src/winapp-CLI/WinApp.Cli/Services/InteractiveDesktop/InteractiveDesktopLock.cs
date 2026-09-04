@@ -31,8 +31,28 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
     /// <summary>Exit code for a command cancelled before it ever ran (128 + SIGINT).</summary>
     internal const int CancelledExitCode = 130;
 
-    private const int PollMinMs = 50;
-    private const int PollMaxMs = 75;
+    /// <summary>
+    /// How often the true global head — and a command blocked at the front of its own owner's barrier —
+    /// rechecks state even without a wake-up.
+    /// </summary>
+    /// <remarks>
+    /// The head is the one waiter whose progress nobody may be alive to signal: if the owner is killed
+    /// there is no orderly completion to publish and no promoter to wake anyone, so somebody has to
+    /// notice. Keeping that duty at the head means exactly one process per desktop recovers, however
+    /// deep the queue.
+    /// </remarks>
+    internal const int HeadRecoveryMs = 500;
+
+    /// <summary>
+    /// Lost-signal backstop for waiters that are not the head.
+    /// </summary>
+    /// <remarks>
+    /// These are woken by the promoter in every ordinary case, so this only covers a promoter that
+    /// crashed between publishing and signalling. Rare enough to be worth almost nothing, which is why
+    /// it is ten times the head interval rather than the old 50-75 ms poll.
+    /// </remarks>
+    internal const int DeepRecoveryMs = 5_000;
+
     private const int ActiveLockRetryMinMs = 10;
     private const int ActiveLockRetryMaxMs = 25;
 
@@ -44,6 +64,7 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
     private readonly IUiOwnerResolver _ownerResolver;
     private readonly IProcessInspector _processInspector;
     private readonly IPollDelay _pollDelay;
+    private readonly IParticipantSignals _signals;
     private readonly IAnsiConsole _console;
     private readonly ILogger<InteractiveDesktopLock> _logger;
     private readonly IMonotonicClock _clock;
@@ -57,6 +78,7 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
         IProcessInspector processInspector,
         IMonotonicClock clock,
         IPollDelay pollDelay,
+        IParticipantSignals signals,
         IAnsiConsole console,
         ILogger<InteractiveDesktopLock> logger)
     {
@@ -66,6 +88,7 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
         _ownerResolver = ownerResolver;
         _processInspector = processInspector;
         _pollDelay = pollDelay;
+        _signals = signals;
         _console = console;
         _logger = logger;
         _clock = clock;
@@ -162,6 +185,13 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
         private readonly Stopwatch _waitWatch = new();
 
         /// <summary>
+        /// This process's wake-up channel, opened before any entry naming it is published so a promoter
+        /// can never find it missing.
+        /// </summary>
+        private readonly IParticipantSignal _signal =
+            coordinator._signals.Create(participant.ProcessId, participant.StartTicksUtc);
+
+        /// <summary>
         /// Serializes desktop sections opened by this one command.
         /// </summary>
         /// <remarks>
@@ -198,6 +228,46 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
         public UiTurnMode Mode { get; private set; } = mode;
 
         public long WaitedMs { get; private set; }
+
+        /// <summary>
+        /// Publishes a mutated state and wakes every participant the mutation made runnable.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The single place state reaches disk during a transaction that can change who may run, so no
+        /// transition path — promotion, absorption, barrier release, cancellation cleanup, crash
+        /// pruning — has to remember to wake anyone. The set is computed by comparing what the state
+        /// said was runnable before the mutation with what it says afterwards, which is a property of
+        /// the state rather than of the code path that produced it.
+        /// </para>
+        /// <para>
+        /// Signalling happens strictly after the publish. A wake-up that arrived first would send its
+        /// target to read state that has not changed yet, and the target would go back to sleep having
+        /// consumed the only notification it was going to get.
+        /// </para>
+        /// </remarks>
+        private void PublishAndSignal(
+            InteractiveDesktopState state,
+            HashSet<(int Pid, long StartTicksUtc)> runnableBefore)
+        {
+            coordinator._store.Publish(state);
+
+            foreach (var target in InteractiveDesktopScheduler.RunnableParticipants(state))
+            {
+                if (target.Pid == participant.ProcessId && target.StartTicksUtc == participant.StartTicksUtc)
+                {
+                    // Waking ourselves would only cost us a spurious loop after we already know.
+                    continue;
+                }
+
+                if (runnableBefore.Contains(target))
+                {
+                    continue;
+                }
+
+                coordinator._signals.Signal(target.Pid, target.StartTicksUtc);
+            }
+        }
 
         public async Task<int> RunAsync(
             Func<IUiTurn, CancellationToken, Task<int>> body,
@@ -271,13 +341,17 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
 
             var state = read.State!;
 
+            // Captured before any mutation: everything published from this transaction compares against
+            // it to find who became runnable.
+            var runnableBefore = InteractiveDesktopScheduler.RunnableParticipants(state);
+
             if (Mode == UiTurnMode.Observe)
             {
-                RegisterObserve(state);
+                RegisterObserve(state, runnableBefore);
                 return;
             }
 
-            RegisterParticipating(state);
+            RegisterParticipating(state, runnableBefore);
         }
 
         /// <summary>
@@ -301,7 +375,7 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
             _turnAction = UiTurnAction.Detached;
         }
 
-        private void RegisterObserve(InteractiveDesktopState state)
+        private void RegisterObserve(InteractiveDesktopState state, HashSet<(int Pid, long StartTicksUtc)> runnableBefore)
         {
             var changed = coordinator._scheduler.Normalize(state, _probe);
 
@@ -311,7 +385,7 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
                 // and no state entry and cannot block anyone.
                 if (changed || _recoveredFromCorruption)
                 {
-                    coordinator._store.Publish(state);
+                    PublishAndSignal(state, runnableBefore);
                 }
 
                 _detached = true;
@@ -337,7 +411,7 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
 
                 if (changed || _recoveredFromCorruption)
                 {
-                    coordinator._store.Publish(state);
+                    PublishAndSignal(state, runnableBefore);
                 }
 
                 return;
@@ -345,10 +419,10 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
 
             _turnAction = admission.TurnAction;
             _turnStartedTick64 = TurnStartTick(state);
-            coordinator._store.Publish(state);
+            PublishAndSignal(state, runnableBefore);
         }
 
-        private void RegisterParticipating(InteractiveDesktopState state)
+        private void RegisterParticipating(InteractiveDesktopState state, HashSet<(int Pid, long StartTicksUtc)> runnableBefore)
         {
             _lease = coordinator._participants.OpenLease(participant.ProcessId, participant.StartTicksUtc);
 
@@ -371,8 +445,9 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
             _turnStartedTick64 = admission.Admission == UiAdmission.GlobalWaiter
                 ? null
                 : TurnStartTick(state);
-            _observedQueueDepth = InteractiveDesktopScheduler.CountLiveWaiters(state, _probe);
-            coordinator._store.Publish(state);
+            // Normalized inside BeginParticipating, so the list is already only live waiters.
+            _observedQueueDepth = InteractiveDesktopScheduler.CountWaiters(state);
+            PublishAndSignal(state, runnableBefore);
 
             if (admission.Admission is UiAdmission.OwnerCommandWaiting or UiAdmission.GlobalWaiter)
             {
@@ -381,10 +456,24 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
         }
 
         /// <summary>
-        /// Polls until this command's entry is <see cref="UiCommandStatus.Running"/> — covering both the
+        /// Waits until this command's entry is <see cref="UiCommandStatus.Running"/> — covering both the
         /// global FIFO wait and the owner-local forward barrier. Cancellable and indefinite: there is no
         /// coordination timeout in v1 (spec §10.3, §10.4).
         /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Waiting is push-based: whoever makes this command runnable wakes it, so the common case costs
+        /// one state read rather than one every 50-75 ms for the whole wait. The signal is only a hint,
+        /// though — the status is always re-read under <c>state.lock</c> before returning, so a stale,
+        /// duplicated or spurious wake cannot start a command that is not actually eligible.
+        /// </para>
+        /// <para>
+        /// A wake-up that never arrives must not strand anyone, which is what the recovery deadlines are
+        /// for. Only the head of the queue can be waiting on a process that died without publishing
+        /// anything, so only the head rechecks briskly; everyone behind it is covered by a much longer
+        /// backstop, because their turn cannot come before the head's does.
+        /// </para>
+        /// </remarks>
         private async Task WaitUntilRunnableAsync(CancellationToken cancellationToken)
         {
             if (!_waitWatch.IsRunning)
@@ -399,7 +488,7 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                UiWaitDiagnostics diagnostics;
+                WaitPlan plan;
                 using (var stateLock = coordinator._store.AcquireStateLock(cancellationToken))
                 {
                     var read = coordinator._store.Read();
@@ -412,9 +501,12 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
                     }
 
                     var state = read.State!;
+                    var runnableBefore = InteractiveDesktopScheduler.RunnableParticipants(state);
                     if (coordinator._scheduler.Normalize(state, _probe) || read.RecoveredFromCorruption)
                     {
-                        coordinator._store.Publish(state);
+                        // This waiter may itself be the one that recovers a crashed owner, in which case
+                        // it has just promoted somebody — possibly not itself.
+                        PublishAndSignal(state, runnableBefore);
                     }
 
                     var entry = InteractiveDesktopScheduler.FindOwnerCommand(state, participant);
@@ -431,23 +523,111 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
                         return;
                     }
 
-                    diagnostics = BuildDiagnostics(state, entry);
+                    plan = BuildWaitPlan(state, entry, reporter.IsReportDue(_waitWatch.ElapsedMilliseconds));
                 }
 
-                reporter.ReportIfDue(_waitWatch.ElapsedMilliseconds, diagnostics);
+                if (plan.Diagnostics is { } diagnostics)
+                {
+                    reporter.ReportIfDue(_waitWatch.ElapsedMilliseconds, diagnostics);
+                }
 
-                // Jittered so a burst of waiters does not resynchronize into a lock-step convoy on
-                // state.lock. There are no heartbeat writes — a poll that finds nothing changed
-                // publishes nothing.
-                await coordinator._pollDelay
-                    .DelayAsync(Random.Shared.Next(PollMinMs, PollMaxMs + 1), cancellationToken)
-                    .ConfigureAwait(false);
+                // A signal that arrived before this call is still latched on the auto-reset event, so a
+                // promoter that published and woke us while we were between iterations cannot be missed.
+                await _signal.WaitAsync(plan.Timeout, cancellationToken).ConfigureAwait(false);
             }
+        }
+
+        /// <summary>How long to sleep next, and the diagnostics to render first when one is due.</summary>
+        private readonly record struct WaitPlan(TimeSpan Timeout, UiWaitDiagnostics? Diagnostics);
+
+        /// <summary>
+        /// Decides how long this command may sleep before it must look again on its own.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The head of the global queue, and a command sitting at the front of its own owner's barrier,
+        /// take the short interval: they are the ones whose unblocking may depend on a process that
+        /// died without publishing anything, and a dead process sends no signals. Everyone else keeps
+        /// the long backstop, which only exists for a promoter that crashed between publishing and
+        /// signalling.
+        /// </para>
+        /// <para>
+        /// An explicit idle grace is a deadline nobody will announce — the turn simply becomes stale at
+        /// a known time — so the head also wakes exactly then rather than up to an interval late.
+        /// </para>
+        /// </remarks>
+        private WaitPlan BuildWaitPlan(InteractiveDesktopState state, OwnerCommandEntry? ownEntry, bool reportDue)
+        {
+            var isHead = IsRecoveryResponsible(state, ownEntry);
+            var timeoutMs = isHead ? HeadRecoveryMs : DeepRecoveryMs;
+
+            if (isHead && state.Owner is not null && state.OwnerCommands.Count == 0)
+            {
+                // The turn is idle and will lapse at a known tick; waking then turns a grace expiry into
+                // an immediate handoff instead of one that waits for the next interval.
+                var untilGrace = state.IdleExpiresTick64 - coordinator._clock.NowTicks64;
+                if (untilGrace > 0 && untilGrace < timeoutMs)
+                {
+                    timeoutMs = (int)untilGrace;
+                }
+            }
+
+            if (outputMode.AllowsWaitingStatus)
+            {
+                // Human output has its own cadence to keep, so never sleep past the next status line.
+                var untilReport = NextReportInMs(_waitWatch.ElapsedMilliseconds);
+                if (untilReport < timeoutMs)
+                {
+                    timeoutMs = untilReport;
+                }
+            }
+
+            return new WaitPlan(
+                TimeSpan.FromMilliseconds(Math.Max(1, timeoutMs)),
+                reportDue ? BuildDiagnostics(state, ownEntry) : null);
+        }
+
+        /// <summary>
+        /// Whether this command is the one that must notice a failure nobody will report.
+        /// </summary>
+        private bool IsRecoveryResponsible(InteractiveDesktopState state, OwnerCommandEntry? ownEntry)
+        {
+            if (ownEntry is not null)
+            {
+                // Blocked behind its own owner's barrier: responsible when nothing of this owner's is
+                // ahead of it, because then the only thing it waits on is a command that may have died.
+                var ownTicket = ownEntry.Ticket ?? long.MaxValue;
+                return !state.OwnerCommands.Any(c =>
+                    (c.Pid != participant.ProcessId || c.ProcessStartTicksUtc != participant.StartTicksUtc)
+                    && (c.Ticket ?? long.MaxValue) < ownTicket);
+            }
+
+            // Global queue: the lowest live ticket. Normalization has already pruned the dead, so the
+            // minimum is the true head.
+            var head = state.Waiters.MinBy(w => w.Ticket);
+            return head is not null
+                && head.Pid == participant.ProcessId
+                && head.ProcessStartTicksUtc == participant.StartTicksUtc;
+        }
+
+        /// <summary>Milliseconds until the wait reporter would next print, for the sleep clamp.</summary>
+        private static int NextReportInMs(long elapsedMs)
+        {
+            if (elapsedMs < UiCoordinationWaitReporter.FirstReportAfterMs)
+            {
+                return (int)(UiCoordinationWaitReporter.FirstReportAfterMs - elapsedMs);
+            }
+
+            var sinceCycle = (elapsedMs - UiCoordinationWaitReporter.FirstReportAfterMs)
+                % UiCoordinationWaitReporter.RepeatIntervalMs;
+            return (int)(UiCoordinationWaitReporter.RepeatIntervalMs - sinceCycle);
         }
 
         private UiWaitDiagnostics BuildDiagnostics(InteractiveDesktopState state, OwnerCommandEntry? ownEntry)
         {
-            var queueDepth = InteractiveDesktopScheduler.CountLiveWaiters(state, _probe);
+            // Called only from inside a transaction that has just normalized, so the lists hold live
+            // participants only and no entry here needs a process handle to confirm it.
+            var queueDepth = InteractiveDesktopScheduler.CountWaiters(state);
             _observedQueueDepth = Math.Max(_observedQueueDepth, queueDepth);
 
             var active = state.OwnerCommands
@@ -464,8 +644,7 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
             else if (_ticket is { } queuedTicket)
             {
                 commandsAhead = state.OwnerCommands.Count
-                    + state.Waiters.Count(w => w.Ticket < queuedTicket
-                        && _probe.IsParticipantLive(w.Pid, w.ProcessStartTicksUtc));
+                    + state.Waiters.Count(w => w.Ticket < queuedTicket);
             }
             else
             {
@@ -531,8 +710,11 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
                 var read = coordinator._store.Read();
                 if (read.State is { } state)
                 {
+                    // The most important wake-up of all: finishing is what frees the desktop, so the
+                    // participants this completion promotes must be told before this process exits.
+                    var runnableBefore = InteractiveDesktopScheduler.RunnableParticipants(state);
                     coordinator._scheduler.CompleteCommand(state, _probe, participant, owner, renewGrace);
-                    coordinator._store.Publish(state);
+                    PublishAndSignal(state, runnableBefore);
                 }
             }
             catch (Exception ex) when (ex is UiCoordinationException or IOException)
@@ -662,6 +844,11 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
         {
             _lease?.Dispose();
             _lease = null;
+
+            // Closed last, after the lease. While this handle is open another process can still name and
+            // signal us, which is harmless; closing it before the entry is gone would only lose wake-ups
+            // we might still legitimately receive.
+            _signal.Dispose();
             _sectionGate.Dispose();
         }
 

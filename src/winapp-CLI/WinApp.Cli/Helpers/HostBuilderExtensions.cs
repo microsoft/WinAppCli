@@ -74,6 +74,7 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IMonotonicClock, TickCountClock>()
             .AddSingleton<IInteractiveDesktopPaths, InteractiveDesktopPaths>()
             .AddSingleton<IParticipantRegistry, ParticipantRegistry>()
+            .AddSingleton<IParticipantSignals, ParticipantSignals>()
             .AddSingleton<IInteractiveDesktopStateStore, InteractiveDesktopStateStore>()
             .AddSingleton<IUiOwnerResolver, UiOwnerResolver>()
             .AddSingleton<IInteractiveDesktopLock, InteractiveDesktopLock>()

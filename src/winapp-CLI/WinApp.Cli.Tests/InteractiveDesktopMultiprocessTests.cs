@@ -29,7 +29,7 @@ namespace WinApp.Cli.Tests;
 [DoNotParallelize] // WINAPP_UI_LOCK_DIRECTORY is process-wide and the child inherits it.
 [TestCategory("Interactive")]
 [TestCategory("UiCoordination")]
-public class InteractiveDesktopMultiprocessTests
+public partial class InteractiveDesktopMultiprocessTests
 {
     private const string GateVariable = "WINAPP_UI_MULTIPROCESS_TESTS";
 
@@ -70,7 +70,11 @@ public class InteractiveDesktopMultiprocessTests
             _paths, _participants, new TickCountClock(), NullLogger<InteractiveDesktopStateStore>.Instance);
         _coordinator = new InteractiveDesktopLock(
             _store, _paths, _participants, new UiOwnerResolver(), inspector,
-            new TickCountClock(), new FakePollDelay(), new TestConsole(),
+            new TickCountClock(), new FakePollDelay(),
+            // Real named events: the whole point of these tests is that a wake-up crosses a process
+            // boundary to a genuine winapp.exe child.
+            new ParticipantSignals(inspector, NullLogger<ParticipantSignals>.Instance),
+            new TestConsole(),
             NullLogger<InteractiveDesktopLock>.Instance);
     }
 
