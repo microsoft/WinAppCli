@@ -113,7 +113,9 @@ internal sealed class WindowsNativeToolchainResolver(IProcessRunner processRunne
             // diagnostic-only, so keep the usable toolchain and report an unknown display version.
         }
 
-        var vcToolsRoot = Path.Combine(installationPath, "VC", "Tools", "MSVC");
+        var vcToolsRoot = Path.Combine(
+            installationPath,
+            Path.Combine("VC", "Tools", "MSVC"));
         string? vcToolsVersion;
         try
         {

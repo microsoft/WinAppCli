@@ -405,7 +405,7 @@ internal partial class RunCommand
                    new FileInfo(resolution.SourceExecutable!),
                    resolution.Packaging == ProjectPackaging.Packaged
                       ? outputAppXDirectory ??
-                          new DirectoryInfo(Path.Combine(resolution.PublishDirectory!, "AppX"))
+                          new DirectoryInfo(Path.GetFullPath("AppX", resolution.PublishDirectory!))
                       : null);
                report.Verification = new RunVerificationResult
                {

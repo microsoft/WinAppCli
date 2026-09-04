@@ -537,16 +537,16 @@ public sealed class ProjectPublishServiceTests
     private string CreateNativeAotPackages(string rid, string version)
     {
         var packageFolder = Path.Combine(_tempDirectory.FullName, "packages");
-        foreach (var normalizedPackageId in new[]
-                 {
-                     $"Microsoft.NETCore.App.Runtime.NativeAOT.{rid}",
-                     $"runtime.{rid}.Microsoft.DotNet.ILCompiler",
-                 }.Select(packageId => packageId.ToLowerInvariant()))
+        var versionDirectories = new[]
         {
-            var versionDirectory = Path.Combine(
-                packageFolder,
-                normalizedPackageId,
-                version);
+            $"Microsoft.NETCore.App.Runtime.NativeAOT.{rid}",
+            $"runtime.{rid}.Microsoft.DotNet.ILCompiler",
+        }.Select(packageId => Path.Combine(
+            packageFolder,
+            packageId.ToLowerInvariant(),
+            version));
+        foreach (var versionDirectory in versionDirectories)
+        {
             Directory.CreateDirectory(versionDirectory);
             File.WriteAllText(Path.Combine(versionDirectory, ".nupkg.metadata"), "{}");
         }

@@ -495,7 +495,7 @@ internal sealed partial class ProjectRunService
             var targetFileName = GetProp(properties, "TargetFileName");
             var managedAssembly = string.IsNullOrWhiteSpace(targetFileName)
                 ? null
-                : Path.Combine(publishDirectory, targetFileName);
+                : Path.Combine(publishDirectory, Path.GetFileName(targetFileName));
             if (managedAssembly is not null && File.Exists(managedAssembly))
             {
                 runCommand = "dotnet";
@@ -569,7 +569,8 @@ internal sealed partial class ProjectRunService
         var targetName = NullIfEmpty(GetProp(properties, "TargetName"))
             ?? NullIfEmpty(GetProp(properties, "AssemblyName"))
             ?? Path.GetFileNameWithoutExtension(csproj.Name);
-        var executable = Path.Combine(publishDirectory, targetName + ".exe");
+        var executableName = Path.GetFileName(targetName) + ".exe";
+        var executable = Path.Combine(publishDirectory, executableName);
         if (requireArtifacts && !File.Exists(executable))
         {
             throw new ProjectRunException(
@@ -648,16 +649,9 @@ internal sealed partial class ProjectRunService
                 return false;
             }
 
-            foreach (var packageFolder in packageFolders.EnumerateObject())
-            {
-                if (IsCompletePackage(packageFolder.Name, runtimePackId, version) &&
-                    IsCompletePackage(packageFolder.Name, compilerPackId, version))
-                {
-                    return true;
-                }
-            }
-
-            return false;
+            return packageFolders.EnumerateObject().Any(packageFolder =>
+                IsCompletePackage(packageFolder.Name, runtimePackId, version) &&
+                IsCompletePackage(packageFolder.Name, compilerPackId, version));
         }
         catch (Exception ex) when (
             ex is IOException or
@@ -723,12 +717,24 @@ internal sealed partial class ProjectRunService
 
     private static bool IsCompletePackage(string packageFolder, string packageId, string version)
     {
+        if (!Path.IsPathFullyQualified(packageFolder))
+        {
+            return false;
+        }
+
+        var safePackageId = Path.GetFileName(packageId).ToLowerInvariant();
+        var safeVersion = Path.GetFileName(version).ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(safePackageId) ||
+            string.IsNullOrWhiteSpace(safeVersion))
+        {
+            return false;
+        }
+
         var packageDirectory = Path.Combine(
             packageFolder,
-            packageId.ToLowerInvariant(),
-            version.ToLowerInvariant());
+            Path.Combine(safePackageId, safeVersion));
         return Directory.Exists(packageDirectory) &&
-               File.Exists(Path.Combine(packageDirectory, ".nupkg.metadata"));
+               File.Exists(Path.GetFullPath(".nupkg.metadata", packageDirectory));
     }
 
     private static bool TryFindNativeAotDiagnostic(
