@@ -88,11 +88,23 @@ public sealed class ProjectRunServicePublishProfileTests
             ProjectRunService.BuildRestorePassArguments(app, options),
             "-p:PublishProfile=win-arm64.pubxml");
         StringAssert.Contains(
+            ProjectRunService.BuildRestorePassArguments(app, options),
+            $"-p:ProjectToOverrideProjectExtensionsPath={app.FullName}");
+        StringAssert.Contains(
             ProjectRunService.BuildBuildPassArguments(app, options, "minimal"),
             "-p:PublishProfile=win-arm64.pubxml");
         StringAssert.Contains(
+            ProjectRunService.BuildBuildPassArguments(app, options, "minimal"),
+            $"-p:ProjectToOverrideProjectExtensionsPath={app.FullName}");
+        StringAssert.Contains(
             ProjectRunService.BuildEvaluateArguments(app, options),
             "-p:PublishProfile=win-arm64.pubxml");
+        StringAssert.Contains(
+            ProjectRunService.BuildEvaluateArguments(app, options),
+            $"-p:ProjectToOverrideProjectExtensionsPath={app.FullName}");
+        StringAssert.Contains(
+            ProjectRunService.BuildBuildPassArguments(app, options, "minimal"),
+            $"-p:ProjectToOverrideProjectExtensionsPath={app.FullName}");
 
         var fallback = ProjectRunService.BuildEvaluateArguments(
             app,
@@ -167,7 +179,9 @@ public sealed class ProjectRunServicePublishProfileTests
             app,
             Options("arm64"),
             currentProfile: "Custom\\win-anycpu.pubxml",
-            candidateProfile: "Custom\\win-arm64.pubxml");
+            candidateProfile: "Custom\\win-arm64.pubxml",
+            candidatePlatform: "x64",
+            candidateRuntimeIdentifier: "win-x64");
 
         Assert.IsNull(
             resolved.PublishProfile,
@@ -200,6 +214,23 @@ public sealed class ProjectRunServicePublishProfileTests
     }
 
     [TestMethod]
+    public void ResolvedProfile_EscapesCommaPropertySeparator()
+    {
+        var app = WriteApp();
+        WriteProfile("win-arm64,Extra=true.pubxml", "ARM64", "win-arm64");
+
+        var resolved = ResolveProfile(
+            app,
+            Options("arm64"),
+            currentProfile: "win-anycpu,Extra=true.pubxml",
+            candidateProfile: "win-arm64,Extra=true.pubxml");
+        var arguments = ProjectRunService.BuildBuildPassArguments(app, resolved, "minimal");
+
+        StringAssert.Contains(arguments, "-p:PublishProfile=win-arm64%2CExtra=true.pubxml");
+        Assert.IsFalse(arguments.Contains("-p:PublishProfile=win-arm64,Extra=true.pubxml"));
+    }
+
+    [TestMethod]
     public void FrameworkDependentProfile_IsNotSelectedAsSelfContainedFallback()
     {
         var app = WriteApp();
@@ -211,7 +242,7 @@ public sealed class ProjectRunServicePublishProfileTests
     }
 
     [TestMethod]
-    public void ReferencedProjectWithSameProfileName_SuppressesFallback()
+    public void ReferencedProjectWithSameProfileName_IsScopedToRootApp()
     {
         WriteFile("Library\\Library.csproj", """
             <Project Sdk="Microsoft.NET.Sdk">
@@ -238,10 +269,14 @@ public sealed class ProjectRunServicePublishProfileTests
         WriteProfile("win-arm64.pubxml", "ARM64", "win-arm64");
 
         var resolved = ResolveProfile(app, Options("arm64"));
+        var arguments = ProjectRunService.BuildBuildPassArguments(app, resolved, "minimal");
 
-        Assert.IsNull(
-            resolved.PublishProfile,
-            "a global PublishProfile must not be inferred when a referenced project could import it too");
+        Assert.AreEqual("win-arm64.pubxml", resolved.PublishProfile);
+        StringAssert.Contains(arguments, "-p:PublishProfile=win-arm64.pubxml");
+        StringAssert.Contains(
+            arguments,
+            $"-p:ProjectToOverrideProjectExtensionsPath={app.FullName}",
+            "the SDK scoping property must limit profile import to the selected app");
     }
 
     [TestMethod]
@@ -256,6 +291,7 @@ public sealed class ProjectRunServicePublishProfileTests
             app,
             Options("arm64"),
             current,
+            ProfileProperties(app, "win-arm64.pubxml", imported: true, selfContained: true),
             ProfileProperties(app, "win-arm64.pubxml", imported: true, selfContained: true));
 
         Assert.IsNull(resolved.PublishProfile);
@@ -273,6 +309,7 @@ public sealed class ProjectRunServicePublishProfileTests
             app,
             Options("arm64"),
             current,
+            ProfileProperties(app, "win-arm64.pubxml", imported: true, selfContained: true),
             ProfileProperties(app, "win-arm64.pubxml", imported: true, selfContained: true));
 
         Assert.IsNull(resolved.PublishProfile);
@@ -290,6 +327,7 @@ public sealed class ProjectRunServicePublishProfileTests
             app,
             Options("arm64"),
             current,
+            ProfileProperties(app, "win-arm64.pubxml", imported: true, selfContained: true),
             ProfileProperties(app, "win-arm64.pubxml", imported: true, selfContained: true));
 
         Assert.IsNull(resolved.PublishProfile);
@@ -317,11 +355,39 @@ public sealed class ProjectRunServicePublishProfileTests
             app,
             Options("arm64"),
             current,
+            ProfileProperties(app, "win-arm64.pubxml", imported: true, selfContained: true),
             candidate);
 
         Assert.IsNull(
             resolved.PublishProfile,
             "an inferred profile must not silently retarget the app to a stale framework");
+    }
+
+    [TestMethod]
+    public void CandidateArchitectureChange_SuppressesInference()
+    {
+        var app = WriteApp();
+        WriteProfile("win-arm64.pubxml", "ARM64", "win-arm64");
+        var current = ProfileProperties(app, "win-anycpu.pubxml", imported: false, selfContained: false);
+        var discovery = ProfileProperties(app, "win-arm64.pubxml", imported: true, selfContained: true);
+        var candidate = ProfileProperties(
+            app,
+            "win-arm64.pubxml",
+            imported: true,
+            selfContained: true,
+            platform: "x64",
+            runtimeIdentifier: "win-x64");
+
+        var resolved = ProjectRunService.ResolvePublishProfileFallback(
+            app,
+            Options("arm64"),
+            current,
+            discovery,
+            candidate);
+
+        Assert.IsNull(
+            resolved.PublishProfile,
+            "the final PublishProfile-only evaluation must preserve the requested architecture");
     }
 
     [TestMethod]
@@ -569,6 +635,56 @@ public sealed class ProjectRunServicePublishProfileTests
         StringAssert.Contains(dotnet.StreamingCalls.Single(), "-p:PublishProfile=imported-arm64.pubxml");
     }
 
+    [TestMethod]
+    public async Task DefinitiveUnpackagedProbe_UsesProfileThatChangesPackaging()
+    {
+        WriteFile("Library\\Library.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+                <Platform>AnyCPU</Platform>
+              </PropertyGroup>
+            </Project>
+            """);
+        var app = WriteApp("""
+            <PropertyGroup>
+              <WindowsPackageType>None</WindowsPackageType>
+              <PublishTrimmed>true</PublishTrimmed>
+            </PropertyGroup>
+            <ItemGroup>
+              <ProjectReference Include="Library\Library.csproj" />
+            </ItemGroup>
+            """);
+        WriteProfile("win-arm64.pubxml", "ARM64", "win-arm64");
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = arguments =>
+            {
+                var useCandidate = arguments.Contains("-p:Platform=ARM64", StringComparison.Ordinal)
+                    || arguments.Contains("-p:PublishProfile=win-arm64.pubxml", StringComparison.Ordinal);
+                var properties = ProfileProperties(
+                    app,
+                    useCandidate ? "win-arm64.pubxml" : "win-anycpu.pubxml",
+                    imported: useCandidate,
+                    selfContained: useCandidate,
+                    publishTrimmed: true);
+                properties["WindowsPackageType"] = useCandidate ? "MSIX" : "None";
+                return (0, PropertiesJson(properties), string.Empty);
+            },
+        };
+        var service = NewService(dotnet);
+
+        var result = await service.IsDefinitivelyUnpackagedAsync(
+            app,
+            Options("arm64"),
+            CancellationToken.None);
+
+        Assert.IsFalse(result, "the inferred profile changes the effective app to packaged");
+        Assert.IsTrue(
+            dotnet.StringInvocations.Last().Contains("-p:PublishProfile=win-arm64.pubxml"),
+            "the definitive packaging probe must use the same inferred profile as the real build");
+    }
+
     private static ProjectRunOptions Options(string architecture, params string[] properties) =>
         new("Release", architecture, null, NoBuild: false, NoRestore: false, Properties: properties);
 
@@ -577,12 +693,27 @@ public sealed class ProjectRunServicePublishProfileTests
         ProjectRunOptions options,
         string currentProfile = "win-anycpu.pubxml",
         string candidateProfile = "win-arm64.pubxml",
-        bool candidateSelfContained = true) =>
+        bool candidateSelfContained = true,
+        string candidatePlatform = "ARM64",
+        string candidateRuntimeIdentifier = "win-arm64") =>
         ProjectRunService.ResolvePublishProfileFallback(
             app,
             options,
             ProfileProperties(app, currentProfile, imported: false, selfContained: false),
-            ProfileProperties(app, candidateProfile, imported: true, selfContained: candidateSelfContained));
+            ProfileProperties(
+                app,
+                candidateProfile,
+                imported: true,
+                selfContained: candidateSelfContained,
+                platform: candidatePlatform,
+                runtimeIdentifier: candidateRuntimeIdentifier),
+            ProfileProperties(
+                app,
+                candidateProfile,
+                imported: true,
+                selfContained: candidateSelfContained,
+                platform: candidatePlatform,
+                runtimeIdentifier: candidateRuntimeIdentifier));
 
     private Dictionary<string, string> ProfileProperties(
         FileInfo app,
@@ -591,7 +722,9 @@ public sealed class ProjectRunServicePublishProfileTests
         bool selfContained,
         bool publishTrimmed = true,
         bool publishAot = false,
-        string targetFramework = "net10.0-windows10.0.26100.0")
+        string targetFramework = "net10.0-windows10.0.26100.0",
+        string platform = "ARM64",
+        string runtimeIdentifier = "win-arm64")
     {
         var root = Path.Join(app.Directory!.FullName, "Properties", "PublishProfiles")
             + Path.DirectorySeparatorChar;
@@ -614,6 +747,8 @@ public sealed class ProjectRunServicePublishProfileTests
             ["PublishProfileImported"] = imported.ToString(),
             ["_PublishProfileRootFolder"] = root,
             ["TargetFramework"] = targetFramework,
+            ["Platform"] = imported ? platform : "AnyCPU",
+            ["RuntimeIdentifier"] = runtimeIdentifier,
         };
     }
 

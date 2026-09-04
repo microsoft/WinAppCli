@@ -2,8 +2,6 @@
 // Licensed under the MIT License.
 
 using System.ComponentModel;
-using System.Xml;
-using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
@@ -57,9 +55,28 @@ internal sealed partial class ProjectRunService
             csWinRTMetadataFolder,
             cancellationToken);
 
-        return platformProperties is null
+        if (platformProperties is null
+            || !TryGetImportedPublishProfileFile(csproj, platformProperties, out var profile))
+        {
+            return options;
+        }
+
+        var candidateOptions = options with { PublishProfile = Path.GetFileName(profile.FullName) };
+        var candidateProperties = await TryEvaluatePublishProfilePropertiesAsync(
+            csproj,
+            candidateOptions,
+            workingDirectory,
+            csWinRTMetadataFolder,
+            cancellationToken);
+
+        return candidateProperties is null
             ? options
-            : ResolvePublishProfileFallback(csproj, options, currentProperties, platformProperties);
+            : ResolvePublishProfileFallback(
+                csproj,
+                options,
+                currentProperties,
+                platformProperties,
+                candidateProperties);
     }
 
     private async Task<IReadOnlyDictionary<string, string>?> TryEvaluatePublishProfilePropertiesAsync(
@@ -116,7 +133,8 @@ internal sealed partial class ProjectRunService
         FileInfo csproj,
         ProjectRunOptions options,
         IReadOnlyDictionary<string, string> currentProperties,
-        IReadOnlyDictionary<string, string> platformProperties)
+        IReadOnlyDictionary<string, string> platformProperties,
+        IReadOnlyDictionary<string, string> candidateProperties)
     {
         if (!CanInferPublishProfile(options)
             || !RequiresSelfContainedProfile(currentProperties)
@@ -129,27 +147,28 @@ internal sealed partial class ProjectRunService
         var currentProfile = GetProp(currentProperties, "PublishProfile");
         var candidateProfile = GetProp(platformProperties, "PublishProfile");
         var currentFramework = GetProp(currentProperties, "TargetFramework");
-        var candidateFramework = GetProp(platformProperties, "TargetFramework");
+        var candidateFramework = GetProp(candidateProperties, "TargetFramework");
+        var candidatePlatform = RunArchHelper.NormalizeArchitecture(GetProp(candidateProperties, "Platform"));
+        var candidateRuntimeArchitecture = RunArchHelper.ArchitectureFromRid(
+            GetProp(candidateProperties, "RuntimeIdentifier"));
         if (string.IsNullOrWhiteSpace(candidateProfile)
             || string.Equals(currentProfile, candidateProfile, StringComparison.OrdinalIgnoreCase)
             || string.IsNullOrWhiteSpace(currentFramework)
             || !string.Equals(currentFramework, candidateFramework, StringComparison.OrdinalIgnoreCase)
-            || !IsTrue(GetProp(platformProperties, "PublishProfileImported"))
-            || !IsTrue(GetProp(platformProperties, "SelfContained"))
-            || IsTrue(GetProp(platformProperties, "PublishAot"))
-            || !TryGetImportedPublishProfileFile(csproj, platformProperties, out var profile)
-            || !PublishProfileTargetsArchitecture(profile, options.Architecture))
+            || !IsTrue(GetProp(candidateProperties, "PublishProfileImported"))
+            || !IsTrue(GetProp(candidateProperties, "SelfContained"))
+            || IsTrue(GetProp(candidateProperties, "PublishAot"))
+            || !string.Equals(candidatePlatform, options.Architecture, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(
+                candidateRuntimeArchitecture,
+                options.Architecture,
+                StringComparison.OrdinalIgnoreCase)
+            || !TryGetImportedPublishProfileFile(csproj, candidateProperties, out var profile))
         {
             return options;
         }
 
-        var profileToken = Path.GetFileName(profile.FullName);
-        if (ProjectReferenceClosureContainsPublishProfile(csproj, profileToken))
-        {
-            return options;
-        }
-
-        return options with { PublishProfile = profileToken };
+        return options with { PublishProfile = Path.GetFileName(profile.FullName) };
     }
 
     private static bool CanInferPublishProfile(ProjectRunOptions options) =>
@@ -253,91 +272,6 @@ internal sealed partial class ProjectRunService
         {
             return false;
         }
-    }
-
-    private static bool PublishProfileTargetsArchitecture(FileInfo profile, string architecture)
-    {
-        XDocument document;
-        try
-        {
-            document = XDocument.Load(profile.FullName);
-        }
-        catch (IOException)
-        {
-            return false;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return false;
-        }
-        catch (XmlException)
-        {
-            return false;
-        }
-
-        var declaredArchitectures = document
-            .Descendants()
-            .Select(element => element.Name.LocalName switch
-            {
-                "RuntimeIdentifier" => RunArchHelper.ArchitectureFromRid(element.Value),
-                "Platform" => RunArchHelper.NormalizeArchitecture(element.Value),
-                _ => null,
-            })
-            .OfType<string>()
-            .ToList();
-
-        return declaredArchitectures.Count > 0
-            && declaredArchitectures.All(value =>
-                value.Equals(architecture, StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static bool ProjectReferenceClosureContainsPublishProfile(
-        FileInfo start,
-        string publishProfile)
-    {
-        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { start.FullName };
-        var queue = new Queue<FileInfo>();
-        queue.Enqueue(start);
-
-        while (queue.Count > 0)
-        {
-            var current = queue.Dequeue();
-            foreach (var include in ReadProjectReferenceIncludes(current))
-            {
-                if (!TryResolveReferencePath(current, include, out var reference))
-                {
-                    return true;
-                }
-
-                var referenceDirectory = reference.Directory;
-                if (referenceDirectory is null)
-                {
-                    return true;
-                }
-
-                var candidate = new FileInfo(Path.Join(
-                    referenceDirectory.FullName,
-                    "Properties",
-                    "PublishProfiles",
-                    publishProfile));
-                if (candidate.Exists)
-                {
-                    return true;
-                }
-
-                if (visited.Add(reference.FullName))
-                {
-                    if (visited.Count > MaxProjectReferenceClosure)
-                    {
-                        return true;
-                    }
-
-                    queue.Enqueue(reference);
-                }
-            }
-        }
-
-        return false;
     }
 
     private static bool IsTrue(string value) =>

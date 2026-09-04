@@ -40,6 +40,8 @@ internal sealed partial class ProjectRunService(
         "PublishProfileImported",
         "_PublishProfileRootFolder",
         "TargetFramework",
+        "Platform",
+        "RuntimeIdentifier",
     ];
 
     /// <summary>
@@ -452,6 +454,13 @@ internal sealed partial class ProjectRunService(
         options = await ResolveEffectiveFrameworkAsync(csproj, options, workingDir, cancellationToken);
         var shimFramework = await ResolveShimFrameworkAsync(csproj, options, workingDir, cancellationToken);
         var csWinRTMetadata = ResolveCsWinRTMetadataShim(options, shimFramework);
+        options = ResolvePlatformInjection(csproj, options);
+        options = await ResolveRequiredPublishProfileAsync(
+            csproj,
+            options,
+            workingDir,
+            csWinRTMetadata,
+            cancellationToken);
 
         // Reuse the exact evaluate pass (same -p/RID/TFM/shim as a real build) so the WindowsPackageType we
         // read matches what the build would see. Evaluate-only — no build is triggered.

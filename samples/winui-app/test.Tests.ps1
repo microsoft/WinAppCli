@@ -104,6 +104,9 @@ Describe 'winui-app sample' {
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
   </PropertyGroup>
+  <Target Name="RejectAppPublishProfile" BeforeTargets="Build" Condition="'$(PublishProfileImported)' == 'true'">
+    <Error Text="The app publish profile leaked into the referenced library." />
+  </Target>
 </Project>
 '@ | Set-Content -Path (Join-Path $libraryDir 'AnyCpuLibrary.csproj')
 
@@ -120,6 +123,12 @@ Describe 'winui-app sample' {
   </PropertyGroup>
 </Project>
 "@ | Set-Content -Path (Join-Path $profileDir $script:profileName)
+
+                # A same-named library profile would be imported by a plain global PublishProfile property.
+                # winapp scopes the inferred profile to the root app, so this file must remain inactive.
+                $libraryProfileDir = Join-Path $libraryDir 'Properties\PublishProfiles'
+                New-Item -ItemType Directory -Path $libraryProfileDir -Force | Out-Null
+                Copy-Item -Path (Join-Path $profileDir $script:profileName) -Destination $libraryProfileDir
 
                 Push-Location $script:tempDir
             }
@@ -145,6 +154,10 @@ Describe 'winui-app sample' {
             "$output" | Should -Not -Match 'release-'
             "$output" | Should -Match 'Registering packaged application'
             "$output" | Should -Match 'registered'
+        }
+
+        It 'Finds the inferred-profile output with --no-build' -Skip:$script:skip {
+            Invoke-WinappCommand -Arguments 'run . --no-build --no-launch'
         }
     }
 
