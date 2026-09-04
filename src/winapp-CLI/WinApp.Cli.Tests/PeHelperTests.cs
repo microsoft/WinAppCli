@@ -87,14 +87,18 @@ public class PeHelperTests
     [TestMethod]
     public void DetectPeArchitecture_NonexistentFile_ReturnsNull()
     {
-        var missing = Path.Combine(Path.GetTempPath(), $"pehelper_missing_{Guid.NewGuid():N}.dll");
+        var missing = Path.GetFullPath(
+            $"pehelper_missing_{Guid.NewGuid():N}.dll",
+            Path.GetTempPath());
         Assert.IsNull(PeHelper.DetectPeArchitecture(missing));
     }
 
     [TestMethod]
     public void DetectPeArchitecture_NotAPeFile_ReturnsNull()
     {
-        var junk = Path.Combine(Path.GetTempPath(), $"pehelper_junk_{Guid.NewGuid():N}.bin");
+        var junk = Path.GetFullPath(
+            $"pehelper_junk_{Guid.NewGuid():N}.bin",
+            Path.GetTempPath());
         File.WriteAllText(junk, "this is not a PE image");
         try
         {
@@ -112,7 +116,7 @@ public class PeHelperTests
     public void DetectPeArchitecture_RealNativeSystemDll_ReturnsKnownArchitecture()
     {
         // A real native Windows DLL is classified from its COFF machine field.
-        var kernel32 = Path.Combine(Environment.SystemDirectory, "kernel32.dll");
+        var kernel32 = Path.GetFullPath("kernel32.dll", Environment.SystemDirectory);
         if (!File.Exists(kernel32))
         {
             Assert.Inconclusive("kernel32.dll not found; skipping native PE classification check.");
@@ -157,9 +161,9 @@ public class PeHelperTests
 
     private static string WriteBundleMarkerFixture(long headerOffset)
     {
-        var path = Path.Combine(
-            Path.GetTempPath(),
-            $"pehelper_bundle_{Guid.NewGuid():N}.exe");
+        var path = Path.GetFullPath(
+            $"pehelper_bundle_{Guid.NewGuid():N}.exe",
+            Path.GetTempPath());
         using var stream = File.Create(path);
         stream.SetLength(256);
         stream.Position = 64;

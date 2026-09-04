@@ -20,8 +20,10 @@ public sealed class ProjectPublishServiceTests
     public void Initialize()
     {
         _tempDirectory = Directory.CreateDirectory(
-            Path.Combine(Path.GetTempPath(), $"ProjectPublishServiceTests_{Guid.NewGuid():N}"));
-        _project = new FileInfo(Path.Combine(_tempDirectory.FullName, "App.csproj"));
+            Path.GetFullPath(
+                $"ProjectPublishServiceTests_{Guid.NewGuid():N}",
+                Path.GetTempPath()));
+        _project = new FileInfo(TempPath("App.csproj"));
         File.WriteAllText(
             _project.FullName,
             """
@@ -77,13 +79,13 @@ public sealed class ProjectPublishServiceTests
     public async Task PreparePublish_ResolvesRelativePublishDirAndLaunchArtifactFromSameProperties()
     {
         var publishDirectory = Directory.CreateDirectory(
-            Path.Combine(_tempDirectory.FullName, "custom", "publish"));
-        var executable = new FileInfo(Path.Combine(publishDirectory.FullName, "App.exe"));
+            TempPath("custom", "publish"));
+        var executable = new FileInfo(ChildPath(publishDirectory.FullName, "App.exe"));
         File.WriteAllText(executable.FullName, "native fixture");
 
         var properties = Properties(
             ("TargetDir", _tempDirectory.FullName),
-            ("PublishDir", Path.Combine("custom", "publish")),
+            ("PublishDir", RelativePath("custom", "publish")),
             ("PublishAot", "false"),
             ("RuntimeIdentifier", "win-x64"),
             ("Platform", "x64"),
@@ -93,7 +95,7 @@ public sealed class ProjectPublishServiceTests
             ("WindowsPackageType", "None"),
             ("WindowsAppSDKSelfContained", "true"),
             ("OutputType", "WinExe"),
-            ("ProjectAssetsFile", Path.Combine(_tempDirectory.FullName, "obj", "project.assets.json")),
+            ("ProjectAssetsFile", TempPath("obj", "project.assets.json")),
             ("PublishProfile", "Custom"));
 
         var (service, dotnet, toolchain) = CreateService(properties);
@@ -125,8 +127,8 @@ public sealed class ProjectPublishServiceTests
     [TestMethod]
     public async Task PreparePublish_NoBuildStillInvokesDotnetPublishWithNoBuild()
     {
-        var publishDirectory = Directory.CreateDirectory(Path.Combine(_tempDirectory.FullName, "publish"));
-        File.WriteAllText(Path.Combine(publishDirectory.FullName, "App.exe"), "fixture");
+        var publishDirectory = _tempDirectory.CreateSubdirectory("publish");
+        File.WriteAllText(ChildPath(publishDirectory.FullName, "App.exe"), "fixture");
         var properties = UnpackagedProperties(publishDirectory.FullName, publishAot: false);
         var (service, dotnet, _) = CreateService(properties);
         var options = new ProjectRunOptions(
@@ -152,7 +154,7 @@ public sealed class ProjectPublishServiceTests
     public async Task PreparePublish_DryRunNeverExecutesPublish()
     {
         var properties = UnpackagedProperties(
-            Path.Combine(_tempDirectory.FullName, "not-created"),
+            TempPath("not-created"),
             publishAot: false);
         var (service, dotnet, _) = CreateService(properties);
         var options = new ProjectRunOptions(
@@ -180,7 +182,7 @@ public sealed class ProjectPublishServiceTests
     {
        var properties = Properties(
            ("TargetDir", _tempDirectory.FullName),
-           ("PublishDir", Path.Combine(_tempDirectory.FullName, "publish")),
+           ("PublishDir", TempPath("publish")),
            ("PublishAot", "false"),
            ("RuntimeIdentifier", "win-x64"),
            ("AssemblyName", "Library"),
@@ -211,9 +213,9 @@ public sealed class ProjectPublishServiceTests
     [TestMethod]
     public async Task PrepareNativeAotDryRun_MissingRuntimePackIsIndeterminateWithRestoreCommand()
     {
-        var assets = Path.Combine(_tempDirectory.FullName, "obj", "project.assets.json");
+        var assets = TempPath("obj", "project.assets.json");
         var properties = UnpackagedProperties(
-            Path.Combine(_tempDirectory.FullName, "publish"),
+            TempPath("publish"),
             publishAot: true,
             projectAssetsFile: assets);
         var (service, dotnet, toolchain) = CreateService(properties);
@@ -245,8 +247,8 @@ public sealed class ProjectPublishServiceTests
     [TestMethod]
     public async Task PrepareNativeAotDryRun_Arm64UsesArm64ToolchainAndRestoredPack()
     {
-        var assets = Directory.CreateDirectory(Path.Combine(_tempDirectory.FullName, "obj"));
-        var assetsFile = Path.Combine(assets.FullName, "project.assets.json");
+        var assets = _tempDirectory.CreateSubdirectory("obj");
+        var assetsFile = ChildPath(assets.FullName, "project.assets.json");
         var packageFolder = CreateNativeAotPackages("win-arm64", "10.0.0");
         WriteAssetsFile(
             assetsFile,
@@ -255,7 +257,7 @@ public sealed class ProjectPublishServiceTests
             rid: "win-arm64",
             version: "10.0.0");
         var properties = UnpackagedProperties(
-            Path.Combine(_tempDirectory.FullName, "publish"),
+            TempPath("publish"),
             publishAot: true,
             projectAssetsFile: assetsFile,
             runtimeIdentifier: "win-arm64",
@@ -286,8 +288,8 @@ public sealed class ProjectPublishServiceTests
     [TestMethod]
     public async Task PrepareNativeAotDryRun_RemainsReadyWhenAssetsGraphIsRewritten()
     {
-        var assetsDirectory = Directory.CreateDirectory(Path.Combine(_tempDirectory.FullName, "obj"));
-        var assetsFile = Path.Combine(assetsDirectory.FullName, "project.assets.json");
+        var assetsDirectory = _tempDirectory.CreateSubdirectory("obj");
+        var assetsFile = ChildPath(assetsDirectory.FullName, "project.assets.json");
         var packageFolder = CreateNativeAotPackages("win-x64", "10.0.0");
         WriteAssetsFile(
             assetsFile,
@@ -296,7 +298,7 @@ public sealed class ProjectPublishServiceTests
             rid: "win-x64",
             version: "10.0.0");
         var properties = UnpackagedProperties(
-            Path.Combine(_tempDirectory.FullName, "publish"),
+            TempPath("publish"),
             publishAot: true,
             projectAssetsFile: assetsFile);
         var (service, _, _) = CreateService(properties);
@@ -337,7 +339,7 @@ public sealed class ProjectPublishServiceTests
     public async Task PrepareNativeAot_MissingToolchainFailsBeforePublish()
     {
         var properties = UnpackagedProperties(
-            Path.Combine(_tempDirectory.FullName, "publish"),
+            TempPath("publish"),
             publishAot: true);
         var (service, dotnet, toolchain) = CreateService(properties);
         toolchain.Result = new WindowsNativeToolchainResolution(
@@ -369,7 +371,7 @@ public sealed class ProjectPublishServiceTests
     public async Task PrepareNativeAot_PublishDiagnosticsHaveDistinctFailure()
     {
        var properties = UnpackagedProperties(
-           Path.Combine(_tempDirectory.FullName, "publish"),
+           TempPath("publish"),
            publishAot: true);
        var (service, dotnet, _) = CreateService(properties);
        dotnet.RunDotnetArgumentListHandler = _ =>
@@ -397,7 +399,7 @@ public sealed class ProjectPublishServiceTests
     public async Task PrepareNativeAot_UnrestoredImportedPublishAotDefersRequirementUntilPostPublishEvaluation()
     {
        File.WriteAllText(
-           Path.Combine(_tempDirectory.FullName, "Directory.Build.props"),
+           TempPath("Directory.Build.props"),
            """
            <Project>
              <PropertyGroup>
@@ -405,8 +407,8 @@ public sealed class ProjectPublishServiceTests
              </PropertyGroup>
            </Project>
            """);
-       var publishDirectory = Directory.CreateDirectory(Path.Combine(_tempDirectory.FullName, "publish"));
-       File.WriteAllText(Path.Combine(publishDirectory.FullName, "App.exe"), "native fixture");
+       var publishDirectory = _tempDirectory.CreateSubdirectory("publish");
+       File.WriteAllText(ChildPath(publishDirectory.FullName, "App.exe"), "native fixture");
        var properties = UnpackagedProperties(publishDirectory.FullName, publishAot: true);
        var (service, dotnet, toolchain) = CreateService(properties);
        var evaluateCount = 0;
@@ -447,12 +449,12 @@ public sealed class ProjectPublishServiceTests
     [TestMethod]
     public async Task PreparePackagedPublish_UsesEvaluatedGeneratedManifestNotPublishSourceManifest()
     {
-        var targetDirectory = Directory.CreateDirectory(Path.Combine(_tempDirectory.FullName, "target"));
-        var publishDirectory = Directory.CreateDirectory(Path.Combine(_tempDirectory.FullName, "publish"));
-        var generatedManifest = Path.Combine(targetDirectory.FullName, "AppxManifest.xml");
+        var targetDirectory = _tempDirectory.CreateSubdirectory("target");
+        var publishDirectory = _tempDirectory.CreateSubdirectory("publish");
+        var generatedManifest = ChildPath(targetDirectory.FullName, "AppxManifest.xml");
         File.WriteAllText(generatedManifest, Manifest("Generated.exe"));
-        File.WriteAllText(Path.Combine(publishDirectory.FullName, "Generated.exe"), "fixture");
-        File.WriteAllText(Path.Combine(publishDirectory.FullName, "Package.appxmanifest"), Manifest("Wrong.exe"));
+        File.WriteAllText(ChildPath(publishDirectory.FullName, "Generated.exe"), "fixture");
+        File.WriteAllText(ChildPath(publishDirectory.FullName, "Package.appxmanifest"), Manifest("Wrong.exe"));
 
         var properties = Properties(
             ("TargetDir", targetDirectory.FullName),
@@ -483,7 +485,7 @@ public sealed class ProjectPublishServiceTests
         Assert.IsNotNull(outcome.Resolution);
         Assert.AreEqual(generatedManifest, outcome.Resolution.FinalAppxManifestPath);
         Assert.AreEqual(
-            Path.Combine(publishDirectory.FullName, "Generated.exe"),
+            ChildPath(publishDirectory.FullName, "Generated.exe"),
             outcome.Resolution.SourceExecutable);
     }
 
@@ -536,7 +538,7 @@ public sealed class ProjectPublishServiceTests
 
     private string CreateNativeAotPackages(string rid, string version)
     {
-        var packageFolder = Path.Combine(_tempDirectory.FullName, "packages");
+        var packageFolder = _tempDirectory.CreateSubdirectory("packages").FullName;
         var versionDirectories = new[]
         {
             $"Microsoft.NETCore.App.Runtime.NativeAOT.{rid}",
@@ -597,4 +599,24 @@ public sealed class ProjectPublishServiceTests
            </Applications>
          </Package>
          """;
+
+    private string TempPath(params string[] segments) =>
+        ChildPath(_tempDirectory.FullName, segments);
+
+    private static string ChildPath(string root, params string[] segments) =>
+        Path.GetFullPath(RelativePath(segments), root);
+
+    private static string RelativePath(params string[] segments)
+    {
+        if (segments.Any(segment =>
+                string.IsNullOrWhiteSpace(segment) ||
+                Path.IsPathRooted(segment) ||
+                segment is "." or ".." ||
+                !string.Equals(Path.GetFileName(segment), segment, StringComparison.Ordinal)))
+        {
+            throw new ArgumentException("Fixture path contains an invalid segment.", nameof(segments));
+        }
+
+        return string.Join(Path.DirectorySeparatorChar, segments);
+    }
 }

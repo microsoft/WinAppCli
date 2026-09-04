@@ -16,7 +16,9 @@ public sealed class WindowsNativeToolchainResolverTests
     public void Initialize()
     {
         _tempDirectory = Directory.CreateDirectory(
-            Path.Combine(Path.GetTempPath(), $"WindowsNativeToolchainResolverTests_{Guid.NewGuid():N}"));
+            Path.GetFullPath(
+                $"WindowsNativeToolchainResolverTests_{Guid.NewGuid():N}",
+                Path.GetTempPath()));
     }
 
     [TestCleanup]
@@ -86,8 +88,8 @@ public sealed class WindowsNativeToolchainResolverTests
         var runner = new FakeProcessRunner();
         var resolver = new WindowsNativeToolchainResolver(runner)
         {
-            VswherePathProvider = () => Path.Combine(_tempDirectory.FullName, "missing", "vswhere.exe"),
-            WindowsKitsRootProvider = () => Path.Combine(_tempDirectory.FullName, "kits"),
+            VswherePathProvider = () => TempPath("missing", "vswhere.exe"),
+            WindowsKitsRootProvider = () => TempPath("kits"),
         };
 
         var result = await resolver.ResolveAsync(
@@ -144,12 +146,12 @@ public sealed class WindowsNativeToolchainResolverTests
     private ToolchainFixture CreateFixture(string targetArchitecture)
     {
         var vswherePath = WriteFile(
-            Path.Combine("installer", "vswhere.exe"),
+            RelativePath("installer", "vswhere.exe"),
             string.Empty);
         var visualStudioDirectory = Directory.CreateDirectory(
-            Path.Combine(_tempDirectory.FullName, "VS")).FullName;
+            TempPath("VS")).FullName;
         WriteFile(
-            Path.Combine(
+            RelativePath(
                 "VS",
                 "VC",
                 "Auxiliary",
@@ -158,7 +160,7 @@ public sealed class WindowsNativeToolchainResolverTests
             "14.51.36231");
 
         WriteFile(
-            Path.Combine(
+            RelativePath(
                 "VS",
                 "VC",
                 "Tools",
@@ -170,7 +172,7 @@ public sealed class WindowsNativeToolchainResolverTests
                 "link.exe"),
             string.Empty);
         WriteFile(
-            Path.Combine(
+            RelativePath(
                 "VS",
                 "VC",
                 "Tools",
@@ -183,15 +185,15 @@ public sealed class WindowsNativeToolchainResolverTests
             string.Empty);
 
         var kitsRoot = Directory.CreateDirectory(
-            Path.Combine(_tempDirectory.FullName, "Windows Kits", "10")).FullName;
+            TempPath("Windows Kits", "10")).FullName;
         WriteFile(
-            Path.Combine("Windows Kits", "10", "Lib", "10.0.26100.0", "um", targetArchitecture, "kernel32.lib"),
+            RelativePath("Windows Kits", "10", "Lib", "10.0.26100.0", "um", targetArchitecture, "kernel32.lib"),
             string.Empty);
         WriteFile(
-            Path.Combine("Windows Kits", "10", "Lib", "10.0.26100.0", "ucrt", targetArchitecture, "ucrt.lib"),
+            RelativePath("Windows Kits", "10", "Lib", "10.0.26100.0", "ucrt", targetArchitecture, "ucrt.lib"),
             string.Empty);
         WriteFile(
-            Path.Combine("Windows Kits", "10", "bin", "10.0.26100.0", "x64", "mt.exe"),
+            RelativePath("Windows Kits", "10", "bin", "10.0.26100.0", "x64", "mt.exe"),
             string.Empty);
 
         var runner = new FakeProcessRunner
@@ -216,10 +218,34 @@ public sealed class WindowsNativeToolchainResolverTests
 
     private string WriteFile(string relativePath, string contents)
     {
-        var fullPath = Path.Combine(_tempDirectory.FullName, relativePath);
+        if (Path.IsPathFullyQualified(relativePath))
+        {
+            throw new ArgumentException(
+                $"Fixture path must be relative: '{relativePath}'.",
+                nameof(relativePath));
+        }
+
+        var fullPath = Path.GetFullPath(relativePath, _tempDirectory.FullName);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         File.WriteAllText(fullPath, contents);
         return fullPath;
+    }
+
+    private string TempPath(params string[] segments) =>
+        Path.GetFullPath(RelativePath(segments), _tempDirectory.FullName);
+
+    private static string RelativePath(params string[] segments)
+    {
+        if (segments.Any(segment =>
+                string.IsNullOrWhiteSpace(segment) ||
+                Path.IsPathRooted(segment) ||
+                segment is "." or ".." ||
+                !string.Equals(Path.GetFileName(segment), segment, StringComparison.Ordinal)))
+        {
+            throw new ArgumentException("Fixture path contains an invalid segment.", nameof(segments));
+        }
+
+        return string.Join(Path.DirectorySeparatorChar, segments);
     }
 
     private sealed record ToolchainFixture(

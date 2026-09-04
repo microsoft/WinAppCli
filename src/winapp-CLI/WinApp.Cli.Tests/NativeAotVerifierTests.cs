@@ -26,7 +26,9 @@ public sealed class NativeAotVerifierTests
     public void Initialize()
     {
         _tempDirectory = Directory.CreateDirectory(
-            Path.Combine(Path.GetTempPath(), $"NativeAotVerifierTests_{Guid.NewGuid():N}"));
+            Path.GetFullPath(
+                $"NativeAotVerifierTests_{Guid.NewGuid():N}",
+                Path.GetTempPath()));
     }
 
     [TestCleanup]
@@ -78,8 +80,10 @@ public sealed class NativeAotVerifierTests
     public void VerifyPayload_ExcludesTheExistingPackagedStagingDirectory()
     {
        var executable = WriteFile("App.exe", "native fixture");
-       var stagingDirectory = Directory.CreateDirectory(Path.Combine(_tempDirectory.FullName, "AppX"));
-       File.WriteAllText(Path.Combine(stagingDirectory.FullName, "coreclr.dll"), "stale staging file");
+       var stagingDirectory = _tempDirectory.CreateSubdirectory("AppX");
+       File.WriteAllText(
+           Path.GetFullPath("coreclr.dll", stagingDirectory.FullName),
+           "stale staging file");
        var verifier = new NativeAotVerifier(new FakePackageRegistrationService());
 
        var result = verifier.VerifyPayload(_tempDirectory, executable, stagingDirectory);
@@ -90,7 +94,8 @@ public sealed class NativeAotVerifierTests
     [TestMethod]
     public void VerifyPayload_RejectsSingleFileJitBundleWithoutRuntimeSidecars()
     {
-       var executable = new FileInfo(Path.Combine(_tempDirectory.FullName, "App.exe"));
+       var executable = new FileInfo(
+           Path.GetFullPath("App.exe", _tempDirectory.FullName));
        using (var stream = executable.Create())
        {
            stream.SetLength(256);
@@ -139,10 +144,10 @@ public sealed class NativeAotVerifierTests
     [TestMethod]
     public async Task VerifyRuntime_PackagedRequiresMatchingDevelopmentRegistrationAndPayload()
     {
-        var publishDirectory = Directory.CreateDirectory(Path.Combine(_tempDirectory.FullName, "publish"));
-        var stagingDirectory = Directory.CreateDirectory(Path.Combine(_tempDirectory.FullName, "stage"));
-        var source = Path.Combine(publishDirectory.FullName, "App.exe");
-        var staged = Path.Combine(stagingDirectory.FullName, "App.exe");
+        var publishDirectory = _tempDirectory.CreateSubdirectory("publish");
+        var stagingDirectory = _tempDirectory.CreateSubdirectory("stage");
+        var source = Path.GetFullPath("App.exe", publishDirectory.FullName);
+        var staged = Path.GetFullPath("App.exe", stagingDirectory.FullName);
         File.Copy(CmdPath, source);
         File.Copy(source, staged);
 
@@ -222,7 +227,14 @@ public sealed class NativeAotVerifierTests
 
     private FileInfo WriteFile(string relativePath, string contents)
     {
-        var path = Path.Combine(_tempDirectory.FullName, relativePath);
+        if (Path.IsPathFullyQualified(relativePath))
+        {
+            throw new ArgumentException(
+                $"Fixture path must be relative: '{relativePath}'.",
+                nameof(relativePath));
+        }
+
+        var path = Path.GetFullPath(relativePath, _tempDirectory.FullName);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, contents);
         return new FileInfo(path);
