@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.IO.Compression;
+using System.Runtime.InteropServices;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
 
@@ -58,39 +59,86 @@ internal static class DotNetLayout
         ["Microsoft.WindowsDesktop.App"] = ["WindowsBase.dll", "System.Windows.Forms.dll"],
     };
 
-    /// <summary>The .NET roots an apphost resolves against, in the order it consults them.</summary>
+    /// <summary>The .NET roots an apphost resolves against for one architecture.</summary>
     /// <remarks>
-    /// Every standard location, not just the default one. A false "not installed" would refuse to
-    /// run an application that works, which is worse than the launch failure the check replaces — so
-    /// the probe errs towards finding an installation wherever it plausibly is.
+    /// The apphost consults its architecture-specific <c>DOTNET_ROOT</c> first, then the generic
+    /// variable, and only then its architecture's default install location. Each configured root is
+    /// exclusive: accepting a framework from a lower-precedence root would report a graph that the
+    /// apphost will not actually resolve at launch.
     /// </remarks>
-    public static IEnumerable<string> DefaultRoots()
+    public static IEnumerable<string> DefaultRoots(string architecture) =>
+        DefaultRoots(architecture, Environment.GetEnvironmentVariable, RuntimeInformation.OSArchitecture);
+
+    /// <summary>
+    /// Returns apphost roots using the supplied environment lookup.
+    /// </summary>
+    /// <remarks>
+    /// Kept separate from <see cref="DefaultRoots(string)"/> so the precedence rules can be tested
+    /// without changing process-wide environment variables while tests run in parallel.
+    /// </remarks>
+    internal static IEnumerable<string> DefaultRoots(
+        string architecture,
+        Func<string, string?> environmentVariable) =>
+        DefaultRoots(architecture, environmentVariable, RuntimeInformation.OSArchitecture);
+
+    /// <summary>
+    /// Returns apphost roots using the supplied environment lookup and operating-system architecture.
+    /// </summary>
+    internal static IEnumerable<string> DefaultRoots(
+        string architecture,
+        Func<string, string?> environmentVariable,
+        Architecture operatingSystemArchitecture)
     {
-        // DOTNET_ROOT first, and exclusively when it is set: that is the apphost's own precedence,
-        // and mirroring it is what keeps a verification result equal to what the launch will find.
-        foreach (var root in ((string[])
-            ["DOTNET_ROOT", "DOTNET_ROOT(x86)", "DOTNET_ROOT_X64", "DOTNET_ROOT_ARM64"])
-            .Select(Environment.GetEnvironmentVariable)
-            .OfType<string>()
-            .Where(value => value.Length > 0))
+        ArgumentNullException.ThrowIfNull(environmentVariable);
+
+        var normalizedArchitecture = RunArchHelper.NormalizeArchitecture(architecture)
+            ?? RunArchHelper.DefaultArchitecture();
+        var configuredRoot = environmentVariable(DiscoveryVariableForArchitecture(normalizedArchitecture));
+        if (string.IsNullOrWhiteSpace(configuredRoot) &&
+            normalizedArchitecture == "x86" &&
+            operatingSystemArchitecture is not Architecture.X86)
         {
-            yield return root;
+            configuredRoot = environmentVariable(LegacyX86DiscoveryVariable);
         }
 
-        foreach (var programFiles in ((Environment.SpecialFolder[])
-            [Environment.SpecialFolder.ProgramFiles, Environment.SpecialFolder.ProgramFilesX86])
-            .Select(Environment.GetFolderPath)
-            .Where(value => value.Length > 0))
+        configuredRoot = string.IsNullOrWhiteSpace(configuredRoot)
+            ? environmentVariable(DiscoveryVariable)
+            : configuredRoot;
+
+        if (!string.IsNullOrWhiteSpace(configuredRoot))
         {
-            yield return Path.Join(programFiles, "dotnet");
+            yield return configuredRoot;
+            yield break;
         }
 
-        // A per-user install, which is what the dotnet-install script produces by default.
-        if (Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) is { Length: > 0 } localAppData)
+        var programFiles = Environment.GetFolderPath(
+            normalizedArchitecture == "x86"
+                ? Environment.SpecialFolder.ProgramFilesX86
+                : Environment.SpecialFolder.ProgramFiles);
+        if (!string.IsNullOrWhiteSpace(programFiles))
         {
-            yield return Path.Join(localAppData, "Microsoft", "dotnet");
+            yield return normalizedArchitecture == "x64" &&
+                operatingSystemArchitecture is Architecture.Arm64
+                ? Path.Join(programFiles, "dotnet", "x64")
+                : Path.Join(programFiles, "dotnet");
         }
     }
+
+    /// <summary>Generic .NET root variable, used after the architecture-specific one.</summary>
+    internal const string DiscoveryVariable = "DOTNET_ROOT";
+
+    /// <summary>Legacy x86 root variable honored by an x86 apphost on 64-bit Windows.</summary>
+    internal const string LegacyX86DiscoveryVariable = "DOTNET_ROOT(x86)";
+
+    /// <summary>Returns the apphost's architecture-specific .NET root variable.</summary>
+    internal static string DiscoveryVariableForArchitecture(string architecture) =>
+        RunArchHelper.NormalizeArchitecture(architecture) switch
+        {
+            "x86" => "DOTNET_ROOT_X86",
+            "x64" => "DOTNET_ROOT_X64",
+            "arm64" => "DOTNET_ROOT_ARM64",
+            _ => DiscoveryVariable,
+        };
 
     /// <summary>
     /// Whether a .NET root serves <paramref name="architecture"/>.

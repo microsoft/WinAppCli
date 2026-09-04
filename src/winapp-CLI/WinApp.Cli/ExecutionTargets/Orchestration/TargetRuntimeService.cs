@@ -24,15 +24,31 @@ internal sealed record RuntimeProvisionResult(
     /// installed.
     /// </summary>
     /// <remarks>
-    /// A per-user .NET root is discoverable to an apphost through <c>DOTNET_ROOT</c> and nothing
+    /// A per-user .NET root is discoverable to an apphost through its <c>DOTNET_ROOT</c> variables and nothing
     /// else without machine-wide registration, so the value has to reach the launched process
     /// itself. Empty when the guest satisfied every framework on its own, which leaves the guest's
     /// ordinary resolution untouched.
     /// </remarks>
-    public IReadOnlyDictionary<string, string> LaunchEnvironment =>
-        Report?.DotNetRoot is { Length: > 0 } root
-            ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["DOTNET_ROOT"] = root }
-            : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    public IReadOnlyDictionary<string, string> LaunchEnvironment
+    {
+        get
+        {
+            if (Report?.DotNetRoot is not { Length: > 0 } root)
+            {
+                return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            var environment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                [DotNetRuntimeInstaller.DiscoveryVariable] = root,
+            };
+
+            // An inherited architecture-specific value wins over DOTNET_ROOT. Set it explicitly so
+            // the apphost resolves the managed graph this report just verified.
+            environment[DotNetLayout.DiscoveryVariableForArchitecture(Requirements.Architecture)] = root;
+            return environment;
+        }
+    }
 }
 
 /// <summary>
@@ -126,14 +142,17 @@ internal sealed class TargetRuntimeService(
         DirectoryInfo sourceRoot,
         DirectoryInfo projectRoot,
         TaskContext taskContext,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? fallbackArchitecture = null)
     {
         ArgumentNullException.ThrowIfNull(target);
         ArgumentNullException.ThrowIfNull(targetRef);
         ArgumentNullException.ThrowIfNull(sourceRoot);
 
         var discoveryWatch = Stopwatch.StartNew();
-        var requirements = RuntimeRequirementDiscovery.Discover(sourceRoot, target.Capabilities.Architecture);
+        var discoveryArchitecture = RunArchHelper.NormalizeArchitecture(fallbackArchitecture)
+            ?? target.Capabilities.Architecture;
+        var requirements = RuntimeRequirementDiscovery.Discover(sourceRoot, discoveryArchitecture);
         Record(DiscoveryPhase, discoveryWatch);
 
         if (requirements.IsEmpty)
@@ -153,7 +172,9 @@ internal sealed class TargetRuntimeService(
         // Only an unfinished pass makes the staged area untrustworthy. A clean record for a
         // different plan, or one from a previous generation, leaves nothing misleading behind — and
         // wiping the scope for those would re-transfer tens of megabytes for no reason.
-        var repair = existing?.Dirty == true;
+        var repair = existing is { Dirty: true }
+            && string.Equals(existing.TargetEpoch, target.Epoch.Value, StringComparison.Ordinal)
+            && string.Equals(existing.PlanId, planId, StringComparison.Ordinal);
 
         var resolutionWatch = Stopwatch.StartNew();
 
@@ -167,7 +188,9 @@ internal sealed class TargetRuntimeService(
         Record(CacheResolutionPhase, resolutionWatch);
 
         var dotNetRoot = TargetPathSafety.CombineInsideRoot(
-            target.Capabilities.ManagedRoot ?? throw MissingManagedRoot(), DotNetRootFolderName);
+            target.Capabilities.ManagedRoot ?? throw MissingManagedRoot(),
+            DotNetRootFolderName,
+            requirements.Architecture);
 
         var plan = BuildPlan(requirements, planId, dotNetRoot, packages, frameworks);
 

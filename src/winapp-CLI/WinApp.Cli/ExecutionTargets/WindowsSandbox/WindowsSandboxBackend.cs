@@ -95,6 +95,9 @@ internal sealed class WindowsSandboxBackend(
     /// <summary>Delay seam, so agent-readiness bounds are exercised without real waiting.</summary>
     internal Func<TimeSpan, CancellationToken, Task> Delay { get; set; } = Task.Delay;
 
+    /// <summary>Port allocator seam, so a loopback test can reserve the port its agent will bind.</summary>
+    internal Func<int> AgentPortProvider { get; set; } = NextAgentPort;
+
     /// <summary>
     /// How long to spend deciding whether an agent that closed a handshake is still listening.
     /// </summary>
@@ -128,6 +131,13 @@ internal sealed class WindowsSandboxBackend(
     private string? _guestAddress;
     private bool _adopted;
     private GuestBootstrapMaterial? _activeMaterial;
+
+    private enum WarmAgentDisposition
+    {
+        Reuse,
+        PreserveNewerGuest,
+        Repair,
+    }
 
     /// <summary>The host and guest paths one generation's bootstrap share is mapped through.</summary>
     /// <param name="HostBootstrap">Host folder published read-only into the guest.</param>
@@ -256,7 +266,7 @@ internal sealed class WindowsSandboxBackend(
         // ordering is what removes the Windows Security consent dialog: the inbound rule below can
         // only be created for a port that is already known, and Windows prompts the moment a
         // listener starts without a matching rule.
-        var agentPort = NextAgentPort();
+        var agentPort = AgentPortProvider();
         var material = GuestBootstrapMaterial.Create(Target, lease.Epoch, agentPort);
         await File.WriteAllTextAsync(
             Path.Join(bootstrap.HostBootstrap, GuestBootstrapMaterial.FileName),
@@ -373,7 +383,7 @@ internal sealed class WindowsSandboxBackend(
             cancellationToken).ConfigureAwait(false);
         _activeMaterial = material;
 
-        RememberConnection(lease, _guestAddress);
+        RememberConnection(lease, _guestAddress, heartbeat);
 
         // The result folder has served its purpose and is guest-writable, so it does not survive the
         // handshake it was created for.
@@ -430,6 +440,13 @@ internal sealed class WindowsSandboxBackend(
             }
         }
 
+        var disposition = await ClassifyWarmAgentAsync(lease, address, material, cancellationToken)
+            .ConfigureAwait(false);
+        if (disposition == WarmAgentDisposition.Repair)
+        {
+            return null;
+        }
+
         try
         {
             var transport = await GuestTcpTransport
@@ -462,11 +479,95 @@ internal sealed class WindowsSandboxBackend(
                     innerException: ex);
             }
 
+            if (disposition == WarmAgentDisposition.PreserveNewerGuest)
+            {
+                throw ex.Error.Code == ExecutionTargetErrorCodes.AgentIncompatible
+                    ? ex
+                    : NewerAgentUnavailable(ex);
+            }
+
             // The Sandbox is alive but its agent is not answering. Repair only that layer; the
             // unchanged epoch keeps deployment and runtime state valid across the repair.
             return null;
         }
     }
+
+    /// <summary>
+    /// Decides whether persisted identity permits a warm reconnect, while never replacing a live
+    /// agent whose binary does not match the current host.
+    /// </summary>
+    private async Task<WarmAgentDisposition> ClassifyWarmAgentAsync(
+        SandboxInstanceLease lease,
+        string address,
+        GuestBootstrapMaterial material,
+        CancellationToken cancellationToken)
+    {
+        var state = stateStore?.Read(Target);
+        var host = await GetHostAgentIdentityAsync(cancellationToken).ConfigureAwait(false);
+
+        if (string.Equals(state?.AgentBinaryHash, host.BinaryHash, StringComparison.OrdinalIgnoreCase))
+        {
+            return WarmAgentDisposition.Reuse;
+        }
+
+        // A newer agent is intentionally reusable when its protocol still negotiates. Its protocol
+        // range is verified by the secure handshake below; replacing it with this host would be a
+        // downgrade, even after a failed reconnect.
+        if (state?.AgentVersion is { Length: > 0 } guestVersion &&
+            NuGetVersionHelper.Compare(host.Version, guestVersion) is < 0)
+        {
+            return WarmAgentDisposition.PreserveNewerGuest;
+        }
+
+        // A stopped agent can be re-bootstrapped in the same epoch. A listener means it might be
+        // serving other channels, so replacing it would disturb work this command does not own.
+        if (!await GuestTcpTransport
+                .IsListeningAsync(address, material.Port, AgentLivenessProbeTimeout, cancellationToken)
+                .ConfigureAwait(false))
+        {
+            return WarmAgentDisposition.Repair;
+        }
+
+        throw AgentIdentityMismatch(host, state, lease);
+    }
+
+    /// <summary>Reads the binary identity of the host process that would be staged for a repair.</summary>
+    private async Task<GuestAgentIdentity> GetHostAgentIdentityAsync(CancellationToken cancellationToken)
+    {
+        var binary = hostBinaryProvider.GetBinary();
+        return await GuestAgentIdentity
+            .ForBinaryAsync(binary.FullName, VersionHelper.GetVersionString(), cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private static ExecutionTargetException AgentIdentityMismatch(
+        GuestAgentIdentity host,
+        TargetState? guest,
+        SandboxInstanceLease lease) =>
+        ExecutionTargetException.Create(
+            ExecutionTargetErrorCodes.AgentIncompatible,
+            "The running Windows Sandbox agent does not match this winapp binary.",
+            userAction: "Close Windows Sandbox, then retry so winapp can start the current agent.",
+            context: new Dictionary<string, string>
+            {
+                ["hostVersion"] = host.Version,
+                ["guestVersion"] = guest?.AgentVersion ?? "unknown",
+                ["expectedHash"] = host.BinaryHash,
+                ["actualHash"] = guest?.AgentBinaryHash ?? "unknown",
+                ["targetEpoch"] = lease.Epoch.Value,
+            },
+            nextCommand: new ExecutionTargetNextCommand
+            {
+                Command = $"wsb stop --id {lease.InstanceId}",
+                Advisory = true,
+            });
+
+    private static ExecutionTargetException NewerAgentUnavailable(ExecutionTargetException innerException) =>
+        ExecutionTargetException.Create(
+            ExecutionTargetErrorCodes.AgentIncompatible,
+            "The newer Windows Sandbox agent is no longer reachable, so this older winapp will not replace it.",
+            userAction: "Install a newer winapp release on this machine, then retry.",
+            innerException: innerException);
 
     /// <summary>Reads the connection material this target last bootstrapped for one epoch.</summary>
     /// <remarks>
@@ -496,7 +597,8 @@ internal sealed class WindowsSandboxBackend(
     {
         var state = stateStore?.Read(Target);
 
-        return string.Equals(state?.InstanceId, lease.InstanceId, StringComparison.OrdinalIgnoreCase)
+        return string.Equals(state?.InstanceId, lease.InstanceId, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(state?.BootstrappedEpoch, lease.Epoch.Value, StringComparison.Ordinal)
             ? state?.GuestAddress
             : null;
     }
@@ -509,7 +611,10 @@ internal sealed class WindowsSandboxBackend(
     /// one <c>wsb</c> call on the next command, while failing the command over it would trade a
     /// working Sandbox for an error.
     /// </remarks>
-    private void RememberConnection(SandboxInstanceLease lease, string address)
+    private void RememberConnection(
+        SandboxInstanceLease lease,
+        string address,
+        GuestAgentHeartbeat? heartbeat = null)
     {
         if (stateStore is null)
         {
@@ -536,8 +641,11 @@ internal sealed class WindowsSandboxBackend(
             // instance the next command treats as warm.
             var bootstrapChanged = !string.Equals(
                 state.BootstrappedEpoch, lease.Epoch.Value, StringComparison.Ordinal);
+            var identityChanged = heartbeat is not null &&
+                (!string.Equals(state.AgentVersion, heartbeat.Version, StringComparison.OrdinalIgnoreCase)
+                    || !string.Equals(state.AgentBinaryHash, heartbeat.BinaryHash, StringComparison.OrdinalIgnoreCase));
 
-            if (!addressChanged && !bootstrapChanged)
+            if (!addressChanged && !bootstrapChanged && !identityChanged)
             {
                 return;
             }
@@ -548,6 +656,8 @@ internal sealed class WindowsSandboxBackend(
                 {
                     GuestAddress = addressChanged ? address : state.GuestAddress,
                     BootstrappedEpoch = lease.Epoch.Value,
+                    AgentVersion = identityChanged ? heartbeat!.Version : state.AgentVersion,
+                    AgentBinaryHash = identityChanged ? heartbeat!.BinaryHash : state.AgentBinaryHash,
                 },
                 state.Revision);
         }

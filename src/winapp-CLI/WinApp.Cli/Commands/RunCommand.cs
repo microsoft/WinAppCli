@@ -549,7 +549,7 @@ internal partial class RunCommand : Command, IShortDescription, ITargetAwareComm
                 return await ExecutePackagedTargetRunAsync(
                     inputFolder, manifest, outputAppXDirectory, appArgs,
                     noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, executable, isJson,
-                    projectFile, framework, noRestore, cancellationToken);
+                    projectFile, framework, noRestore, runtimeArch, cancellationToken);
             }
 
             uint processId = 0;

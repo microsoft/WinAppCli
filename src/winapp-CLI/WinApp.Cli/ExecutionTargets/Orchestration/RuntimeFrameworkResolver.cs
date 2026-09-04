@@ -83,7 +83,7 @@ internal sealed class RuntimeFrameworkResolver(
     };
 
     /// <summary>Host .NET installation roots probed for an already-installed framework.</summary>
-    internal Func<IEnumerable<string>> HostDotNetRoots { get; set; } = DotNetLayout.DefaultRoots;
+    internal Func<string, IEnumerable<string>> HostDotNetRoots { get; set; } = DotNetLayout.DefaultRoots;
 
     /// <inheritdoc/>
     public async Task<RuntimeFrameworkPayload?> ResolveAsync(
@@ -134,7 +134,7 @@ internal sealed class RuntimeFrameworkResolver(
     /// </para>
     /// </remarks>
     private DotNetLayoutSource? FindHostInstallation(RuntimeFrameworkRequirement requirement) =>
-        HostDotNetRoots()
+        HostDotNetRoots(requirement.Architecture)
             .Where(root => DotNetLayout.MatchesArchitecture(root, requirement.Architecture))
             .SelectMany(root => DotNetLayout.EnumerateInstalled(root, requirement))
             .OrderBy(candidate => candidate.Version)

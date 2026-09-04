@@ -42,7 +42,8 @@ public partial class TargetRuntimeServiceTests
             string guestManagedRoot,
             string stateRoot,
             ExecutionTargetEpoch? epoch = null,
-            string? sharedFrameworkRoot = null)
+            string? sharedFrameworkRoot = null,
+            string guestArchitecture = "x64")
         {
             var currentEpoch = epoch ?? Epoch;
 
@@ -82,7 +83,7 @@ public partial class TargetRuntimeServiceTests
                 currentEpoch,
                 new ExecutionTargetCapabilities
                 {
-                    Architecture = "x64",
+                    Architecture = guestArchitecture,
                     SupportsInteractiveDesktop = true,
                     SupportsRealInput = true,
                     SupportsScreenCapture = true,
@@ -121,14 +122,18 @@ public partial class TargetRuntimeServiceTests
         /// <summary>Roots the guest configured per-user .NET discovery for.</summary>
         public IReadOnlyList<string> ConfiguredDiscoveryRoots => _processes.ConfiguredDiscoveryRoots;
 
-        public Task<RuntimeProvisionResult> EnsureAsync(string sourceRoot, CancellationToken cancellationToken) =>
+        public Task<RuntimeProvisionResult> EnsureAsync(
+            string sourceRoot,
+            CancellationToken cancellationToken,
+            string? fallbackArchitecture = null) =>
             Service.EnsureAsync(
                 Prepared,
                 Target,
                 new DirectoryInfo(sourceRoot),
                 new DirectoryInfo(sourceRoot),
                 CreateTaskContext(),
-                cancellationToken);
+                cancellationToken,
+                fallbackArchitecture);
 
         public RuntimeProvisionState? ReadState() => StateStore.Read(Target);
 
@@ -359,12 +364,12 @@ public partial class TargetRuntimeServiceTests
             {
                 // Never writes the test machine's own user environment; the launch environment the
                 // host derives from the report is what the framework tests assert on.
-                ConfigureDiscovery = root => { ConfiguredDiscoveryRoots.Add(root); return true; },
+                ConfigureDiscovery = (root, _) => { ConfiguredDiscoveryRoots.Add(root); return true; },
             };
 
             if (sharedFrameworkRoot is not null)
             {
-                handler.SharedFrameworkRoots = () => [sharedFrameworkRoot];
+                handler.SharedFrameworkRoots = _ => [sharedFrameworkRoot];
             }
 
             return new RuntimeGuestProcessHost(

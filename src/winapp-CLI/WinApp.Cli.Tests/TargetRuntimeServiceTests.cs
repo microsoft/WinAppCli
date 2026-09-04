@@ -114,6 +114,28 @@ public partial class TargetRuntimeServiceTests
     }
 
     [TestMethod]
+    public async Task Ensure_ManifestArchitectureOverridesTheResolvedProjectFallback()
+    {
+        await WriteManifestAsync();
+        var payload = await WritePayloadAsync(RuntimePackage, RequiredVersion);
+
+        await using var harness = new Harness(
+            _guestManaged,
+            _stateRoot,
+            guestArchitecture: "arm64");
+        harness.Resolver.Payloads[RuntimePackage] = payload;
+        harness.GuestPackages.Installs(RuntimePackage, RequiredVersion);
+
+        var result = await harness.EnsureAsync(
+            _hostSource,
+            TestContext.CancellationToken,
+            fallbackArchitecture: "x86");
+
+        Assert.AreEqual("x64", result.Requirements.Architecture);
+        Assert.IsTrue(result.Requirements.Packages.All(package => package.Architecture == "x64"));
+    }
+
+    [TestMethod]
     public async Task Ensure_WhenCallerAlreadyReleasedTheMutationLease_ThrowsRatherThanMutateUnprotected()
     {
         // EnsureAsync no longer acquires its own mutation lock: it trusts the caller's held lease
@@ -265,6 +287,80 @@ public partial class TargetRuntimeServiceTests
         Assert.IsTrue(repaired.Report!.Satisfied);
         Assert.IsFalse(File.Exists(stale), "repair must rebuild the staging area rather than reconcile against it");
         Assert.IsFalse(harness.ReadState()!.Dirty);
+    }
+
+    [TestMethod]
+    public async Task Ensure_DirtyStateFromAnotherEpoch_DoesNotDiscardThisPlansStagingScope()
+    {
+        await WriteManifestAsync();
+        var payload = await WritePayloadAsync(RuntimePackage, RequiredVersion);
+
+        await using var harness = new Harness(_guestManaged, _stateRoot);
+        harness.Resolver.Payloads[RuntimePackage] = payload;
+        harness.GuestPackages.Installs(RuntimePackage, RequiredVersion);
+
+        var planId = RuntimeRequirementDiscovery
+            .Discover(new DirectoryInfo(_hostSource), "x64").PlanId;
+        var scope = TestPaths.Under(_guestManaged, "runtimes", planId);
+        Directory.CreateDirectory(scope);
+        var currentScopeFile = Path.Join(scope, "current-generation-marker.txt");
+        await File.WriteAllTextAsync(currentScopeFile, "keep", TestContext.CancellationToken);
+
+        harness.StateStore.Commit(
+            Target,
+            new RuntimeProvisionState
+            {
+                SchemaVersion = RuntimeProvisionStateStore.CurrentSchemaVersion,
+                Revision = 0,
+                TargetEpoch = ExecutionTargetEpoch.Create("sandbox-1", "nonce-old").Value,
+                PlanId = planId,
+                Dirty = true,
+            },
+            expectedRevision: 0);
+
+        var result = await harness.EnsureAsync(_hostSource, TestContext.CancellationToken);
+
+        Assert.IsTrue(result.Report!.Satisfied);
+        Assert.IsTrue(
+            File.Exists(currentScopeFile),
+            "A dirty record from another guest generation must not clear this generation's scoped staging.");
+    }
+
+    [TestMethod]
+    public async Task Ensure_DirtyStateForAnotherPlan_DoesNotDiscardThisPlansStagingScope()
+    {
+        await WriteManifestAsync();
+        var payload = await WritePayloadAsync(RuntimePackage, RequiredVersion);
+
+        await using var harness = new Harness(_guestManaged, _stateRoot);
+        harness.Resolver.Payloads[RuntimePackage] = payload;
+        harness.GuestPackages.Installs(RuntimePackage, RequiredVersion);
+
+        var planId = RuntimeRequirementDiscovery
+            .Discover(new DirectoryInfo(_hostSource), "x64").PlanId;
+        var scope = TestPaths.Under(_guestManaged, "runtimes", planId);
+        Directory.CreateDirectory(scope);
+        var currentScopeFile = Path.Join(scope, "current-plan-marker.txt");
+        await File.WriteAllTextAsync(currentScopeFile, "keep", TestContext.CancellationToken);
+
+        harness.StateStore.Commit(
+            Target,
+            new RuntimeProvisionState
+            {
+                SchemaVersion = RuntimeProvisionStateStore.CurrentSchemaVersion,
+                Revision = 0,
+                TargetEpoch = Epoch.Value,
+                PlanId = new RuntimeRequirements("x86", [], []).PlanId,
+                Dirty = true,
+            },
+            expectedRevision: 0);
+
+        var result = await harness.EnsureAsync(_hostSource, TestContext.CancellationToken);
+
+        Assert.IsTrue(result.Report!.Satisfied);
+        Assert.IsTrue(
+            File.Exists(currentScopeFile),
+            "A dirty record for a different architecture or requirement plan must not clear this plan's staging.");
     }
 
     [TestMethod]
@@ -465,7 +561,10 @@ public partial class TargetRuntimeServiceTests
     /// versioned folders a layout carries, and getting those wrong is precisely the failure this
     /// covers.
     /// </remarks>
-    private async Task<RuntimeFrameworkPayload> WriteLayoutAsync(string name, string version)
+    private async Task<RuntimeFrameworkPayload> WriteLayoutAsync(
+        string name,
+        string version,
+        string architecture = "x64")
     {
         var path = TestPaths.Under(_hostCache, $"{name}_{version}.zip");
 
@@ -476,7 +575,10 @@ public partial class TargetRuntimeServiceTests
 
             if (name == "Microsoft.NETCore.App")
             {
-                await WriteEntryAsync(archive, $"shared/{name}/{version}/hostpolicy.dll", "mz"u8.ToArray());
+                await WriteEntryAsync(
+                    archive,
+                    $"shared/{name}/{version}/hostpolicy.dll",
+                    MinimalPe.ForArchitecture(architecture));
                 await WriteEntryAsync(archive, $"shared/{name}/{version}/coreclr.dll", "mz"u8.ToArray());
                 await WriteEntryAsync(
                     archive,
@@ -494,7 +596,7 @@ public partial class TargetRuntimeServiceTests
             }
         }
 
-        return new RuntimeFrameworkPayload(new FileInfo(path), name, version, "x64");
+        return new RuntimeFrameworkPayload(new FileInfo(path), name, version, architecture);
     }
 
     private static void WriteInstalledFramework(string root, string name, string version)
@@ -505,7 +607,7 @@ public partial class TargetRuntimeServiceTests
 
         if (name == "Microsoft.NETCore.App")
         {
-            File.WriteAllText(Path.Join(directory, "hostpolicy.dll"), "mz");
+            File.WriteAllBytes(Path.Join(directory, "hostpolicy.dll"), MinimalPe.ForArchitecture("x64"));
             File.WriteAllText(Path.Join(directory, "coreclr.dll"), "mz");
             File.WriteAllText(Path.Join(directory, "System.Private.CoreLib.dll"), "mz");
 

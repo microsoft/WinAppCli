@@ -66,7 +66,7 @@ internal class GuestRuntimeCommand : Command, IShortDescription
         /// a runtime the guest already had, and a false "installed" would launch an application that
         /// cannot start — so the probe looks wherever an installation plausibly is.
         /// </remarks>
-        internal Func<IEnumerable<string>> SharedFrameworkRoots { get; set; } = DotNetLayout.DefaultRoots;
+        internal Func<string, IEnumerable<string>> SharedFrameworkRoots { get; set; } = DotNetLayout.DefaultRoots;
 
         /// <summary>
         /// Makes the managed .NET root discoverable to processes winapp did not start.
@@ -75,7 +75,7 @@ internal class GuestRuntimeCommand : Command, IShortDescription
         /// Seamed because it writes the guest user's environment, which a test must not do to the
         /// machine running it.
         /// </remarks>
-        internal Func<string, bool> ConfigureDiscovery { get; set; } = DotNetRuntimeInstaller.TryConfigureDiscovery;
+        internal Func<string, string, bool> ConfigureDiscovery { get; set; } = DotNetRuntimeInstaller.TryConfigureDiscovery;
 
         /// <inheritdoc/>
         public override async Task<int> InvokeAsync(
@@ -214,7 +214,7 @@ internal class GuestRuntimeCommand : Command, IShortDescription
         /// Installs and verifies every shared .NET framework the plan requires.
         /// </summary>
         /// <remarks>
-        /// All from one root, or none from it. <c>DOTNET_ROOT</c> is exclusive: an apphost pointed at
+        /// All from one root, or none from it. An apphost's selected <c>DOTNET_ROOT</c> is exclusive: an apphost pointed at
         /// a root resolves every framework from <em>there</em> and consults nothing else. So a guest
         /// that already has the core runtime but needs the desktop one cannot be served by installing
         /// only what is missing — pinning the launch to the managed root would then hide the core
@@ -238,7 +238,7 @@ internal class GuestRuntimeCommand : Command, IShortDescription
                 return outcomes;
             }
 
-            var guestRoots = SharedFrameworkRoots()
+            var guestRoots = SharedFrameworkRoots(plan.Architecture)
                 .Where(root => !string.Equals(root, plan.DotNetRoot, StringComparison.OrdinalIgnoreCase))
                 .ToList();
 
@@ -286,7 +286,7 @@ internal class GuestRuntimeCommand : Command, IShortDescription
                 // Best-effort, and never on the critical path: the launch carries the same value in
                 // the child's own environment. This only extends it to processes winapp did not
                 // start, such as an app run by hand through `sandbox exec`.
-                ConfigureDiscovery(plan.DotNetRoot);
+                ConfigureDiscovery(plan.DotNetRoot, plan.Architecture);
             }
 
             return outcomes;

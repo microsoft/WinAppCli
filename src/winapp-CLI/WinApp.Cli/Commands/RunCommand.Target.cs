@@ -47,6 +47,7 @@ internal partial class RunCommand
             FileInfo? projectFile,
             string? framework,
             bool noRestore,
+            string? runtimeFallbackArchitecture,
             CancellationToken cancellationToken)
         {
             FileInfo resolvedManifest;
@@ -151,7 +152,8 @@ internal partial class RunCommand
                 // --with-alias is documented as running the app "in the current terminal with
                 // inherited stdin/stdout/stderr". Output already came back; without this, stdin did
                 // not, so a console app launched this way could never be driven.
-                forwardStandardInput: withAlias);
+                forwardStandardInput: withAlias,
+                runtimeFallbackArchitecture: runtimeFallbackArchitecture);
         }
 
         /// <summary>
@@ -213,7 +215,8 @@ internal partial class RunCommand
                     Detach = detach,
                 },
                 cancellationToken,
-                guestProducesRunResult: false);
+                guestProducesRunResult: false,
+                runtimeFallbackArchitecture: resolution.Architecture);
         }
 
         /// <summary>
@@ -267,7 +270,8 @@ internal partial class RunCommand
             Func<GuestDeployment, Dictionary<string, string>, GuestExecRequest> buildRequest,
             CancellationToken cancellationToken,
             bool guestProducesRunResult = true,
-            bool forwardStandardInput = false)
+            bool forwardStandardInput = false,
+            string? runtimeFallbackArchitecture = null)
         {
             try
             {
@@ -280,7 +284,8 @@ internal partial class RunCommand
                 // transferring the build — and each is announced before it starts rather than after.
                 WriteProgress(isJson, "Checking runtimes in the Windows Sandbox...");
 
-                var provisioning = await ProvisionRuntimesAsync(target, sourceRoot, cancellationToken);
+                var provisioning = await ProvisionRuntimesAsync(
+                    target, sourceRoot, runtimeFallbackArchitecture, cancellationToken);
 
                 WriteProgress(isJson, "Deploying the application into the Windows Sandbox...");
 
@@ -360,8 +365,8 @@ internal partial class RunCommand
                     GuestOwnerContext.ResolveGuestToken(
                         target.Reference.StateKey, target.Epoch.Value));
 
-                // A per-user .NET installation is discoverable to an apphost through DOTNET_ROOT and
-                // nothing else without machine-wide registration, so the root provisioning created
+                // A per-user .NET installation is discoverable to an apphost only through its
+                // DOTNET_ROOT variables without machine-wide registration, so the root provisioning created
                 // has to reach the launched process itself. Merged rather than assigned, so the
                 // owner context this launch also depends on is not lost — and only present at all
                 // when the guest reported that the managed root is what satisfies a framework.
@@ -663,6 +668,7 @@ internal partial class RunCommand
         private async Task<RuntimeProvisionResult> ProvisionRuntimesAsync(
             PreparedTarget target,
             DirectoryInfo sourceRoot,
+            string? runtimeFallbackArchitecture,
             CancellationToken cancellationToken)
         {
             ExecutionTargetException? failure = null;
@@ -680,7 +686,8 @@ internal partial class RunCommand
                             sourceRoot,
                             new DirectoryInfo(currentDirectoryProvider.GetCurrentDirectory()),
                             taskContext,
-                            ct);
+                            ct,
+                            runtimeFallbackArchitecture);
 
                         provisioned = result;
 

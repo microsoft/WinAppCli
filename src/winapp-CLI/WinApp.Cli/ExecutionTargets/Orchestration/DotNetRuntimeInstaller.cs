@@ -19,7 +19,7 @@ internal sealed record DotNetInstallOutcome(bool Installed, Version? PresentVers
 /// Per-user and side-by-side, deliberately. A machine-wide <c>dotnet</c> layout would need elevation
 /// winapp does not otherwise take in a guest, and would put winapp in the position of servicing an
 /// installation other software depends on. A managed root under the guest's own profile is enough
-/// for an apphost — <c>DOTNET_ROOT</c> is the first thing it consults — and it can be added to
+/// for an apphost through its architecture-specific <c>DOTNET_ROOT</c> variable — and it can be added to
 /// without ever replacing or removing anything.
 /// <para>
 /// Every install is atomic in the only sense that matters here: content is unpacked to a disposable
@@ -99,8 +99,8 @@ internal static class DotNetRuntimeInstaller
         return new DotNetInstallOutcome(true, FindSatisfying(requirement, probeRoots), Detail: null);
     }
 
-    /// <summary>The environment variable an apphost consults first to find a .NET root.</summary>
-    internal const string DiscoveryVariable = "DOTNET_ROOT";
+    /// <summary>The generic environment variable an apphost consults after architecture-specific roots.</summary>
+    internal const string DiscoveryVariable = DotNetLayout.DiscoveryVariable;
 
     /// <summary>
     /// Makes the managed root discoverable to processes winapp did not launch.
@@ -108,7 +108,8 @@ internal static class DotNetRuntimeInstaller
     /// <remarks>
     /// The authoritative path is the launched process's own environment, which the host sets from
     /// the report — that is what makes <c>run --on sandbox</c> work regardless of what the guest's user
-    /// environment says. This is the additional, durable half: a per-user <c>DOTNET_ROOT</c> so an
+    /// environment says. This is the additional, durable half: a per-user architecture-specific
+    /// <c>DOTNET_ROOT</c> so an
     /// app started by hand or through <c>sandbox exec</c> resolves the same runtimes.
     /// <para>
     /// Per-user, and never overwritten. An existing value pointing somewhere else belongs to
@@ -118,12 +119,13 @@ internal static class DotNetRuntimeInstaller
     /// servicer of an installation other software depends on.
     /// </para>
     /// </remarks>
-    /// <returns>True when the variable now names <paramref name="managedRoot"/>.</returns>
-    public static bool TryConfigureDiscovery(string managedRoot)
+    /// <returns>True when the architecture-specific variable now names <paramref name="managedRoot"/>.</returns>
+    public static bool TryConfigureDiscovery(string managedRoot, string architecture)
     {
         try
         {
-            var existing = Environment.GetEnvironmentVariable(DiscoveryVariable, EnvironmentVariableTarget.User);
+            var discoveryVariable = DotNetLayout.DiscoveryVariableForArchitecture(architecture);
+            var existing = Environment.GetEnvironmentVariable(discoveryVariable, EnvironmentVariableTarget.User);
 
             if (string.Equals(existing, managedRoot, StringComparison.OrdinalIgnoreCase))
             {
@@ -136,7 +138,7 @@ internal static class DotNetRuntimeInstaller
             }
 
             Environment.SetEnvironmentVariable(
-                DiscoveryVariable, managedRoot, EnvironmentVariableTarget.User);
+                discoveryVariable, managedRoot, EnvironmentVariableTarget.User);
 
             return true;
         }
@@ -162,6 +164,7 @@ internal static class DotNetRuntimeInstaller
         ArgumentNullException.ThrowIfNull(probeRoots);
 
         return probeRoots
+            .Where(root => DotNetLayout.MatchesArchitecture(root, requirement.Architecture))
             .SelectMany(root => DotNetLayout.InstalledVersions(root, requirement.Name))
             .Where(requirement.IsSatisfiedBy)
             .OrderByDescending(version => version)

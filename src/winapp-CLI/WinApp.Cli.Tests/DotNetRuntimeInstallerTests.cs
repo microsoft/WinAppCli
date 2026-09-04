@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.IO.Compression;
+using System.Runtime.InteropServices;
 using WinApp.Cli.ExecutionTargets.Orchestration;
 
 namespace WinApp.Cli.Tests;
@@ -166,6 +167,115 @@ public class DotNetRuntimeInstallerTests
     }
 
     [TestMethod]
+    public void Ensure_UsesTheMatchingArchitectureWhenSeveralRootsHaveTheFramework()
+    {
+        var x64 = TestPaths.Under(_root, "dotnet-x64");
+        var x86 = TestPaths.Under(_root, "dotnet-x86");
+        WriteInstalledFramework(x64, Core, "10.0.9", "x64");
+        WriteInstalledFramework(x86, Core, "10.0.3", "x86");
+
+        var outcome = Ensure(
+            Requirement(Core, "10.0.0", payloadFile: null, architecture: "x86"),
+            extraRoots: [x64, x86]);
+
+        Assert.IsFalse(outcome.Installed);
+        Assert.AreEqual(new Version(10, 0, 3), outcome.PresentVersion);
+    }
+
+    [TestMethod]
+    public void Ensure_WhenOnlyAnotherArchitectureIsInstalled_DoesNotAcceptIt()
+    {
+        var x64 = TestPaths.Under(_root, "dotnet-x64");
+        WriteInstalledFramework(x64, Core, "10.0.9", "x64");
+
+        var outcome = Ensure(
+            Requirement(Core, "10.0.0", payloadFile: null, architecture: "x86"),
+            extraRoots: [x64]);
+
+        Assert.IsFalse(outcome.Installed);
+        Assert.IsNull(outcome.PresentVersion);
+        StringAssert.Contains(outcome.Detail!, "no runtime layout");
+    }
+
+    [TestMethod]
+    public void Ensure_AfterInstall_ReprobesTheManagedRootForThePlanArchitecture()
+    {
+        var x64 = TestPaths.Under(_root, "dotnet-x64");
+        WriteInstalledFramework(x64, Core, "10.0.9", "x64");
+        WriteLayout("x86-layout.zip", Core, "10.0.2", "x86");
+
+        var outcome = Ensure(
+            Requirement(Core, "10.0.0", "x86-layout.zip", architecture: "x86"),
+            extraRoots: [x64]);
+
+        Assert.IsTrue(outcome.Installed);
+        Assert.AreEqual(new Version(10, 0, 2), outcome.PresentVersion);
+    }
+
+    [TestMethod]
+    [DataRow("x64", "DOTNET_ROOT_X64")]
+    [DataRow("arm64", "DOTNET_ROOT_ARM64")]
+    [DataRow("x86", "DOTNET_ROOT_X86")]
+    public void DefaultRoots_PrefersTheArchitectureSpecificEnvironmentVariable(
+        string architecture,
+        string expectedVariable)
+    {
+        var roots = DotNetLayout.DefaultRoots(
+            architecture,
+            variable => variable switch
+            {
+                "DOTNET_ROOT" => @"C:\generic-dotnet",
+                _ when variable == expectedVariable => @"C:\specific-dotnet",
+                _ => null,
+            }).ToArray();
+
+        Assert.AreEqual(1, roots.Length);
+        Assert.AreEqual(@"C:\specific-dotnet", roots[0]);
+    }
+
+    [TestMethod]
+    public void DefaultRoots_UsesGenericEnvironmentVariableWhenTheSpecificOneIsUnset()
+    {
+        var roots = DotNetLayout.DefaultRoots(
+            "x64",
+            variable => variable == DotNetLayout.DiscoveryVariable ? @"C:\generic-dotnet" : null).ToArray();
+
+        Assert.AreEqual(1, roots.Length);
+        Assert.AreEqual(@"C:\generic-dotnet", roots[0]);
+    }
+
+    [TestMethod]
+    public void DefaultRoots_X86UsesTheLegacyVariableBeforeTheGenericOne()
+    {
+        var roots = DotNetLayout.DefaultRoots(
+            "x86",
+            variable => variable switch
+            {
+                DotNetLayout.LegacyX86DiscoveryVariable => @"C:\legacy-x86-dotnet",
+                DotNetLayout.DiscoveryVariable => @"C:\generic-dotnet",
+                _ => null,
+            },
+            Architecture.X64).ToArray();
+
+        Assert.AreEqual(1, roots.Length);
+        Assert.AreEqual(@"C:\legacy-x86-dotnet", roots[0]);
+    }
+
+    [TestMethod]
+    public void DefaultRoots_X64OnArm64UsesTheEmulatedRuntimeLocation()
+    {
+        var roots = DotNetLayout.DefaultRoots(
+            "x64",
+            _ => null,
+            Architecture.Arm64).ToArray();
+
+        Assert.AreEqual(1, roots.Length);
+        Assert.AreEqual(
+            Path.Join(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "dotnet", "x64"),
+            roots[0]);
+    }
+
+    [TestMethod]
     public void Ensure_WithNoStagedLayout_ReportsWhyRatherThanThrowing()
     {
         var outcome = Ensure(Requirement(Core, "10.0.0", payloadFile: null));
@@ -205,12 +315,16 @@ public class DotNetRuntimeInstallerTests
         Assert.IsFalse(File.Exists(Path.Join(_root, "escaped.dll")));
     }
 
-    private static RuntimeFrameworkRequirement Requirement(string name, string minVersion, string? payloadFile) =>
+    private static RuntimeFrameworkRequirement Requirement(
+        string name,
+        string minVersion,
+        string? payloadFile,
+        string architecture = "x64") =>
         new()
         {
             Name = name,
             MinVersion = minVersion,
-            Architecture = "x64",
+            Architecture = architecture,
             PayloadFile = payloadFile,
         };
 
@@ -222,7 +336,7 @@ public class DotNetRuntimeInstallerTests
             new[] { _managedRoot }.Concat(extraRoots ?? []),
             TestContext.CancellationToken);
 
-    private void WriteLayout(string fileName, string framework, string version)
+    private void WriteLayout(string fileName, string framework, string version, string architecture = "x64")
     {
         var path = Path.Join(_staging, fileName);
 
@@ -233,7 +347,10 @@ public class DotNetRuntimeInstallerTests
 
         if (framework == Core)
         {
-            Write(archive, $"shared/{framework}/{version}/hostpolicy.dll", "mz");
+            WriteBytes(
+                archive,
+                $"shared/{framework}/{version}/hostpolicy.dll",
+                MinimalPe.ForArchitecture(architecture));
             Write(archive, $"shared/{framework}/{version}/coreclr.dll", "mz");
             Write(archive, $"shared/{framework}/{version}/System.Private.CoreLib.dll", "mz");
             Write(archive, $"host/fxr/{version}/hostfxr.dll", "mz");
@@ -244,9 +361,19 @@ public class DotNetRuntimeInstallerTests
             using var writer = new StreamWriter(archive.CreateEntry(entryPath).Open());
             writer.Write(content);
         }
+
+        static void WriteBytes(ZipArchive archive, string entryPath, byte[] content)
+        {
+            using var stream = archive.CreateEntry(entryPath).Open();
+            stream.Write(content);
+        }
     }
 
-    private static string WriteInstalledFramework(string root, string framework, string version)
+    private static string WriteInstalledFramework(
+        string root,
+        string framework,
+        string version,
+        string architecture = "x64")
     {
         var directory = Path.Join(root, "shared", framework, version);
         Directory.CreateDirectory(directory);
@@ -254,7 +381,7 @@ public class DotNetRuntimeInstallerTests
 
         if (framework == Core)
         {
-            File.WriteAllText(Path.Join(directory, "hostpolicy.dll"), "mz");
+            File.WriteAllBytes(Path.Join(directory, "hostpolicy.dll"), MinimalPe.ForArchitecture(architecture));
             File.WriteAllText(Path.Join(directory, "coreclr.dll"), "mz");
             File.WriteAllText(Path.Join(directory, "System.Private.CoreLib.dll"), "mz");
 

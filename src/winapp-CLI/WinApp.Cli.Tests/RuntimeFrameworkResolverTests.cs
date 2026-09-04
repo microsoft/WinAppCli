@@ -55,7 +55,7 @@ public class RuntimeFrameworkResolverTests
         {
             // No host installation unless a test builds one; the machine running these tests has a
             // real .NET installed, and probing it would make the result depend on the machine.
-            HostDotNetRoots = () => [],
+            HostDotNetRoots = _ => [],
         };
     }
 
@@ -102,7 +102,7 @@ public class RuntimeFrameworkResolverTests
 
         var installed = TestPaths.Under(_root, "dotnet");
         WriteInstallation(installed, "10.0.4");
-        _resolver.HostDotNetRoots = () => [installed];
+        _resolver.HostDotNetRoots = _ => [installed];
 
         var payload = await ResolveAsync(Core, "10.0.0", "x64");
 
@@ -117,7 +117,7 @@ public class RuntimeFrameworkResolverTests
     {
         var installed = TestPaths.Under(_root, "dotnet-x86");
         WriteInstallation(installed, "10.0.4", architecture: "x86");
-        _resolver.HostDotNetRoots = () => [installed];
+        _resolver.HostDotNetRoots = _ => [installed];
 
         WritePack(Core, "10.0.2", "arm64");
 

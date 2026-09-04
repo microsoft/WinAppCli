@@ -40,7 +40,10 @@ public partial class TargetRuntimeServiceTests
         Assert.AreEqual(2, result.Report.Items.Count);
         Assert.IsTrue(result.Report.Items.TrueForAll(item => item.Installed));
 
-        var managedRoot = TestPaths.Under(_guestManaged, TargetRuntimeService.DotNetRootFolderName);
+        var managedRoot = TestPaths.Under(
+            _guestManaged,
+            TargetRuntimeService.DotNetRootFolderName,
+            "x64");
         Assert.IsTrue(Directory.Exists(Path.Join(managedRoot, "shared", "Microsoft.NETCore.App", "10.0.2")));
         Assert.IsTrue(Directory.Exists(Path.Join(managedRoot, "host", "fxr", "10.0.2")));
 
@@ -116,7 +119,10 @@ public partial class TargetRuntimeServiceTests
         Assert.IsTrue(result.Report!.Satisfied);
         Assert.IsTrue(result.Report.Items.TrueForAll(item => item.Installed));
 
-        var managedRoot = TestPaths.Under(_guestManaged, TargetRuntimeService.DotNetRootFolderName);
+        var managedRoot = TestPaths.Under(
+            _guestManaged,
+            TargetRuntimeService.DotNetRootFolderName,
+            "x64");
         Assert.IsTrue(Directory.Exists(Path.Join(managedRoot, "shared", "Microsoft.NETCore.App", "10.0.2")));
         Assert.IsTrue(Directory.Exists(Path.Join(managedRoot, "shared", "Microsoft.WindowsDesktop.App", "10.0.2")));
         Assert.AreEqual(managedRoot, result.LaunchEnvironment["DOTNET_ROOT"]);
@@ -162,5 +168,108 @@ public partial class TargetRuntimeServiceTests
 
         Assert.AreEqual(ExecutionTargetErrorCodes.RuntimeProvisionFailed, failure.Error.Code);
         StringAssert.Contains(failure.Error.Message, "Microsoft.WindowsDesktop.App");
+    }
+
+    [TestMethod]
+    [DataRow("x64")]
+    [DataRow("arm64")]
+    public async Task Ensure_UnpackagedX86App_UsesTheResolvedProjectArchitecture(string guestArchitecture)
+    {
+        await WriteRuntimeConfigAsync("Microsoft.NETCore.App", "10.0.0");
+        var layout = await WriteLayoutAsync("Microsoft.NETCore.App", "10.0.2", "x86");
+
+        await using var harness = new Harness(
+            _guestManaged,
+            _stateRoot,
+            sharedFrameworkRoot: TestPaths.Under(_root, "no-dotnet"),
+            guestArchitecture: guestArchitecture);
+        harness.Frameworks.Layouts["Microsoft.NETCore.App"] = layout;
+
+        var result = await harness.EnsureAsync(
+            _hostSource,
+            TestContext.CancellationToken,
+            fallbackArchitecture: "x86");
+
+        Assert.AreEqual("x86", result.Requirements.Architecture);
+        Assert.IsTrue(result.Requirements.Frameworks.All(framework => framework.Architecture == "x86"));
+        Assert.AreEqual(
+            TestPaths.Under(_guestManaged, TargetRuntimeService.DotNetRootFolderName, "x86"),
+            result.LaunchEnvironment[DotNetLayout.DiscoveryVariableForArchitecture("x86")]);
+    }
+
+    [TestMethod]
+    public async Task Ensure_UnpackagedAnyCpuFallback_UsesTheGuestArchitecture()
+    {
+        await WriteRuntimeConfigAsync("Microsoft.NETCore.App", "10.0.0");
+        var layout = await WriteLayoutAsync("Microsoft.NETCore.App", "10.0.2", "arm64");
+
+        await using var harness = new Harness(
+            _guestManaged,
+            _stateRoot,
+            sharedFrameworkRoot: TestPaths.Under(_root, "no-dotnet"),
+            guestArchitecture: "arm64");
+        harness.Frameworks.Layouts["Microsoft.NETCore.App"] = layout;
+
+        var result = await harness.EnsureAsync(
+            _hostSource,
+            TestContext.CancellationToken,
+            fallbackArchitecture: "AnyCPU");
+
+        Assert.AreEqual("arm64", result.Requirements.Architecture);
+        Assert.IsTrue(result.Requirements.Frameworks.All(framework => framework.Architecture == "arm64"));
+        Assert.AreEqual(
+            TestPaths.Under(_guestManaged, TargetRuntimeService.DotNetRootFolderName, "arm64"),
+            result.LaunchEnvironment[DotNetLayout.DiscoveryVariableForArchitecture("arm64")]);
+    }
+
+    [TestMethod]
+    public async Task Ensure_SeparatesManagedFrameworkRootsByArchitecture()
+    {
+        await WriteRuntimeConfigAsync("Microsoft.NETCore.App", "10.0.0");
+
+        await using (var x64 = new Harness(
+            _guestManaged,
+            _stateRoot,
+            sharedFrameworkRoot: TestPaths.Under(_root, "no-x64-dotnet"),
+            guestArchitecture: "x64"))
+        {
+            x64.Frameworks.Layouts["Microsoft.NETCore.App"] =
+                await WriteLayoutAsync("Microsoft.NETCore.App", "10.0.2", "x64");
+            var result = await x64.EnsureAsync(
+                _hostSource,
+                TestContext.CancellationToken,
+                fallbackArchitecture: "x64");
+            Assert.IsTrue(result.Report!.Satisfied);
+        }
+
+        await using (var x86 = new Harness(
+            _guestManaged,
+            _stateRoot,
+            sharedFrameworkRoot: TestPaths.Under(_root, "no-x86-dotnet"),
+            guestArchitecture: "x64"))
+        {
+            x86.Frameworks.Layouts["Microsoft.NETCore.App"] =
+                await WriteLayoutAsync("Microsoft.NETCore.App", "10.0.2", "x86");
+            var result = await x86.EnsureAsync(
+                _hostSource,
+                TestContext.CancellationToken,
+                fallbackArchitecture: "x86");
+            Assert.IsTrue(result.Report!.Satisfied);
+        }
+
+        Assert.IsTrue(Directory.Exists(Path.Join(
+            _guestManaged,
+            TargetRuntimeService.DotNetRootFolderName,
+            "x64",
+            "shared",
+            "Microsoft.NETCore.App",
+            "10.0.2")));
+        Assert.IsTrue(Directory.Exists(Path.Join(
+            _guestManaged,
+            TargetRuntimeService.DotNetRootFolderName,
+            "x86",
+            "shared",
+            "Microsoft.NETCore.App",
+            "10.0.2")));
     }
 }
