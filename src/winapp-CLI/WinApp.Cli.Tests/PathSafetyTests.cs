@@ -329,6 +329,28 @@ public class PathSafetyTests
     }
 
     [TestMethod]
+    public void IsNetworkPath_LocalDevicePaths_ReturnFalse()
+    {
+        // A drive letter or volume GUID behind the device prefix is local storage;
+        // refusing these would stop callers probing perfectly ordinary paths.
+        Assert.IsFalse(PathSafety.IsNetworkPath(@"\\?\C:\repo\App.csproj"));
+        Assert.IsFalse(PathSafety.IsNetworkPath(@"\\?\Volume{b75e2c83-0000-0000-0000-602f00000000}\repo\App.csproj"));
+    }
+
+    [TestMethod]
+    public void IsNetworkPath_DeviceNamespaceRoutesToSmb_ReturnsTrue()
+    {
+        // \\?\UNC\ is the obvious spelling, but the MUP and LanmanRedirector devices
+        // reach the same SMB redirector without the letters "UNC" appearing anywhere.
+        // A crafted solution or project asset file naming one of these turns a local,
+        // read-only query into an outbound authentication attempt.
+        Assert.IsTrue(PathSafety.IsNetworkPath(@"\\?\UNC\attacker.example\share\Evil.csproj"));
+        Assert.IsTrue(PathSafety.IsNetworkPath(@"\\?\GLOBALROOT\Device\Mup\attacker.example\share\Evil.csproj"));
+        Assert.IsTrue(PathSafety.IsNetworkPath(@"\\.\GLOBALROOT\Device\LanmanRedirector\attacker.example\share\Evil.csproj"));
+        Assert.IsTrue(PathSafety.IsNetworkPath(@"//?/GLOBALROOT/Device/Mup/attacker.example/share/Evil.csproj"));
+    }
+
+    [TestMethod]
     public async Task AtomicWriteAllTextAsync_BareFilename_WritesToCurrentDirectory()
     {
         // A path with no directory component defaults to the current working directory.
