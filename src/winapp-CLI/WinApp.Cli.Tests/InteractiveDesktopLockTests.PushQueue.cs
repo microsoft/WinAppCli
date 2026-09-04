@@ -203,6 +203,52 @@ public partial class InteractiveDesktopLockTests
             "a cancelled command must leave no queue entry behind for others to prune");
     }
 
+    [TestMethod]
+    public async Task AQuietWaiterStillRecordsQueueGrowthThatHappensAfterItRegisters()
+    {
+        // The telemetry summary reports the deepest queue a command ever saw. Sampling that next to the
+        // status line made it depend on whether anyone was watching: under --json and --quiet no status
+        // line is ever due, so the depth froze at whatever it was when the command registered and every
+        // command that piled up behind it went unrecorded — exactly the runs where queue depth is worth
+        // knowing.
+        using var foreignLease = OccupyTurnWithAnotherOwner();
+
+        UiCoordinationTelemetryScope.Begin();
+
+        using var cts = new CancellationTokenSource();
+        var queued = _coordinator.RunCoordinatedAsync(
+            UiTurnMode.DesktopExclusive, "ui click", UiCoordinationTestParse.Quiet(),
+            (_, _) => Task.FromResult(0), cts.Token);
+
+        Assert.IsTrue(
+            await EventuallyAsync(() => _signals.RequestedTimeouts.Count > 0),
+            "the command must be waiting before the queue grows behind it");
+
+        // Three more waiters arrive after this command registered, so a depth captured only at
+        // registration would report one rather than four.
+        using var second = QueueForeignWaiterAhead(foreignPid: 717171, foreignStart: 717);
+        using var third = QueueForeignWaiterAhead(foreignPid: 727272, foreignStart: 727);
+        using var fourth = QueueForeignWaiterAhead(foreignPid: 737373, foreignStart: 737);
+
+        // Wake it so it takes another look; the wake is a hint, and the look is what samples the depth.
+        _signals.SignalDirect(new UiParticipantIdentity(
+            Environment.ProcessId, new ProcessInspector().CurrentProcessStartTicksUtc, "ui click"));
+
+        Assert.IsTrue(
+            await EventuallyAsync(() => _signals.RequestedTimeouts.Count > 1),
+            "the waiter must have looked again after the queue grew");
+
+        await cts.CancelAsync();
+        Assert.AreEqual(InteractiveDesktopLock.CancelledExitCode, await queued);
+
+        var summary = UiCoordinationTelemetryScope.Current;
+        Assert.IsNotNull(summary);
+        Assert.IsGreaterThanOrEqualTo(
+            4,
+            summary!.QueueDepth,
+            $"a quiet waiter must still observe the queue growing behind it; it recorded {summary.QueueDepth}");
+    }
+
     /// <summary>
     /// Adds a live foreign waiter ahead of this process, so the test process is deliberately not the
     /// head of the queue.

@@ -509,6 +509,14 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
                         PublishAndSignal(state, runnableBefore);
                     }
 
+                    // Telemetry reports the deepest queue this command ever saw, so it is sampled on
+                    // every look rather than alongside the status line: under --json and --quiet no
+                    // status line is ever due, and sampling there would have reported only the depth at
+                    // registration and missed everything that queued up behind it afterwards. Counting a
+                    // normalized list is a list length, so it is cheap enough to do unconditionally.
+                    _observedQueueDepth = Math.Max(
+                        _observedQueueDepth, InteractiveDesktopScheduler.CountWaiters(state));
+
                     var entry = InteractiveDesktopScheduler.FindOwnerCommand(state, participant);
                     if (entry is { Status: UiCommandStatus.Running })
                     {
@@ -626,9 +634,10 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
         private UiWaitDiagnostics BuildDiagnostics(InteractiveDesktopState state, OwnerCommandEntry? ownEntry)
         {
             // Called only from inside a transaction that has just normalized, so the lists hold live
-            // participants only and no entry here needs a process handle to confirm it.
+            // participants only and no entry here needs a process handle to confirm it. The observed
+            // depth is not tracked here: this runs only when a status line is due, and the telemetry
+            // has to be the same whether or not anyone was watching.
             var queueDepth = InteractiveDesktopScheduler.CountWaiters(state);
-            _observedQueueDepth = Math.Max(_observedQueueDepth, queueDepth);
 
             var active = state.OwnerCommands
                 .Where(c => c.Status == UiCommandStatus.Running && c.Pid != participant.ProcessId)

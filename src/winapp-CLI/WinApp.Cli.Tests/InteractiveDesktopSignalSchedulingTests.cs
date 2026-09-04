@@ -138,10 +138,12 @@ public class InteractiveDesktopSignalSchedulingTests
     }
 
     [TestMethod]
-    public void ObservationsAreNotReportedAsNewlyRunnable()
+    public void ARegisteringObservationIsReportedAsNewlyRunnable()
     {
-        // Observations are already running when they register; they never wait, so waking one would be
-        // a wasted wake-up rather than a correctness problem — but it is still noise worth not sending.
+        // An observation is Running the moment it registers, so it does appear in the difference. That
+        // is correct rather than wasteful: the entry is a real change to who may act on the desktop.
+        // Nobody is woken for it, because PublishAndSignal skips the participant doing the publishing —
+        // which for a registration is always the observation itself.
         var state = InteractiveDesktopState.CreateFresh();
         var owner = Participant(100);
         _scheduler.BeginParticipating(state, _probe, OwnerA, owner, UiTurnMode.DesktopExclusive);
@@ -151,7 +153,7 @@ public class InteractiveDesktopSignalSchedulingTests
         _scheduler.BeginObserve(state, _probe, OwnerA, observer);
 
         var newlyRunnable = InteractiveDesktopScheduler.RunnableParticipants(state).Except(before).ToList();
-        Assert.HasCount(1, newlyRunnable, "the observation does appear, and it is the only change");
+        Assert.HasCount(1, newlyRunnable, "the observation is the only change");
         Assert.AreEqual((300, 300), newlyRunnable[0]);
     }
 
