@@ -541,14 +541,13 @@ public sealed class ProjectPublishServiceTests
         {
             $"Microsoft.NETCore.App.Runtime.NativeAOT.{rid}",
             $"runtime.{rid}.Microsoft.DotNet.ILCompiler",
-        }.Select(packageId => Path.Combine(
-            packageFolder,
-            packageId.ToLowerInvariant(),
-            version));
+        }.Select(packageId => Path.GetFullPath(
+            $"{packageId.ToLowerInvariant()}{Path.DirectorySeparatorChar}{version}",
+            packageFolder));
         foreach (var versionDirectory in versionDirectories)
         {
             Directory.CreateDirectory(versionDirectory);
-            File.WriteAllText(Path.Combine(versionDirectory, ".nupkg.metadata"), "{}");
+            File.WriteAllText(Path.GetFullPath(".nupkg.metadata", versionDirectory), "{}");
         }
 
         return packageFolder;

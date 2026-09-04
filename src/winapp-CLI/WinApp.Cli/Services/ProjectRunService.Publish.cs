@@ -493,9 +493,15 @@ internal sealed partial class ProjectRunService
         if (!File.Exists(sourceExecutable) && !publishAot)
         {
             var targetFileName = GetProp(properties, "TargetFileName");
-            var managedAssembly = string.IsNullOrWhiteSpace(targetFileName)
-                ? null
-                : Path.Combine(publishDirectory, Path.GetFileName(targetFileName));
+            var managedAssemblyFileName = Path.GetFileName(targetFileName);
+            var managedAssembly =
+                string.IsNullOrWhiteSpace(targetFileName) ||
+                !string.Equals(
+                    managedAssemblyFileName,
+                    targetFileName,
+                    StringComparison.Ordinal)
+                    ? null
+                    : Path.GetFullPath(managedAssemblyFileName, publishDirectory);
             if (managedAssembly is not null && File.Exists(managedAssembly))
             {
                 runCommand = "dotnet";
@@ -569,8 +575,15 @@ internal sealed partial class ProjectRunService
         var targetName = NullIfEmpty(GetProp(properties, "TargetName"))
             ?? NullIfEmpty(GetProp(properties, "AssemblyName"))
             ?? Path.GetFileNameWithoutExtension(csproj.Name);
-        var executableName = Path.GetFileName(targetName) + ".exe";
-        var executable = Path.Combine(publishDirectory, executableName);
+        var safeTargetName = Path.GetFileName(targetName);
+        if (!string.Equals(safeTargetName, targetName, StringComparison.Ordinal))
+        {
+            throw new ProjectRunException(
+                $"The evaluated target name '{targetName}' is not a valid file name.");
+        }
+
+        var executableName = safeTargetName + ".exe";
+        var executable = Path.GetFullPath(executableName, publishDirectory);
         if (requireArtifacts && !File.Exists(executable))
         {
             throw new ProjectRunException(
@@ -725,14 +738,16 @@ internal sealed partial class ProjectRunService
         var safePackageId = Path.GetFileName(packageId).ToLowerInvariant();
         var safeVersion = Path.GetFileName(version).ToLowerInvariant();
         if (string.IsNullOrWhiteSpace(safePackageId) ||
-            string.IsNullOrWhiteSpace(safeVersion))
+            string.IsNullOrWhiteSpace(safeVersion) ||
+            !string.Equals(safePackageId, packageId, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(safeVersion, version, StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
 
-        var packageDirectory = Path.Combine(
-            packageFolder,
-            Path.Combine(safePackageId, safeVersion));
+        var packageDirectory = Path.GetFullPath(
+            $"{safePackageId}{Path.DirectorySeparatorChar}{safeVersion}",
+            packageFolder);
         return Directory.Exists(packageDirectory) &&
                File.Exists(Path.GetFullPath(".nupkg.metadata", packageDirectory));
     }

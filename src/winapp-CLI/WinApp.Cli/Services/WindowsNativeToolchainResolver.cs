@@ -113,9 +113,9 @@ internal sealed class WindowsNativeToolchainResolver(IProcessRunner processRunne
             // diagnostic-only, so keep the usable toolchain and report an unknown display version.
         }
 
-        var vcToolsRoot = Path.Combine(
-            installationPath,
-            Path.Combine("VC", "Tools", "MSVC"));
+        var vcToolsRoot = Path.GetFullPath(
+            $"VC{Path.DirectorySeparatorChar}Tools{Path.DirectorySeparatorChar}MSVC",
+            installationPath);
         string? vcToolsVersion;
         try
         {
@@ -135,10 +135,22 @@ internal sealed class WindowsNativeToolchainResolver(IProcessRunner processRunne
                 $"The MSVC tools directory was not found under '{vcToolsRoot}'. Install or repair the '{component}' component in Visual Studio Installer.",
                 component);
         }
+        if (!string.Equals(
+                Path.GetFileName(vcToolsVersion),
+                vcToolsVersion,
+                StringComparison.Ordinal))
+        {
+            return Failure(
+                "MsvcToolsMissing",
+                $"Visual Studio returned an invalid MSVC tools version '{vcToolsVersion}'.",
+                component);
+        }
 
-        var vcToolsDirectory = Path.Combine(vcToolsRoot, vcToolsVersion);
+        var vcToolsDirectory = Path.GetFullPath(vcToolsVersion, vcToolsRoot);
         var toolDirectory = ResolveNativeToolDirectory(vcToolsDirectory, targetName);
-        var linkerPath = toolDirectory is null ? null : Path.Combine(toolDirectory, "link.exe");
+        var linkerPath = toolDirectory is null
+            ? null
+            : Path.GetFullPath("link.exe", toolDirectory);
         if (requirements.RequireLinker && (linkerPath is null || !File.Exists(linkerPath)))
         {
             return Failure(
@@ -147,7 +159,9 @@ internal sealed class WindowsNativeToolchainResolver(IProcessRunner processRunne
                 component);
         }
 
-        var compilerPath = toolDirectory is null ? null : Path.Combine(toolDirectory, "cl.exe");
+        var compilerPath = toolDirectory is null
+            ? null
+            : Path.GetFullPath("cl.exe", toolDirectory);
         if (requirements.RequireCompiler && (compilerPath is null || !File.Exists(compilerPath)))
         {
             return Failure(
