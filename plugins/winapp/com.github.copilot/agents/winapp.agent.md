@@ -191,13 +191,13 @@ Building a WinUI 3 UI and need to find the right control or a working sample?
 - `--project <name-or-path>` — (project mode) select which project to launch when a solution/directory has multiple runnable app projects (errors listing candidates if ambiguous)
 - `--publish` — (project mode) run `dotnet publish` and launch the evaluated `PublishDir`
 - `--verify-native-aot` — (project mode) imply `--publish`, reject .NET single-file bundles, and enforce AOT settings, payload, startup, module, and process-provenance checks
-- `--dry-run` — (project mode) validate the build/publish plan and native toolchain without restoring, building, publishing, registering, or launching
+- `--dry-run` — (project mode) validate the build/publish plan and restored Native AOT assets without restoring, building, publishing, registering, or launching; it does not validate native build tools
 - `--no-build` / `--no-restore` — (project mode) skip build / restore; with `--publish`, `--no-build` is forwarded to `dotnet publish --no-build`
 - `-p, --property <Name=Value>` — (project mode) MSBuild property forwarded to build + evaluation; repeatable (e.g. `-p WindowsPackageType=None`)
 - `--debug-output` — capture `OutputDebugString` messages and first-chance exceptions (prevents other debuggers like VS/VS Code from attaching). For WinUI apps it also auto-runs a stowed-exception (`0xC000027B`) triage pass (`!xamlstowed`/`!xamltriage`) that recovers the originating HRESULT and native XAML dispatch stack. The first triage run downloads debugger components (engine bits from NuGet + `JsProvider.dll` from the WinDbg CDN) and caches them under `~\.winapp\dbgtools\`; if downloads are blocked, install Debugging Tools for Windows or point `WINAPP_DBGTOOLS_DIR` at a debugger directory containing `dbgeng.dll` and `JsProvider.dll`.
 - `--symbols` — with `--debug-output`, download Microsoft public symbols for richer native crash stacks (first run downloads and caches them)
 - `--output-appx-directory <path>` — custom output directory for the loose layout
-**Requires:** Folder mode — built app output directory + `appxmanifest.xml`. Project mode — a `.csproj`/`.sln`/`.slnx` (or directory containing one) + .NET SDK 8.0.100+.
+**Requires:** Folder mode — built app output directory + `appxmanifest.xml`. Project mode — a `.csproj`/`.sln`/`.slnx` (or directory containing one) + .NET SDK 8.0.100+. Windows Native AOT publishing also requires Desktop development with C++; WinApp does not install it, and `dotnet publish` reports missing prerequisites.
 
 ### `winapp cert generate`
 **Purpose:** Create a self-signed PFX certificate for local testing.

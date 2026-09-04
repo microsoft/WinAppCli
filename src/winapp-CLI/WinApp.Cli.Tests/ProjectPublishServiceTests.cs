@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
-using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using Spectre.Console;
@@ -98,7 +97,7 @@ public sealed class ProjectPublishServiceTests
             ("ProjectAssetsFile", TempPath("obj", "project.assets.json")),
             ("PublishProfile", "Custom"));
 
-        var (service, dotnet, toolchain) = CreateService(properties);
+        var (service, dotnet) = CreateService(properties);
         var options = new ProjectRunOptions(
             "Release",
             "x64",
@@ -119,7 +118,6 @@ public sealed class ProjectPublishServiceTests
         Assert.AreEqual(executable.FullName, outcome.Resolution.SourceExecutable);
         Assert.AreEqual(executable.FullName, outcome.Resolution.RunCommand);
         Assert.AreEqual("Custom", outcome.Resolution.PublishProfile);
-        Assert.AreEqual(0, toolchain.Calls.Count, "Non-AOT publish should not require the native linker preflight.");
         Assert.AreEqual(1, dotnet.ArgumentListInvocations.Count, "The publish pass should execute exactly once.");
         CollectionAssert.Contains(dotnet.ArgumentListInvocations[0].ToArray(), "-p:PublishProfile=Custom");
     }
@@ -130,7 +128,7 @@ public sealed class ProjectPublishServiceTests
         var publishDirectory = _tempDirectory.CreateSubdirectory("publish");
         File.WriteAllText(ChildPath(publishDirectory.FullName, "App.exe"), "fixture");
         var properties = UnpackagedProperties(publishDirectory.FullName, publishAot: false);
-        var (service, dotnet, _) = CreateService(properties);
+        var (service, dotnet) = CreateService(properties);
         var options = new ProjectRunOptions(
             "Release",
             "x64",
@@ -151,12 +149,112 @@ public sealed class ProjectPublishServiceTests
     }
 
     [TestMethod]
+    public async Task PreparePublish_RidSplitGraphPreservesRuntimeIdentifierOmission()
+    {
+        WriteRidSplitGraph();
+        var publishDirectory = _tempDirectory.CreateSubdirectory("publish");
+        File.WriteAllText(ChildPath(publishDirectory.FullName, "App.exe"), "fixture");
+        var (service, dotnet) = CreateService(
+            UnpackagedProperties(publishDirectory.FullName, publishAot: false));
+        var options = new ProjectRunOptions(
+            "Release",
+            "x64",
+            null,
+            NoBuild: false,
+            NoRestore: true,
+            Properties: []);
+
+        var outcome = await service.PrepareAndResolveAsync(
+            _project,
+            options,
+            ProjectPreparationOperation.Publish,
+            CancellationToken.None);
+
+        Assert.AreEqual(0, outcome.ExitCode, outcome.Error);
+        var publishArguments = dotnet.ArgumentListInvocations.Single();
+        Assert.IsFalse(publishArguments.Contains("-r"));
+        Assert.IsFalse(publishArguments.Contains("win-x64"));
+        CollectionAssert.Contains(publishArguments.ToArray(), "-p:Platform=x64");
+    }
+
+    [TestMethod]
+    public async Task PrepareNativeAot_RidSplitGraphRestoresAndPublishesWithRuntimeIdentifier()
+    {
+        WriteRidSplitGraph();
+        var publishDirectory = _tempDirectory.CreateSubdirectory("publish");
+        File.WriteAllText(ChildPath(publishDirectory.FullName, "App.exe"), "fixture");
+        var shim = new FakeCsWinRTMetadataShimService
+        {
+            WindowsSdkAbsent = true,
+        };
+        shim.FolderSequence.Enqueue(null);
+        shim.FolderSequence.Enqueue(null);
+        shim.FolderSequence.Enqueue(TempPath("shim"));
+        var (service, dotnet) = CreateService(
+            UnpackagedProperties(publishDirectory.FullName, publishAot: true),
+            shim);
+        var options = new ProjectRunOptions(
+            "Release",
+            "x64",
+            null,
+            NoBuild: false,
+            NoRestore: false,
+            Properties: [],
+            VerifyNativeAot: true);
+
+        var outcome = await service.PrepareAndResolveAsync(
+            _project,
+            options,
+            ProjectPreparationOperation.Publish,
+            CancellationToken.None);
+
+        Assert.AreEqual(0, outcome.ExitCode, outcome.Error);
+        var restore = dotnet.StringInvocations.Single(invocation =>
+            invocation.StartsWith("restore ", StringComparison.Ordinal));
+        StringAssert.Contains(restore, "-r win-x64");
+        var publish = dotnet.ArgumentListInvocations.Single();
+        CollectionAssert.Contains(publish.ToArray(), "-r");
+        CollectionAssert.Contains(publish.ToArray(), "win-x64");
+        CollectionAssert.Contains(publish.ToArray(), "--no-restore");
+    }
+
+    [TestMethod]
+    public async Task PreparePublishDryRun_RidSplitGraphEvaluatesWithoutRuntimeIdentifier()
+    {
+        WriteRidSplitGraph();
+        var (service, dotnet) = CreateService(
+            UnpackagedProperties(TempPath("publish"), publishAot: false));
+        var options = new ProjectRunOptions(
+            "Release",
+            "x64",
+            null,
+            NoBuild: false,
+            NoRestore: true,
+            Properties: [],
+            DryRun: true);
+
+        var outcome = await service.PrepareAndResolveAsync(
+            _project,
+            options,
+            ProjectPreparationOperation.Publish,
+            CancellationToken.None);
+
+        Assert.AreEqual(true, outcome.Ready);
+        var evaluations = dotnet.StringInvocations
+            .Where(invocation => invocation.StartsWith("msbuild ", StringComparison.Ordinal))
+            .ToList();
+        Assert.HasCount(2, evaluations);
+        StringAssert.Contains(evaluations[0], "-p:RuntimeIdentifier=win-x64");
+        Assert.IsFalse(evaluations[1].Contains("-p:RuntimeIdentifier=", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public async Task PreparePublish_DryRunNeverExecutesPublish()
     {
         var properties = UnpackagedProperties(
             TempPath("not-created"),
             publishAot: false);
-        var (service, dotnet, _) = CreateService(properties);
+        var (service, dotnet) = CreateService(properties);
         var options = new ProjectRunOptions(
             "Release",
             "x64",
@@ -188,7 +286,7 @@ public sealed class ProjectPublishServiceTests
            ("AssemblyName", "Library"),
            ("WindowsPackageType", "None"),
            ("OutputType", "Library"));
-       var (service, dotnet, _) = CreateService(properties);
+       var (service, dotnet) = CreateService(properties);
        var options = new ProjectRunOptions(
            "Release",
            "x64",
@@ -218,7 +316,7 @@ public sealed class ProjectPublishServiceTests
             TempPath("publish"),
             publishAot: true,
             projectAssetsFile: assets);
-        var (service, dotnet, toolchain) = CreateService(properties);
+        var (service, dotnet) = CreateService(properties);
         var options = new ProjectRunOptions(
             "Release",
             "x64",
@@ -240,12 +338,70 @@ public sealed class ProjectPublishServiceTests
         StringAssert.Contains(outcome.SuggestedCommand, "dotnet restore");
         StringAssert.Contains(outcome.SuggestedCommand, "win-x64");
         StringAssert.Contains(outcome.SuggestedCommand, "PublishAot=true");
-        Assert.AreEqual(1, toolchain.Calls.Count);
         Assert.AreEqual(0, dotnet.ArgumentListInvocations.Count);
     }
 
     [TestMethod]
-    public async Task PrepareNativeAotDryRun_Arm64UsesArm64ToolchainAndRestoredPack()
+    public async Task PrepareNativeAotDryRun_RedactsSecretPropertiesFromRestoreSuggestion()
+    {
+        var properties = UnpackagedProperties(
+            TempPath("publish"),
+            publishAot: true);
+        var (service, dotnet) = CreateService(properties);
+        dotnet.RunDotnetCommandHandler = arguments =>
+            arguments == "--version"
+                ? (0, "10.0.303", string.Empty)
+                : (1, string.Empty, "project.assets.json was not found");
+        var options = new ProjectRunOptions(
+            "Release",
+            "x64",
+            null,
+            NoBuild: false,
+            NoRestore: false,
+            Properties: ["PublishAot=true", "PackageCertificatePassword=hunter2"],
+            DryRun: true,
+            VerifyNativeAot: true);
+
+        var outcome = await service.PrepareAndResolveAsync(
+            _project,
+            options,
+            ProjectPreparationOperation.Publish,
+            CancellationToken.None);
+
+        Assert.AreEqual("RestoreRequired", outcome.ErrorCode);
+        StringAssert.Contains(outcome.SuggestedCommand, "-p:PackageCertificatePassword=***");
+        Assert.IsFalse(outcome.SuggestedCommand.Contains("hunter2", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task PrepareBuildDryRun_RedactsSecretPropertiesFromRestoreSuggestion()
+    {
+        var (service, dotnet) = CreateService(
+            UnpackagedProperties(TempPath("publish"), publishAot: false));
+        dotnet.RunDotnetCommandHandler = _ =>
+            (1, string.Empty, "project.assets.json was not found");
+        var options = new ProjectRunOptions(
+            "Release",
+            "x64",
+            null,
+            NoBuild: false,
+            NoRestore: false,
+            Properties: ["PackageCertificatePassword=hunter2"],
+            DryRun: true);
+
+        var outcome = await service.PrepareAndResolveAsync(
+            _project,
+            options,
+            ProjectPreparationOperation.Build,
+            CancellationToken.None);
+
+        Assert.AreEqual("RestoreRequired", outcome.ErrorCode);
+        StringAssert.Contains(outcome.SuggestedCommand, "-p:PackageCertificatePassword=***");
+        Assert.IsFalse(outcome.SuggestedCommand.Contains("hunter2", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task PrepareNativeAotDryRun_Arm64UsesRestoredPack()
     {
         var assets = _tempDirectory.CreateSubdirectory("obj");
         var assetsFile = ChildPath(assets.FullName, "project.assets.json");
@@ -262,7 +418,7 @@ public sealed class ProjectPublishServiceTests
             projectAssetsFile: assetsFile,
             runtimeIdentifier: "win-arm64",
             platform: "ARM64");
-        var (service, _, toolchain) = CreateService(properties);
+        var (service, _) = CreateService(properties);
         var options = new ProjectRunOptions(
             "Release",
             "arm64",
@@ -280,9 +436,38 @@ public sealed class ProjectPublishServiceTests
             CancellationToken.None);
 
         Assert.AreEqual(true, outcome.Ready);
-        Assert.AreEqual(Architecture.Arm64, toolchain.Calls.Single().TargetArchitecture);
-        Assert.IsTrue(toolchain.Calls.Single().RequireLinker);
-        Assert.IsTrue(toolchain.Calls.Single().RequireWindowsSdk);
+        Assert.IsNotNull(outcome.Resolution);
+        Assert.AreEqual("arm64", outcome.Resolution.Architecture);
+        Assert.AreEqual("win-arm64", outcome.Resolution.RuntimeIdentifier);
+    }
+
+    [TestMethod]
+    public async Task PrepareNativeAot_X86IsRejectedBeforePublish()
+    {
+        var properties = UnpackagedProperties(
+            TempPath("publish"),
+            publishAot: true,
+            runtimeIdentifier: "win-x86",
+            platform: "x86");
+        var (service, dotnet) = CreateService(properties);
+        var options = new ProjectRunOptions(
+            "Release",
+            "x86",
+            null,
+            NoBuild: false,
+            NoRestore: false,
+            Properties: [],
+            VerifyNativeAot: true);
+
+        var outcome = await service.PrepareAndResolveAsync(
+            _project,
+            options,
+            ProjectPreparationOperation.Publish,
+            CancellationToken.None);
+
+        Assert.AreEqual("UnsupportedNativeAotArchitecture", outcome.ErrorCode);
+        Assert.IsFalse(outcome.Executed);
+        Assert.AreEqual(0, dotnet.ArgumentListInvocations.Count);
     }
 
     [TestMethod]
@@ -301,7 +486,7 @@ public sealed class ProjectPublishServiceTests
             TempPath("publish"),
             publishAot: true,
             projectAssetsFile: assetsFile);
-        var (service, _, _) = CreateService(properties);
+        var (service, _) = CreateService(properties);
         var options = new ProjectRunOptions(
             "Release",
             "x64",
@@ -336,17 +521,14 @@ public sealed class ProjectPublishServiceTests
     }
 
     [TestMethod]
-    public async Task PrepareNativeAot_MissingToolchainFailsBeforePublish()
+    public async Task PrepareNativeAot_DotnetPublishFailurePropagatesOriginalExitCode()
     {
         var properties = UnpackagedProperties(
             TempPath("publish"),
             publishAot: true);
-        var (service, dotnet, toolchain) = CreateService(properties);
-        toolchain.Result = new WindowsNativeToolchainResolution(
-            null,
-            "LinkerNotFound",
-            "The x64 linker was not found.",
-            "Microsoft.VisualStudio.Component.VC.Tools.x86.x64");
+        var (service, dotnet) = CreateService(properties);
+        dotnet.RunDotnetArgumentListHandler = _ =>
+            (87, string.Empty, "Native AOT toolchain prerequisite missing.");
         var options = new ProjectRunOptions(
             "Release",
             "x64",
@@ -362,18 +544,22 @@ public sealed class ProjectPublishServiceTests
             ProjectPreparationOperation.Publish,
             CancellationToken.None);
 
-        Assert.AreEqual("LinkerNotFound", outcome.ErrorCode);
-        StringAssert.Contains(outcome.Error, "Microsoft.VisualStudio.Component.VC.Tools.x86.x64");
-        Assert.AreEqual(0, dotnet.ArgumentListInvocations.Count, "Toolchain failure must happen before publish.");
+        Assert.AreEqual("PublishFailed", outcome.ErrorCode);
+        Assert.AreEqual(87, outcome.ExitCode);
+        Assert.IsTrue(outcome.Executed);
+        Assert.AreEqual(1, dotnet.ArgumentListInvocations.Count);
+        Assert.IsNull(dotnet.ArgumentListEnvironmentInvocations.Single());
     }
 
     [TestMethod]
-    public async Task PrepareNativeAot_PublishDiagnosticsHaveDistinctFailure()
+    public async Task PrepareNativeAot_PublishWarningsDoNotBlockVerification()
     {
+       var publishDirectory = _tempDirectory.CreateSubdirectory("publish");
+       File.WriteAllText(ChildPath(publishDirectory.FullName, "App.exe"), "native fixture");
        var properties = UnpackagedProperties(
-           TempPath("publish"),
+           publishDirectory.FullName,
            publishAot: true);
-       var (service, dotnet, _) = CreateService(properties);
+       var (service, dotnet) = CreateService(properties);
        dotnet.RunDotnetArgumentListHandler = _ =>
            (0, "warning IL2026: Native code analysis found an incompatible call", string.Empty);
        var options = new ProjectRunOptions(
@@ -391,8 +577,9 @@ public sealed class ProjectPublishServiceTests
            ProjectPreparationOperation.Publish,
            CancellationToken.None);
 
-       Assert.AreEqual("NativeAotPublishDiagnostics", outcome.ErrorCode);
-       StringAssert.Contains(outcome.Error, "IL2026");
+       Assert.AreEqual(0, outcome.ExitCode, outcome.Error);
+       Assert.IsNotNull(outcome.Resolution);
+       Assert.IsTrue(outcome.Resolution.PublishAot);
     }
 
     [TestMethod]
@@ -410,7 +597,7 @@ public sealed class ProjectPublishServiceTests
        var publishDirectory = _tempDirectory.CreateSubdirectory("publish");
        File.WriteAllText(ChildPath(publishDirectory.FullName, "App.exe"), "native fixture");
        var properties = UnpackagedProperties(publishDirectory.FullName, publishAot: true);
-       var (service, dotnet, toolchain) = CreateService(properties);
+       var (service, dotnet) = CreateService(properties);
        var evaluateCount = 0;
        dotnet.RunDotnetCommandHandler = arguments =>
        {
@@ -443,7 +630,6 @@ public sealed class ProjectPublishServiceTests
        Assert.IsNotNull(outcome.Resolution);
        Assert.IsTrue(outcome.Resolution.PublishAot);
        Assert.AreEqual(1, dotnet.ArgumentListInvocations.Count, "The real publish must run despite the indeterminate preflight evaluation.");
-       Assert.AreEqual(1, toolchain.Calls.Count);
     }
 
     [TestMethod]
@@ -467,7 +653,7 @@ public sealed class ProjectPublishServiceTests
             ("WindowsPackageType", "MSIX"),
             ("WindowsAppSDKSelfContained", "true"),
             ("OutputType", "WinExe"));
-        var (service, _, _) = CreateService(properties);
+        var (service, _) = CreateService(properties);
         var options = new ProjectRunOptions(
             "Release",
             "x64",
@@ -489,8 +675,10 @@ public sealed class ProjectPublishServiceTests
             outcome.Resolution.SourceExecutable);
     }
 
-    private static (ProjectRunService Service, FakeDotNetService Dotnet, FakeWindowsNativeToolchainResolver Toolchain)
-        CreateService(string propertiesJson)
+    private static (ProjectRunService Service, FakeDotNetService Dotnet)
+        CreateService(
+            string propertiesJson,
+            FakeCsWinRTMetadataShimService? shim = null)
     {
         var dotnet = new FakeDotNetService
         {
@@ -500,7 +688,6 @@ public sealed class ProjectPublishServiceTests
                     : (0, propertiesJson, string.Empty),
             RunDotnetArgumentListHandler = _ => (0, "publish succeeded", string.Empty),
         };
-        var toolchain = new FakeWindowsNativeToolchainResolver();
         var console = AnsiConsole.Create(new AnsiConsoleSettings
         {
             Out = new AnsiConsoleOutput(TextWriter.Null),
@@ -508,11 +695,52 @@ public sealed class ProjectPublishServiceTests
         var service = new ProjectRunService(
             dotnet,
             new ProjectDetectionService(NullLogger<ProjectDetectionService>.Instance, dotnet),
-            new FakeCsWinRTMetadataShimService(),
+            shim ?? new FakeCsWinRTMetadataShimService(),
             console,
-            NullLogger<ProjectRunService>.Instance,
-            toolchain);
-        return (service, dotnet, toolchain);
+            NullLogger<ProjectRunService>.Instance);
+        return (service, dotnet);
+    }
+
+    private void WriteRidSplitGraph()
+    {
+        File.WriteAllText(
+            ChildPath(_tempDirectory.FullName, "Shared.csproj"),
+            """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+                <Platforms>AnyCPU;x64;ARM64</Platforms>
+              </PropertyGroup>
+            </Project>
+            """);
+        File.WriteAllText(
+            ChildPath(_tempDirectory.FullName, "Middle.csproj"),
+            """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+                <Platforms>AnyCPU;x64;ARM64</Platforms>
+              </PropertyGroup>
+              <ItemGroup>
+                <ProjectReference Include="Shared.csproj" GlobalPropertiesToRemove="RuntimeIdentifier" />
+              </ItemGroup>
+            </Project>
+            """);
+        File.WriteAllText(
+            _project.FullName,
+            """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <OutputType>WinExe</OutputType>
+                <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+                <Platforms>x86;x64;ARM64</Platforms>
+              </PropertyGroup>
+              <ItemGroup>
+                <ProjectReference Include="Shared.csproj" />
+                <ProjectReference Include="Middle.csproj" />
+              </ItemGroup>
+            </Project>
+            """);
     }
 
     private static string UnpackagedProperties(

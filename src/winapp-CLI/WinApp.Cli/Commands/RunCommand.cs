@@ -1368,10 +1368,6 @@ internal sealed class ProjectRunCommandResult : RunCommandResult
     public bool? NativeAotVerified { get; set; }
     public RunVerificationResult? Verification { get; set; }
     public string? DotnetSdk { get; set; }
-    public string? VisualStudio { get; set; }
-    public string? Msvc { get; set; }
-    public string? Linker { get; set; }
-    public string? WindowsSdk { get; set; }
     public string? ErrorCode { get; set; }
     public string? Details { get; set; }
 }

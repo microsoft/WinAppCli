@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
-using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
@@ -88,7 +87,7 @@ internal sealed partial class ProjectRunService
 
         if (exitCode != 0)
         {
-            var restore = $"dotnet {BuildDryRunRestoreArguments(csproj, options, publishAot: false)}";
+            var restore = $"dotnet {RedactSecretsForDisplay(BuildDryRunRestoreArguments(csproj, options, publishAot: false))}";
             return new ProjectPreparationOutcome(
                 null,
                 exitCode,
@@ -144,12 +143,7 @@ internal sealed partial class ProjectRunService
         WarnOnOverriddenFlags(options);
 
         options = await ResolveEffectiveFrameworkAsync(csproj, options, workingDir, cancellationToken);
-        options = ResolvePlatformInjection(csproj, options) with
-        {
-            // Publish always targets a concrete RID. In particular, Native AOT cannot be evaluated or
-            // produced from a Platform-only outer build.
-            OmitRuntimeIdentifier = false,
-        };
+        options = ResolvePlatformInjection(csproj, options);
 
         var shimFramework = await ResolveShimFrameworkAsync(csproj, options, workingDir, cancellationToken);
         var initialShim = ResolveCsWinRTMetadataShim(options, shimFramework);
@@ -186,36 +180,35 @@ internal sealed partial class ProjectRunService
             return FailedPreparation("PublishAotRequired", error, executed: false);
         }
 
-        WindowsNativeToolchain? toolchain = null;
         if (publishAot || options.VerifyNativeAot)
         {
-            if (!TryGetNativeArchitecture(options.Architecture, out var nativeArchitecture))
+            if (!IsNativeAotArchitecture(options.Architecture))
             {
                 return FailedPreparation(
                     "UnsupportedNativeAotArchitecture",
                     $"Windows Native AOT publishing supports win-x64 and win-arm64. Runtime 'win-{options.Architecture}' is not supported.",
                     executed: false);
             }
+        }
 
-            var toolchainResolution = await nativeToolchainResolver.ResolveAsync(
-                new WindowsNativeToolchainRequirements(
-                    nativeArchitecture,
-                    RequireCompiler: false,
-                    RequireLinker: true,
-                    RequireWindowsSdk: true),
+        if (options.DryRun &&
+            initialProperties is not null &&
+            options.OmitRuntimeIdentifier &&
+            !publishAot &&
+            !options.VerifyNativeAot)
+        {
+            initialEvaluateArgs = BuildEvaluateArguments(csproj, options, initialShim);
+            logger.LogDebug(
+                "{UISymbol} RID-safe publish plan evaluation: dotnet {Arguments}",
+                UiSymbols.Note,
+                RedactSecretsForDisplay(initialEvaluateArgs));
+            (initialExit, initialStdout, initialStderr) = await dotNetService.RunDotnetCommandAsync(
+                workingDir,
+                initialEvaluateArgs,
                 cancellationToken);
-
-            if (!toolchainResolution.Succeeded)
-            {
-                var error = FormatToolchainFailure(csproj, options, toolchainResolution);
-                return FailedPreparation(
-                    toolchainResolution.ErrorCode ?? "NativeAotToolchainUnavailable",
-                    error,
-                    executed: false);
-            }
-
-            toolchain = toolchainResolution.Toolchain;
-            PrintNativeToolchain(toolchain!, options);
+            initialProperties = initialExit == 0
+                ? MsBuildPropertyReader.Parse(initialStdout, RequestedProperties)
+                : null;
         }
 
         var dotnetSdk = await ResolveDotnetSdkVersionAsync(workingDir, cancellationToken);
@@ -241,8 +234,7 @@ internal sealed partial class ProjectRunService
                     initialProperties,
                     workingDir,
                     requireArtifacts: false,
-                    dotnetSdk,
-                    toolchain);
+                    dotnetSdk);
             }
             catch (ProjectRunException ex)
             {
@@ -261,23 +253,19 @@ internal sealed partial class ProjectRunService
                 Ready: true);
         }
 
-        // Toolchain preflight above intentionally precedes any restore. Once it succeeds, reuse the normal
-        // framework/shim/solution preparation so project-mode publish keeps build-mode restore behavior.
         var (resolvedOptions, publishOptions, csWinRTMetadata) = await PrepareBuildInputsAsync(
             csproj,
             options,
             workingDir,
             setStatus: null,
-            cancellationToken);
-        resolvedOptions = resolvedOptions with { OmitRuntimeIdentifier = false };
-        publishOptions = publishOptions with { OmitRuntimeIdentifier = false };
+            cancellationToken,
+            requireConcreteRid: publishAot || options.VerifyNativeAot);
 
         var publishResult = await RunPublishPassAsync(
             csproj,
             publishOptions,
             workingDir,
             csWinRTMetadata,
-            toolchain?.Environment,
             cancellationToken);
         if (publishResult.ExitCode != 0)
         {
@@ -293,30 +281,12 @@ internal sealed partial class ProjectRunService
                 exitCode: publishResult.ExitCode);
         }
 
-        if (options.VerifyNativeAot &&
-           TryFindNativeAotDiagnostic(publishResult.Output, publishResult.Error, out var nativeAotDiagnostic))
-        {
-           return FailedPreparation(
-               "NativeAotPublishDiagnostics",
-               $"Native publish completed with an AOT or trimming diagnostic that must be resolved before verification can succeed: {nativeAotDiagnostic}",
-               executed: true);
-        }
-        if (options.VerifyNativeAot)
-        {
-           logger.LogDebug(
-               "{UISymbol} dotnet publish exited 0; no blocking Native AOT or trimming diagnostics were classified.",
-               UiSymbols.Note);
-        }
-        else
-        {
-           logger.LogDebug("{UISymbol} dotnet publish exited 0.", UiSymbols.Note);
-        }
+        logger.LogDebug("{UISymbol} dotnet publish exited 0.", UiSymbols.Note);
 
         var evaluateArgs = BuildEvaluateArguments(
             csproj,
             resolvedOptions,
-            csWinRTMetadata,
-            forceRuntimeIdentifier: true);
+            csWinRTMetadata);
         logger.LogDebug(
             "{UISymbol} Post-publish evaluation: dotnet {Arguments}",
             UiSymbols.Note,
@@ -354,8 +324,7 @@ internal sealed partial class ProjectRunService
                 properties,
                 workingDir,
                 requireArtifacts: true,
-                dotnetSdk,
-                toolchain);
+                dotnetSdk);
         }
         catch (ProjectRunException ex)
         {
@@ -394,7 +363,6 @@ internal sealed partial class ProjectRunService
         ProjectRunOptions options,
         DirectoryInfo workingDir,
         string? csWinRTMetadata,
-        IReadOnlyDictionary<string, string>? environment,
         CancellationToken cancellationToken)
     {
         var arguments = BuildPublishPassArguments(
@@ -440,7 +408,7 @@ internal sealed partial class ProjectRunService
         return await dotNetService.RunDotnetCommandAsync(
             workingDir,
             arguments,
-            environment,
+            environmentOverrides: null,
             stdout,
             stderr,
             cancellationToken);
@@ -452,8 +420,7 @@ internal sealed partial class ProjectRunService
         IReadOnlyDictionary<string, string> properties,
         DirectoryInfo workingDir,
         bool requireArtifacts,
-        string? dotnetSdk,
-        WindowsNativeToolchain? toolchain)
+        string? dotnetSdk)
     {
        ValidateExecutableOutputType(csproj, properties);
 
@@ -535,7 +502,6 @@ internal sealed partial class ProjectRunService
             FinalAppxManifestPath: finalManifest,
             ProjectAssetsFile: ResolveAbsolutePath(GetProp(properties, "ProjectAssetsFile"), workingDir),
             DotnetSdk: dotnetSdk,
-            NativeToolchain: toolchain,
             PublishProfile: NullIfEmpty(GetProp(properties, "PublishProfile")),
             EvaluatedPlatform: NullIfEmpty(GetProp(properties, "Platform")) ?? options.Platform,
             BundledNetCoreAppPackageVersion: NullIfEmpty(
@@ -752,28 +718,6 @@ internal sealed partial class ProjectRunService
                File.Exists(Path.GetFullPath(".nupkg.metadata", packageDirectory));
     }
 
-    private static bool TryFindNativeAotDiagnostic(
-       string standardOutput,
-       string standardError,
-       out string diagnostic)
-    {
-       diagnostic = string.Empty;
-       var lines = string.Join(Environment.NewLine, standardOutput, standardError)
-           .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-       var match = lines.FirstOrDefault(line =>
-           line.Contains("warning IL2", StringComparison.OrdinalIgnoreCase) ||
-           line.Contains("warning IL3", StringComparison.OrdinalIgnoreCase) ||
-           line.Contains("warning IL4", StringComparison.OrdinalIgnoreCase) ||
-           line.Contains("AOT analysis warning", StringComparison.OrdinalIgnoreCase));
-       if (match is null)
-       {
-           return false;
-       }
-
-       diagnostic = match;
-       return true;
-    }
-
     private static bool TryReadBooleanProjectProperty(
         FileInfo csproj,
         IReadOnlyList<string> userProperties,
@@ -823,32 +767,6 @@ internal sealed partial class ProjectRunService
         }
     }
 
-    private void PrintNativeToolchain(
-        WindowsNativeToolchain toolchain,
-        ProjectRunOptions options)
-    {
-        if (!options.Json && logger.IsEnabled(LogLevel.Information))
-        {
-            ansiConsole.MarkupLineInterpolated($"{UiSymbols.Search} Checking native toolchain");
-            ansiConsole.MarkupLineInterpolated($"  {UiSymbols.Check} Visual Studio Build Tools {toolchain.VisualStudioVersion}");
-            ansiConsole.MarkupLineInterpolated($"  {UiSymbols.Check} MSVC {options.Architecture} linker {toolchain.VcToolsVersion}");
-            ansiConsole.MarkupLineInterpolated($"  {UiSymbols.Check} Windows SDK {toolchain.WindowsSdkVersion}");
-        }
-
-        logger.LogDebug(
-           "{UISymbol} Native toolchain: component={Component}; VS={VisualStudioPath}; MSVC={Msvc}; compiler={Compiler}; linker={Linker}; SDK={Sdk}; environment modifications={EnvironmentKeys}",
-            UiSymbols.Note,
-           options.Architecture.Equals("arm64", StringComparison.OrdinalIgnoreCase)
-               ? "Microsoft.VisualStudio.Component.VC.Tools.ARM64"
-               : "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
-            toolchain.VisualStudioInstallPath,
-            toolchain.VcToolsVersion,
-           toolchain.CompilerPath ?? "(not requested)",
-            toolchain.LinkerPath,
-            toolchain.WindowsSdkVersion,
-            string.Join(", ", toolchain.Environment.Keys.OrderBy(key => key, StringComparer.OrdinalIgnoreCase)));
-    }
-
     private static ProjectPreparationOutcome RestoreRequiredOutcome(
         FileInfo csproj,
         ProjectRunOptions options,
@@ -857,7 +775,7 @@ internal sealed partial class ProjectRunService
         string? evaluationError,
         ProjectRunResolution? resolution = null)
     {
-        var restore = $"dotnet {BuildDryRunRestoreArguments(csproj, options, publishAot)}";
+        var restore = $"dotnet {RedactSecretsForDisplay(BuildDryRunRestoreArguments(csproj, options, publishAot))}";
         var detail = string.IsNullOrWhiteSpace(evaluationError)
             ? "The Native AOT runtime pack is not present in the restored project assets."
             : $"Project evaluation was incomplete: {evaluationError.Trim()}";
@@ -902,54 +820,9 @@ internal sealed partial class ProjectRunService
         return "PublishedArtifactInvalid";
     }
 
-    private static string FormatToolchainFailure(
-        FileInfo csproj,
-        ProjectRunOptions options,
-        WindowsNativeToolchainResolution failure)
-    {
-        var retry = new List<string>
-        {
-            "winapp",
-            "run",
-            csproj.FullName,
-            "--publish",
-            "--verify-native-aot",
-            "-c",
-            options.Configuration,
-            "-r",
-            RunArchHelper.ToRuntimeIdentifier(options.Architecture),
-        };
-        var lines = new List<string>
-        {
-            failure.Error ?? "The Windows Native AOT toolchain is unavailable.",
-        };
-        if (!string.IsNullOrWhiteSpace(failure.RequiredComponent))
-        {
-            lines.Add(string.Empty);
-            lines.Add("Install component:");
-            lines.Add($"  {failure.RequiredComponent}");
-        }
-        lines.Add(string.Empty);
-        lines.Add("Then retry:");
-        lines.Add($"  {WindowsCommandLine.JoinArguments(retry)}");
-        return string.Join(Environment.NewLine, lines);
-    }
-
-    private static bool TryGetNativeArchitecture(string architecture, out Architecture nativeArchitecture)
-    {
-        switch (architecture.ToLowerInvariant())
-        {
-            case "x64":
-                nativeArchitecture = Architecture.X64;
-                return true;
-            case "arm64":
-                nativeArchitecture = Architecture.Arm64;
-                return true;
-            default:
-                nativeArchitecture = default;
-                return false;
-        }
-    }
+    private static bool IsNativeAotArchitecture(string architecture) =>
+        architecture.Equals("x64", StringComparison.OrdinalIgnoreCase) ||
+        architecture.Equals("arm64", StringComparison.OrdinalIgnoreCase);
 
     private static string ResolveAbsolutePath(string path, DirectoryInfo baseDirectory)
     {

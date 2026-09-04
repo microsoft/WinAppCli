@@ -151,9 +151,13 @@ internal sealed partial class ProjectRunService
             csproj.FullName,
             "-c",
             options.Configuration,
-            "-r",
-            RunArchHelper.ToRuntimeIdentifier(options.Architecture),
         };
+
+        if (!options.OmitRuntimeIdentifier)
+        {
+            tokens.Add("-r");
+            tokens.Add(RunArchHelper.ToRuntimeIdentifier(options.Architecture));
+        }
 
         if (options.NoBuild)
         {
@@ -209,10 +213,14 @@ internal sealed partial class ProjectRunService
         {
             "restore",
             csproj.FullName,
-            "-r",
-            RunArchHelper.ToRuntimeIdentifier(options.Architecture),
-            $"-p:Configuration={options.Configuration}",
         };
+
+        if (publishAot || !options.OmitRuntimeIdentifier)
+        {
+            tokens.Add("-r");
+            tokens.Add(RunArchHelper.ToRuntimeIdentifier(options.Architecture));
+        }
+        tokens.Add($"-p:Configuration={options.Configuration}");
 
         if (!string.IsNullOrWhiteSpace(options.Platform))
         {

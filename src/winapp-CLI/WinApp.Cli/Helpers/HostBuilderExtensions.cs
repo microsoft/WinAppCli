@@ -44,7 +44,6 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IProjectDetectionService, ProjectDetectionService>()
             .AddSingleton<IProjectContextDetector, ProjectContextDetector>()
             .AddSingleton<ICsWinRTMetadataShimService, CsWinRTMetadataShimService>()
-            .AddSingleton<IWindowsNativeToolchainResolver, WindowsNativeToolchainResolver>()
             .AddSingleton<IProjectRunService, ProjectRunService>()
             .AddSingleton<ITemplateCacheReader, TemplateCacheReader>()
             .AddSingleton<ITemplateUpdateCheckThrottle, TemplateUpdateCheckThrottle>()

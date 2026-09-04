@@ -17,12 +17,8 @@ internal sealed partial class ProjectRunService(
     IProjectDetectionService projectDetectionService,
     ICsWinRTMetadataShimService csWinRTMetadataShimService,
     IAnsiConsole ansiConsole,
-    ILogger<ProjectRunService> logger,
-    IWindowsNativeToolchainResolver? windowsNativeToolchainResolver = null) : IProjectRunService
+    ILogger<ProjectRunService> logger) : IProjectRunService
 {
-    private readonly IWindowsNativeToolchainResolver nativeToolchainResolver =
-        windowsNativeToolchainResolver ?? new WindowsNativeToolchainResolver(new ProcessRunner());
-
     /// <summary>MSBuild properties requested from the evaluate step (always ≥2 → JSON output).</summary>
     private static readonly string[] RequestedProperties =
     [
@@ -149,7 +145,8 @@ internal sealed partial class ProjectRunService(
             ProjectRunOptions options,
             DirectoryInfo workingDir,
             Action<string>? setStatus,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool requireConcreteRid = false)
     {
         // Pin an effective single TFM for a multi-targeted project (default = first declared) BEFORE any
         // pass so build/evaluate/packaging/provisioning all agree. No-op when single-targeted / --framework set.
@@ -169,7 +166,7 @@ internal sealed partial class ProjectRunService(
         // only when the target AND its whole ProjectReference closure declare a <Platforms> including the
         // arch, so it can't desync a no-<Platforms> reference (MSB3030/PRI252). Threaded into every pass
         // below (restore/build/evaluate) via `options`, keeping them in lock-step.
-        options = ResolvePlatformInjection(csproj, options);
+        options = ResolvePlatformInjection(csproj, options, requireConcreteRid);
         var buildOptions = options;
 
         // When the target lives in a solution, restore the whole solution's managed projects up front so

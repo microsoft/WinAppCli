@@ -489,14 +489,6 @@ internal partial class RunCommand
            report.DotnetSdk = resolution.DotnetSdk;
            report.ErrorCode = outcome.ErrorCode;
            report.Error = outcome.Error;
-
-           if (resolution.NativeToolchain is { } toolchain)
-           {
-               report.VisualStudio = toolchain.VisualStudioVersion;
-               report.Msvc = toolchain.VcToolsVersion;
-               report.Linker = toolchain.LinkerPath;
-               report.WindowsSdk = toolchain.WindowsSdkVersion;
-           }
         }
 
         private void PrintDryRunResult(ProjectRunCommandResult report)

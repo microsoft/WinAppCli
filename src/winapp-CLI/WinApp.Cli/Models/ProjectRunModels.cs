@@ -87,7 +87,6 @@ internal sealed record ProjectRunResolution(
     string? FinalAppxManifestPath = null,
     string? ProjectAssetsFile = null,
     string? DotnetSdk = null,
-    WindowsNativeToolchain? NativeToolchain = null,
     string? PublishProfile = null,
     string? EvaluatedPlatform = null,
     string? BundledNetCoreAppPackageVersion = null)

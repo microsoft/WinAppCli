@@ -1,33 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
-using System.Runtime.InteropServices;
-
 namespace WinApp.Cli.Models;
-
-internal sealed record WindowsNativeToolchainRequirements(
-    Architecture TargetArchitecture,
-    bool RequireCompiler,
-    bool RequireLinker,
-    bool RequireWindowsSdk);
-
-internal sealed record WindowsNativeToolchain(
-    string VisualStudioInstallPath,
-    string VisualStudioVersion,
-    string VcToolsVersion,
-    string? CompilerPath,
-    string LinkerPath,
-    string WindowsSdkVersion,
-    IReadOnlyDictionary<string, string> Environment);
-
-internal sealed record WindowsNativeToolchainResolution(
-    WindowsNativeToolchain? Toolchain,
-    string? ErrorCode = null,
-    string? Error = null,
-    string? RequiredComponent = null)
-{
-    public bool Succeeded => Toolchain is not null;
-}
 
 internal sealed record NativeAotStaticVerification(
     bool Succeeded,

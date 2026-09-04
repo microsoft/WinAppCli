@@ -785,14 +785,14 @@ Project mode requires the **.NET SDK 8.0.100 or newer** (for MSBuild `--getPrope
 - `--project <name-or-path>` - When the input is a solution (`.sln`/`.slnx`) or a directory with multiple runnable app projects, selects which project to launch (by project name or path).
 - `--publish` - Run `dotnet publish`, evaluate `PublishDir` with the same configuration, RID, framework, platform, publish profile, and `-p` properties, then launch that published artifact.
 - `--verify-native-aot` - Implies `--publish`. Requires `PublishAot=true`, a `win-x64` or `win-arm64` RID, a payload without CoreCLR/JIT artifacts or a .NET single-file bundle, and a running process whose modules and image path pass Native AOT provenance checks.
-- `--dry-run` - Evaluate the build or publish plan and validate settings/toolchain readiness without restoring, building, publishing, registering, or launching. If restored Native AOT assets are missing, it reports an indeterminate result and prints the exact `dotnet restore` command to run.
+- `--dry-run` - Evaluate the build or publish plan and validate settings without restoring, building, publishing, registering, or launching. If restored Native AOT assets are missing, it reports an indeterminate result and prints the exact `dotnet restore` command to run. It does not validate native build-tool availability.
 - `--no-build` - Without `--publish`, skip `dotnet build` and use existing `TargetDir` output. With `--publish`, invoke `dotnet publish --no-build` and resolve its `PublishDir`; it does not mean “skip publish.”
 - `--no-restore` - Skip restoring during `dotnet build` or `dotnet publish`.
 - `-p, --property <Name=Value>` - MSBuild property, forwarded consistently to preparation and property evaluation. Repeatable (e.g. `-p WindowsPackageType=None` or `-p PublishProfile=Custom`).
 
 `--publish`, `--verify-native-aot`, and `--dry-run` require project mode. Passing one when the input resolves to a build-output folder is a usage error.
 
-**Native AOT prerequisites:** Windows Native AOT publishing requires .NET SDK 8.0.100 or newer plus Visual Studio or Visual Studio Build Tools with Desktop development with C++. WinApp validates `vswhere.exe`, the target-specific MSVC linker, and a compatible Windows SDK before publishing. Install `Microsoft.VisualStudio.Component.VC.Tools.x86.x64` for x64 or `Microsoft.VisualStudio.Component.VC.Tools.ARM64` for ARM64 when prompted; WinApp does not install workloads automatically.
+**Native AOT prerequisites:** Windows Native AOT publishing requires .NET SDK 8.0.100 or newer plus Visual Studio or Visual Studio Build Tools with Desktop development with C++. WinApp does not install these prerequisites; `dotnet publish` reports any that are missing.
 
 For `--verify-native-aot`, WinApp also checks that the process remains alive during a short internal startup window. A self-contained single-file JIT app can hide CoreCLR inside its executable, so WinApp rejects the official .NET single-file bundle marker rather than certifying it from missing sidecar files. Packaged output must be registered in development mode at this invocation's staging directory; unpackaged output must run directly from the evaluated `PublishDir`. JSON output includes the source executable, staging/process paths, package identity, PID, exit code when available, window information, and layered verification results.
 
@@ -840,7 +840,7 @@ winapp run . --publish -c Release -r win-x64 --detach
 # Publish, launch, and enforce Native AOT
 winapp run . --verify-native-aot -c Release -r win-x64 --detach
 
-# Check settings, restored runtime packs, and the native toolchain without changing anything
+# Check settings and restored runtime packs without changing anything
 winapp run . --verify-native-aot -c Release -r win-x64 --dry-run
 
 # Show winapp's build decision traces (dotnet build stays at minimal verbosity)

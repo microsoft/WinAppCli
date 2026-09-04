@@ -215,13 +215,13 @@ To enforce a Native AOT publish, set `PublishAot=true` in the project (or pass `
 winapp run .\dotnet-app.csproj --verify-native-aot -c Release -r win-x64 --detach
 ```
 
-Before a long publish, check the project, restored Native AOT pack, MSVC linker, and Windows SDK without changing anything:
+Before a long publish, check the project settings and restored Native AOT pack without changing anything:
 
 ```powershell
 winapp run .\dotnet-app.csproj --verify-native-aot -c Release -r win-x64 --dry-run
 ```
 
-If the dry run says `RestoreRequired`, run the printed `dotnet restore` command and repeat it. Windows Native AOT supports `win-x64` and `win-arm64`; install Desktop development with C++ in Visual Studio Installer if WinApp reports a missing target-specific component. `--no-build` keeps .NET CLI semantics: it skips the build in normal mode, but with `--publish` it is forwarded to `dotnet publish --no-build`.
+If the dry run says `RestoreRequired`, run the printed `dotnet restore` command and repeat it. Windows Native AOT supports `win-x64` and `win-arm64` and requires Desktop development with C++ in Visual Studio or Visual Studio Build Tools. WinApp does not install or validate these native build tools; `dotnet publish` reports any missing prerequisites. `--no-build` keeps .NET CLI semantics: it skips the build in normal mode, but with `--publish` it is forwarded to `dotnet publish --no-build`.
 
 WinApp rejects .NET single-file bundles during Native AOT verification. A self-contained single-file JIT app can contain CoreCLR inside the executable and omit the usual runtime sidecars, so missing DLLs alone are not accepted as proof. If startup verification reports an exit code, re-run without `--verify-native-aot` or `--detach` and add `--debug-output --symbols`.
 
