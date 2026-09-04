@@ -214,6 +214,17 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
+    public void RedactSecretsForDisplay_RedactsSignedFeedUrlInNonSecretProperty()
+    {
+        var line = "restore App.csproj -p:RestoreSources=https://feed.example/v3/index.json?sig=COMMAND_SECRET";
+
+        var redacted = ProjectRunService.RedactSecretsForDisplay(line);
+
+        Assert.IsFalse(redacted.Contains("COMMAND_SECRET", StringComparison.Ordinal));
+        StringAssert.Contains(redacted, "https://feed.example/v3/index.json?<redacted>");
+    }
+
+    [TestMethod]
     public void RedactSecretsForDisplay_RedactsOnlySecretSegmentOfPackedProperty()
     {
         var line = "build -p:A=1;Password=s3cr3t;B=2";
@@ -2067,6 +2078,22 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
+    public void BuildRestorePassArguments_SolutionTarget_OmitsUserPlatform()
+    {
+        var solution = WriteFile("App.slnx", SlnxListing("App.csproj", "Server/Server.csproj"));
+        var options = new ProjectRunOptions(
+            "Debug", "x64", null, NoBuild: false, NoRestore: false,
+            Properties: ["Platform=x64", "WindowsPackageType=None"], Solution: solution);
+
+        var args = ProjectRunService.BuildRestorePassArguments(solution, options);
+
+        Assert.IsFalse(args.Contains("-p:Platform=", StringComparison.OrdinalIgnoreCase),
+            "a user Platform property must not request an undeclared solution configuration");
+        StringAssert.Contains(args, "-p:WindowsPackageType=None",
+            "other user properties must continue to flow to solution restore");
+    }
+
+    [TestMethod]
     public void BuildRestorePassArguments_DropsDedicatedFlagPropertiesSoRidWins()
     {
         // C6: a conflicting user -p RuntimeIdentifier/Configuration/TargetFramework must NOT reach the
@@ -2985,14 +3012,18 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
-    public async Task BuildAndResolveAsync_SolutionRestoreInRealTerminal_UsesInheritedLauncher()
+    public async Task BuildAndResolveAsync_SolutionRestoreInRealTerminal_StreamsRedactedOutput()
     {
         var csproj = WriteFile("App.csproj", ExecutableCsproj);
         var solution = WriteFile("App.slnx", SlnxListing("App.csproj", "Server/Server.csproj"));
         var dotnet = new FakeDotNetService
         {
             RunDotnetCommandHandler = _ => (0, PackagedPropertiesJson(), string.Empty),
-            RunDotnetInheritedHandler = _ => 0,
+            RunDotnetStreamingHandler = (_, onOut, _) =>
+            {
+                onOut?.Invoke("NU1301 https://feed.example/v3/index.json?sig=RESTORE_SECRET");
+                return 0;
+            },
         };
         var service = NewServiceWith(dotnet, LogLevel.Information, out var console);
         service.NativeTerminalGateOverrideForTests = () => true;
@@ -3003,12 +3034,14 @@ public class ProjectRunServiceTests
 
         Assert.IsNotNull(outcome.Resolution);
         Assert.IsTrue(
-            dotnet.InheritedCalls.Any(a => a.StartsWith($"restore {solution.FullName}", StringComparison.Ordinal)),
-            "an interactive restore must inherit stdio so dotnet's terminal logger can render in-place progress");
+            dotnet.StreamingCalls.Any(a => a.StartsWith($"restore {solution.FullName}", StringComparison.Ordinal)),
+            "interactive restore must stream through winapp so output can be redacted");
         Assert.IsFalse(
-            dotnet.StreamingCalls.Any(a => a.StartsWith("restore ", StringComparison.Ordinal)),
-            "an interactive restore must not use redirected line streaming");
+            dotnet.InheritedCalls.Any(a => a.StartsWith("restore ", StringComparison.Ordinal)),
+            "restore output must never bypass winapp's redaction through inherited stdio");
         StringAssert.Contains(console.Output, "Restoring App.slnx dependencies");
+        StringAssert.Contains(console.Output, "https://feed.example/v3/index.json?<redacted>");
+        Assert.IsFalse(console.Output.Contains("RESTORE_SECRET", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -3024,8 +3057,8 @@ public class ProjectRunServiceTests
         {
             RunDotnetStreamingHandler = (_, onOut, onErr) =>
             {
-                onOut?.Invoke("RESTORE-STDOUT");
-                onErr?.Invoke("RESTORE-STDERR");
+                onOut?.Invoke("RESTORE-STDOUT https://feed.example/v3/index.json?sig=STDOUT_SECRET");
+                onErr?.Invoke("RESTORE-STDERR https://feed.example/v3/index.json?sig=STDERR_SECRET");
                 return 0;
             },
         };
@@ -3052,6 +3085,8 @@ public class ProjectRunServiceTests
         Assert.IsFalse(stderr.ToString().Contains("top-secret"), "the secret must not be displayed");
         StringAssert.Contains(stderr.ToString(), "RESTORE-STDOUT", "--json must route child stdout to stderr");
         StringAssert.Contains(stderr.ToString(), "RESTORE-STDERR", "--json must route child stderr to stderr");
+        Assert.IsFalse(stderr.ToString().Contains("STDOUT_SECRET"), "restore stdout must redact feed credentials");
+        Assert.IsFalse(stderr.ToString().Contains("STDERR_SECRET"), "restore stderr must redact feed credentials");
     }
 
     [TestMethod]

@@ -210,7 +210,7 @@ Project mode supports both **packaged** and **unpackaged** WinUI apps, detected 
 
 - **Build inputs:** `-c/--configuration`, `--arch`, `-r/--runtime`, `-f/--framework`, `--no-build`, `--no-restore`, `-p/--property` (repeatable).
 - **Packaged-only options:** `--manifest`, `--no-launch`, `--with-alias`, `--clean`, `--unregister-on-exit`, `--output-appx-directory`, `--executable` — rejected for unpackaged apps.
-- **Output:** winapp restores dependencies, builds, and streams both commands' output live (including successful-build warnings). Interactive terminals show dotnet's in-place progress; redirected output uses plain lines. `--json` sends invocations and child output to **stderr** so stdout stays valid JSON. `--quiet` suppresses invocations and sends dotnet's quiet restore/build output to **stderr** so stdout stays clean.
+- **Output:** winapp restores dependencies, builds, and streams both commands' output live (including successful-build warnings). Restore output uses sanitized plain lines; interactive terminals show dotnet's in-place build progress, while redirected build output uses plain lines. `--json` sends invocations and child output to **stderr** so stdout stays valid JSON. `--quiet` suppresses invocations and sends dotnet's quiet restore/build output to **stderr** so stdout stays clean.
 
 #### Choosing between `run` and `create-debug-identity`
 

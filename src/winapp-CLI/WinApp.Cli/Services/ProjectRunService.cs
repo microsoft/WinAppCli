@@ -43,8 +43,8 @@ internal sealed partial class ProjectRunService(
     private static readonly string[] DedicatedFlagProperties = ["Configuration", "RuntimeIdentifier", "TargetFramework"];
 
     /// <summary>
-    /// Test seam for the "real interactive terminal" gate restore and build passes use to choose the native
-    /// terminal-logger launcher over plain line streaming. <see langword="null"/> in production
+    /// Test seam for the "real interactive terminal" gate the build pass uses to choose the native terminal
+    /// logger launcher over plain line streaming. <see langword="null"/> in production
     /// (the gate is <see cref="ProgressDisplay.ShouldUseLiveSpinner(IAnsiConsole, ILogger)"/>); overridable
     /// only because that gate reads process-global state that is always false under the test host.
     /// </summary>
@@ -622,8 +622,8 @@ internal sealed partial class ProjectRunService(
 
     /// <summary>
     /// Runs a pre-build restore with live output so slow package downloads, feed retries, and NuGet errors
-    /// are visible as they happen. A real terminal is handed directly to dotnet so its terminal logger can
-    /// render in-place progress; redirected, JSON, and quiet modes use line streaming instead.
+    /// are visible as they happen. Output is always streamed through winapp so authenticated NuGet source
+    /// URLs can be redacted before they reach the terminal or CI logs.
     /// </summary>
     internal async Task<int> RunRestoreCommandAsync(
         string arguments,
@@ -641,22 +641,15 @@ internal sealed partial class ProjectRunService(
 
             return await dotNetService.RunDotnetStreamingAsync(
                 workingDir, arguments,
-                onOutputLine: static line => Console.Error.WriteLine(line),
-                onErrorLine: static line => Console.Error.WriteLine(line),
+                onOutputLine: static line => Console.Error.WriteLine(NugetErrorMessage.Redact(line)),
+                onErrorLine: static line => Console.Error.WriteLine(NugetErrorMessage.Redact(line)),
                 cancellationToken);
         }
 
         ansiConsole.MarkupLineInterpolated($"{UiSymbols.Sync} {banner}");
         ansiConsole.MarkupLineInterpolated($"[dim]   dotnet {Markup.Escape(RedactSecretsForDisplay(arguments))}[/]");
 
-        var nativeTerminal = NativeTerminalGateOverrideForTests?.Invoke()
-            ?? ProgressDisplay.ShouldUseLiveSpinner(ansiConsole, logger);
-        if (nativeTerminal)
-        {
-            return await dotNetService.RunDotnetInheritedAsync(workingDir, arguments, cancellationToken);
-        }
-
-        var writeLive = CreateSynchronizedRawLineWriter();
+        var writeLive = CreateSynchronizedRedactedLineWriter();
 
         return await dotNetService.RunDotnetStreamingAsync(
             workingDir, arguments, writeLive, writeLive, cancellationToken);
@@ -665,7 +658,7 @@ internal sealed partial class ProjectRunService(
     private static string? ResolveRestoreVerbosity(ILogger logger, bool json) =>
         !json && !logger.IsEnabled(LogLevel.Information) ? "quiet" : null;
 
-    private Action<string> CreateSynchronizedRawLineWriter()
+    private Action<string> CreateSynchronizedRedactedLineWriter()
     {
         var writeLock = new object();
         var writer = ansiConsole.Profile.Out.Writer;
@@ -673,7 +666,7 @@ internal sealed partial class ProjectRunService(
         {
             lock (writeLock)
             {
-                writer.WriteLine(line);
+                writer.WriteLine(NugetErrorMessage.Redact(line));
             }
         };
     }
@@ -742,7 +735,7 @@ internal sealed partial class ProjectRunService(
         {
             // Info-enabled but NOT a TTY (agent/CI/redirected/piped --verbose): stream dotnet's output live
             // to stdout, serializing writes so concurrent stdout/stderr callbacks don't interleave.
-            var writeLive = CreateSynchronizedRawLineWriter();
+            var writeLive = CreateSynchronizedRedactedLineWriter();
 
             streamedExit = await dotNetService.RunDotnetStreamingAsync(
                 workingDir, buildArgs, writeLive, writeLive, cancellationToken);
