@@ -175,12 +175,17 @@ internal sealed partial class ProjectRunService(
                 if (restoreExit == 0)
                 {
                     csWinRTMetadata = ResolveCsWinRTMetadataShim(options, shimFramework);
-                    buildOptions = options with { NoRestore = true }; // Explicit restore done; skip build-pass restore.
+                    // A project-scoped restore mirrors Platform and fully covers the build. A solution-scoped
+                    // restore omits Platform to avoid MSB4126, so a platform-specific build must restore again.
+                    if (!restoredWholeSolution || string.IsNullOrWhiteSpace(options.Platform))
+                    {
+                        buildOptions = options with { NoRestore = true };
+                    }
                 }
             }
-            else if (restoredWholeSolution)
+            else if (restoredWholeSolution && string.IsNullOrWhiteSpace(options.Platform))
             {
-                buildOptions = options with { NoRestore = true }; // Whole-solution restore covered the target.
+                buildOptions = options with { NoRestore = true };
             }
         }
 
@@ -515,10 +520,9 @@ internal sealed partial class ProjectRunService(
         if (exitCode != 0)
         {
             // Non-fatal: fall through and let the build pass restore + surface any real error itself.
-            logger.LogWarning(
-                "{UISymbol} Initial restore failed (exit code {ExitCode}); continuing with the build, which will retry restore.",
-                UiSymbols.Warning,
-                exitCode);
+            WriteRestoreFallbackWarning(
+                options,
+                $"{UiSymbols.Warning} Initial restore failed (exit code {exitCode}); continuing with the build, which will retry restore.");
         }
         return exitCode;
     }
@@ -563,10 +567,9 @@ internal sealed partial class ProjectRunService(
             // Whole-solution restore failed. Don't defer to the target-only build restore (that leaves
             // non-ProjectReference managed siblings unrestored — the NETSDK1004 case this prevents); fall
             // back to per-sibling restore before returning false.
-            logger.LogWarning(
-                "{UISymbol} Solution restore failed (exit code {ExitCode}); retrying managed dependencies individually.",
-                UiSymbols.Warning,
-                exitCode);
+            WriteRestoreFallbackWarning(
+                options,
+                $"{UiSymbols.Warning} Solution restore failed (exit code {exitCode}); retrying managed dependencies individually.");
         }
 
         // Native project present (dotnet restore <sln> errors VS-less) or the solution restore failed:
@@ -594,13 +597,27 @@ internal sealed partial class ProjectRunService(
                 args, $"Restoring {sibling.Name} dependencies...", options, workingDir, cancellationToken);
             if (exitCode != 0)
             {
-                logger.LogWarning(
-                    "{UISymbol} Restore of {Sibling} failed (exit code {ExitCode}); continuing with the build, which will report any unresolved dependency errors.",
-                    UiSymbols.Warning,
-                    sibling.Name,
-                    exitCode);
+                WriteRestoreFallbackWarning(
+                    options,
+                    $"{UiSymbols.Warning} Restore of {sibling.Name} failed (exit code {exitCode}); continuing with the build, which will report any unresolved dependency errors.");
             }
         }
+    }
+
+    private void WriteRestoreFallbackWarning(ProjectRunOptions options, string message)
+    {
+        if (options.Json || !logger.IsEnabled(LogLevel.Warning))
+        {
+            return;
+        }
+
+        if (!logger.IsEnabled(LogLevel.Information))
+        {
+            Console.Error.WriteLine(message);
+            return;
+        }
+
+        logger.LogWarning("{Message}", message);
     }
 
     /// <summary>

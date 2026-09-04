@@ -2957,6 +2957,34 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
+    public async Task BuildAndResolveAsync_PlatformSpecificSolutionRestore_LetsProjectBuildRestoreAgain()
+    {
+        var csproj = WriteFile("App.csproj", PlatformAwareExeCsproj);
+        var solution = WriteFile("App.slnx", SlnxListing("App.csproj", "Server/Server.csproj"));
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = _ => (0, PackagedPropertiesJson(), string.Empty),
+        };
+        var service = NewServiceWith(dotnet, LogLevel.Information, out _);
+        var options = new ProjectRunOptions(
+            "Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Solution: solution);
+
+        var outcome = await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
+
+        Assert.IsNotNull(outcome.Resolution);
+        var solutionRestore = dotnet.StreamingCalls.Single(
+            args => args.StartsWith($"restore {solution.FullName}", StringComparison.Ordinal));
+        Assert.IsFalse(solutionRestore.Contains("-p:Platform=", StringComparison.Ordinal),
+            "solution restore must omit Platform to avoid MSB4126");
+        var build = dotnet.StreamingCalls.Single(
+            args => args.StartsWith($"build {csproj.FullName}", StringComparison.Ordinal));
+        StringAssert.Contains(build, "-p:Platform=x64",
+            "the selected project build must retain its resolved Platform");
+        Assert.IsFalse(build.Contains("--no-restore", StringComparison.Ordinal),
+            "the project must restore again because the platform-less solution restore did not cover platform-conditioned assets");
+    }
+
+    [TestMethod]
     public async Task BuildAndResolveAsync_SolutionRestoreInRealTerminal_UsesInheritedLauncher()
     {
         var csproj = WriteFile("App.csproj", ExecutableCsproj);
@@ -3221,6 +3249,49 @@ public class ProjectRunServiceTests
                 entry.Level == LogLevel.Warning
                 && entry.Message.Contains("continuing with the build", StringComparison.Ordinal)),
             "the visible sibling restore error must explain that the build continues");
+    }
+
+    [TestMethod]
+    [DoNotParallelize] // redirects the process-wide Console.Error
+    public async Task BuildAndResolveAsync_QuietSiblingRestoreFails_WritesExplanationToStderr()
+    {
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var solution = WriteFile(
+            "App.slnx",
+            SlnxListing("App.csproj", "Managed/Managed.csproj", "Native/Native.vcxproj"));
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args =>
+                args.StartsWith("restore ", StringComparison.Ordinal)
+                    ? (1, string.Empty, "simulated sibling restore failure")
+                    : (0, PackagedPropertiesJson(), string.Empty),
+        };
+        using var console = new TestConsole();
+        var logger = new LevelLogger<ProjectRunService>(LogLevel.Warning);
+        var service = new ProjectRunService(
+            dotnet, NewDetection(dotnet), new FakeCsWinRTMetadataShimService(), console, logger);
+        var options = new ProjectRunOptions(
+            "Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Solution: solution);
+
+        using var stderr = new StringWriter();
+        var originalError = Console.Error;
+        Console.SetError(stderr);
+        ProjectBuildOutcome outcome;
+        try
+        {
+            outcome = await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
+        }
+        finally
+        {
+            Console.SetError(originalError);
+        }
+
+        Assert.IsNotNull(outcome.Resolution);
+        Assert.AreEqual(string.Empty, console.Output, "--quiet must keep stdout clean");
+        StringAssert.Contains(stderr.ToString(), "continuing with the build",
+            "the best-effort restore failure explanation must remain visible on stderr");
+        Assert.IsFalse(logger.Entries.Any(entry => entry.Level == LogLevel.Warning),
+            "quiet restore fallback warnings must bypass the stdout-routed logger");
     }
 
     [TestMethod]
