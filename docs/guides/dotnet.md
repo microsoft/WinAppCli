@@ -225,19 +225,6 @@ If the dry run says `RestoreRequired`, run the printed `dotnet restore` command 
 
 WinApp rejects .NET single-file bundles during Native AOT verification. A self-contained single-file JIT app can contain CoreCLR inside the executable and omit the usual runtime sidecars, so missing DLLs alone are not accepted as proof. If startup verification reports an exit code, re-run without `--verify-native-aot` or `--detach` and add `--debug-output --symbols`.
 
-To run the exact packaged and unpackaged acceptance flow on a real device:
-
-```powershell
-# Use x64 on an x64 or ARM64 Windows device
-.\scripts\test-native-aot-run.ps1 -Architecture x64
-
-# Use ARM64 only on a Windows ARM64 device
-.\scripts\test-native-aot-run.ps1 -Architecture arm64 `
-  -WinappPath .\artifacts\cli\win-arm64\winapp.exe
-```
-
-The script creates an isolated packaged WinUI fixture plus a long-running unpackaged Native AOT console fixture, assigns unique package/process identities, verifies JSON provenance and the visible packaged window, then stops processes and unregisters only its own package. Keep failed fixtures with `-KeepArtifacts`.
-
 **Multi-project apps** (an app referencing class libraries) build correctly: winapp negotiates each project reference's platform automatically, so referencing an `AnyCPU`/`netstandard2.0` library doesn't fail with `CS0006` "metadata file could not be found".
 
 The `dotnet build` output streams live, with the exact invocation printed first. Add `--verbose` for winapp's own build decision traces. Requires .NET SDK 8.0.100 or newer. See [`winapp run` in the usage reference](../usage.md#project-mode-net-sdk-projects) for the full option list.

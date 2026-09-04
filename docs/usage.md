@@ -800,19 +800,6 @@ Publish mode replaces only a same-identity development registration rooted in th
 
 If the app exits during verification, the error reports its exit code when available. Re-run without `--verify-native-aot` or `--detach` and add `--debug-output`; add `--symbols` for native crash details.
 
-**Real-device acceptance:** run both packaged and unpackaged Native AOT workflows with isolated identities and cleanup:
-
-```powershell
-# x64 device
-.\scripts\test-native-aot-run.ps1 -Architecture x64
-
-# Windows ARM64 device (requires the ARM64 C++ tools)
-.\scripts\test-native-aot-run.ps1 -Architecture arm64 `
-  -WinappPath .\artifacts\cli\win-arm64\winapp.exe
-```
-
-The ARM64 command must run on Windows ARM64. An x64 machine can validate ARM64 discovery and publish planning, but cannot claim ARM64 runtime verification.
-
 **Build output & verbosity:** the project is built in two steps — a `dotnet build` whose output **streams live** to your console, followed by a fast property-evaluation pass. winapp prints the exact `dotnet build …` invocation before the output, and streams warnings even on a successful build. Verbosity:
 
 | Flag | dotnet verbosity | Adds |

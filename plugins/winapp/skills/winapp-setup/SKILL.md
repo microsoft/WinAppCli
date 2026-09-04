@@ -221,7 +221,6 @@ Project mode supports both **packaged** and **unpackaged** WinUI apps, detected 
 - **Dry run:** `--dry-run` does not restore, build, publish, register, or launch. If assets are missing, run the exact restore command it prints and repeat the dry run.
 - **`--no-build`:** skips `dotnet build` in normal mode; with `--publish`, it is forwarded to `dotnet publish --no-build`.
 - **Output:** default output shows material phases and remediation; `--verbose` adds exact commands, evaluated paths/properties, tool paths, staging, and verification evidence. Under `--json`/`--quiet`, child build/publish output goes to **stderr** so stdout stays clean.
-- **Real-device acceptance:** from the repo root, run `.\scripts\test-native-aot-run.ps1 -Architecture x64`; on Windows ARM64 run the same script with `-Architecture arm64 -WinappPath .\artifacts\cli\win-arm64\winapp.exe`. Do not claim ARM64 runtime verification from an x64 host.
 
 #### Choosing between `run` and `create-debug-identity`
 
