@@ -139,12 +139,20 @@ internal sealed class GuestCommandChannel : IAsyncDisposable, ITargetOperationEx
             var exitCode = await state.Completion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
             return new GuestExecResult(exitCode, state.ProcessId);
         }
-        catch (OperationCanceledException)
+        catch (Exception ex) when (ex is OperationCanceledException or ExecutionTargetException)
         {
-            // Ask the guest to stop before surfacing cancellation. This is done here rather than
+            // Ask the guest to stop before surfacing the failure. This is done here rather than
             // from a CancellationToken registration because registrations fire last-in-first-out:
             // WaitAsync's own registration would run first, and unwinding this method would dispose
             // ours before it ever ran, silently leaving the guest process running.
+            //
+            // Structured failures are included, not just cancellation, because they end this
+            // operation exactly as abruptly: a relay callback that throws on a closed pipe -- the
+            // shape `winapp target exec ... | <something that stops reading>` takes -- drops the
+            // operation on this side while the guest child is still running, and the guest reuses
+            // its agent across commands, so that child would outlive the command that started it.
+            // The request is best effort and already swallows a dead channel, so it costs nothing
+            // on the failures where the guest is gone anyway.
             await RequestCancelAsync(operationId).ConfigureAwait(false);
             throw;
         }
@@ -306,6 +314,7 @@ internal sealed class GuestCommandChannel : IAsyncDisposable, ITargetOperationEx
 
         var operationId = Guid.NewGuid();
         var state = Register(operationId);
+        state.FailureCode = ExecutionTargetErrorCodes.TransferInterrupted;
         state.Callbacks = new GuestExecCallbacks(
             OnStandardOutput: data => destination.Write(data.Span));
 
@@ -590,15 +599,43 @@ internal sealed class GuestCommandChannel : IAsyncDisposable, ITargetOperationEx
                 Dispatch(frame.Value);
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             // Shutdown.
         }
         catch (ExecutionTargetException ex)
         {
-            _fatalError = ex.Error;
-            FailPendingOperations(ex.Error);
+            // Already structured -- an authentication or protocol failure the transport diagnosed.
+            // Reported exactly as raised, never reclassified as a generic pump fault.
+            Fatal(ex.Error);
         }
+        catch (Exception ex)
+        {
+            // Total boundary. This pump is the channel's only reader, so anything that stops it
+            // stops every reply: an operation waiting on one would otherwise wait forever for a
+            // reader that no longer exists, and the command would hang with nothing on screen.
+            // Whatever went wrong is converted into the same structured failure every other
+            // infrastructure fault uses, so callers get a diagnosable error instead of a hang.
+            Fatal(new ExecutionTargetErrorInfo
+            {
+                Code = ExecutionTargetErrorCodes.TransportFailed,
+                Message = $"The connection to the guest failed while reading its replies: {ex.Message}",
+                UserAction = "Retry the command.",
+                Context = new Dictionary<string, string> { ["cause"] = ex.GetType().Name },
+            }, ex);
+        }
+    }
+
+    /// <summary>Records the failure that ended the pump and fails everything still waiting on it.</summary>
+    /// <remarks>
+    /// Recorded as well as reported so an operation registered after the pump stopped -- the window
+    /// between the last failure and disposal -- fails with the real cause rather than the generic
+    /// "connection closed" <see cref="DisposeAsync"/> falls back to.
+    /// </remarks>
+    private void Fatal(ExecutionTargetErrorInfo error, Exception? cause = null)
+    {
+        _fatalError = error;
+        FailPendingOperations(error, cause);
     }
 
     private void Dispatch(ReadOnlyMemory<byte> frame)
@@ -635,8 +672,8 @@ internal sealed class GuestCommandChannel : IAsyncDisposable, ITargetOperationEx
 
             case GuestMessageTypes.ExecStarted when message.ProcessId is { } processId:
                 state.ProcessId = processId;
-                state.Callbacks?.OnStarted?.Invoke(
-                    new GuestProcessStart(processId, message.ProcessStartTicksUtc ?? 0));
+                Deliver(operationId, state, "started", () => state.Callbacks?.OnStarted?.Invoke(
+                    new GuestProcessStart(processId, message.ProcessStartTicksUtc ?? 0)));
                 break;
 
             case GuestMessageTypes.ExecCompleted when message.ExitCode is { } exitCode:
@@ -675,11 +712,11 @@ internal sealed class GuestCommandChannel : IAsyncDisposable, ITargetOperationEx
         switch (stream)
         {
             case GuestStreamId.StandardOutput:
-                state.Callbacks?.OnStandardOutput?.Invoke(data);
+                Deliver(operationId, state, "standard output", () => state.Callbacks?.OnStandardOutput?.Invoke(data));
                 break;
 
             case GuestStreamId.StandardError:
-                state.Callbacks?.OnStandardError?.Invoke(data);
+                Deliver(operationId, state, "standard error", () => state.Callbacks?.OnStandardError?.Invoke(data));
                 break;
 
             default:
@@ -688,17 +725,61 @@ internal sealed class GuestCommandChannel : IAsyncDisposable, ITargetOperationEx
         }
     }
 
-    private void FailPendingOperations(ExecutionTargetErrorInfo error)
+    /// <summary>
+    /// Runs one operation's callback, failing only that operation if the callback throws.
+    /// </summary>
+    /// <remarks>
+    /// Callbacks run on the pump, and the pump is the channel's only reader, so an escaping failure
+    /// would stop every operation's replies rather than just this one's. The most likely source is
+    /// not a bug but ordinary I/O: <see cref="GetFileAsync"/>'s callback writes each chunk straight
+    /// to the caller's destination stream, which can fail on a full disk or a revoked handle.
+    /// Failing this operation and dropping it keeps that bounded — the reader survives, and every
+    /// unrelated operation still completes, including the cleanup a caller runs afterward.
+    /// </remarks>
+    private void Deliver(Guid operationId, OperationState state, string what, Action callback)
     {
-        foreach (var state in _operations.Values)
+        try
         {
-            Fail(state, error);
+            callback();
+        }
+        catch (Exception ex) when (!IsShutdownCancellation(ex))
+        {
+            _operations.TryRemove(operationId, out _);
+
+            Fail(
+                state,
+                new ExecutionTargetErrorInfo
+                {
+                    Code = state.FailureCode,
+                    Message = $"The {what} of the operation could not be delivered: {ex.Message}",
+                    UserAction = state.FailureCode == ExecutionTargetErrorCodes.TransferInterrupted
+                        ? "Check the destination still exists and has room, then retry the command."
+                        : "Retry the command.",
+                    Context = new Dictionary<string, string> { ["cause"] = ex.GetType().Name },
+                },
+                ex);
         }
     }
 
-    private static void Fail(OperationState state, ExecutionTargetErrorInfo error)
+    /// <summary>True when <paramref name="ex"/> is this channel's own shutdown unwinding.</summary>
+    /// <remarks>
+    /// Distinguished so a shutdown in progress stays a clean stop, while a cancellation raised by a
+    /// callback for its own reasons is still reported rather than silently ending the operation.
+    /// </remarks>
+    private bool IsShutdownCancellation(Exception ex) =>
+        ex is OperationCanceledException && _shutdown.IsCancellationRequested;
+
+    private void FailPendingOperations(ExecutionTargetErrorInfo error, Exception? cause = null)
     {
-        var exception = new ExecutionTargetException(error);
+        foreach (var state in _operations.Values)
+        {
+            Fail(state, error, cause);
+        }
+    }
+
+    private static void Fail(OperationState state, ExecutionTargetErrorInfo error, Exception? cause = null)
+    {
+        var exception = new ExecutionTargetException(error, cause);
         state.Completion.TrySetException(exception);
         state.Capabilities.TrySetException(exception);
         state.Files.TrySetException(exception);
@@ -722,5 +803,15 @@ internal sealed class GuestCommandChannel : IAsyncDisposable, ITargetOperationEx
         public GuestExecCallbacks? Callbacks { get; set; }
 
         public int ProcessId { get; set; }
+
+        /// <summary>
+        /// The error code used when this operation's own callback fails.
+        /// </summary>
+        /// <remarks>
+        /// A transfer's callback writes to the caller's destination, so a failure there is a
+        /// transfer that stopped rather than a channel that broke, and the code has to say so:
+        /// the two lead to different recovery. Everything else is reading the channel itself.
+        /// </remarks>
+        public string FailureCode { get; set; } = ExecutionTargetErrorCodes.TransportFailed;
     }
 }

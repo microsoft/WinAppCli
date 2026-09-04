@@ -315,6 +315,114 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
     }
 
     /// <summary>
+    /// A debug run's <c>--symbols</c> reaches the guest verb that actually launches the app.
+    /// </summary>
+    /// <remarks>
+    /// Driven from the run pipeline's own options rather than from a hand-built
+    /// <see cref="GuestRunOptions"/>, because the planners were never the broken half: the flag was
+    /// parsed, validated, warned about — and then dropped on the way to the guest, so
+    /// <c>winapp run . --on sandbox --debug-output --symbols</c> resolved no symbols there and
+    /// produced the unsymbolicated stack the same command resolves locally.
+    /// </remarks>
+    [TestMethod]
+    public async Task DebugPackagedSandboxRun_ForwardsSymbolsToTheLaunchCall()
+    {
+        var ct = TestContext.CancellationToken;
+
+        await using var harness = CreateHarness("symbols");
+
+        var task = RunAsync(harness, noLaunch: false, clean: false, ct, debugOutput: true, useSymbols: true);
+
+        var register = await harness.Processes.WaitForNextAsync(ct);
+        Assert.IsTrue(IsRegisterOnly(register));
+        Assert.IsFalse(
+            register.Request.Arguments.Contains("--symbols"),
+            "The register-only call never launches anything, so it has no debug loop to feed symbols to.");
+
+        register.Exit(0);
+
+        var launch = await harness.Processes.WaitForNextAsync(ct);
+        Assert.IsTrue(IsGuestLaunchVerb(launch));
+        Assert.IsTrue(launch.Request.Arguments.Contains("--debug-output"));
+        Assert.IsTrue(
+            launch.Request.Arguments.Contains("--symbols"),
+            "Without this the guest debug loop runs unsymbolicated and nothing says why.");
+
+        launch.Exit(0);
+
+        Assert.AreEqual(0, await task);
+    }
+
+    /// <summary>
+    /// <c>--symbols</c> without <c>--debug-output</c> is not forwarded, because nothing reads it.
+    /// </summary>
+    /// <remarks>
+    /// The host already warns that the flag has no effect. Forwarding it as well would make guest
+    /// winapp print the same warning into the run's own output, so one mistake would be reported
+    /// twice — once about the command the user typed, once about a command they never saw.
+    /// </remarks>
+    [TestMethod]
+    public async Task PackagedSandboxRun_WithoutDebugOutput_DoesNotForwardSymbols()
+    {
+        var ct = TestContext.CancellationToken;
+
+        await using var harness = CreateHarness("symbols-only");
+
+        var task = RunAsync(harness, noLaunch: false, clean: false, ct, useSymbols: true);
+
+        var register = await harness.Processes.WaitForNextAsync(ct);
+        register.Exit(0);
+
+        var launch = await harness.Processes.WaitForNextAsync(ct);
+        Assert.IsTrue(IsGuestLaunchVerb(launch));
+        Assert.IsFalse(launch.Request.Arguments.Contains("--symbols"));
+
+        launch.Exit(0);
+
+        Assert.AreEqual(0, await task);
+    }
+
+    /// <summary>
+    /// <c>--quiet</c> silences this command's own target phases, not just the orchestrator's.
+    /// </summary>
+    /// <remarks>
+    /// The two are emitted from different places and to different streams, and each used to decide
+    /// for itself whether to write — so the flag reached one of them and a "quiet" run still
+    /// narrated half of itself. Both directions are asserted here, because a test that only proved
+    /// silence would also pass if the lines had simply stopped being written at all.
+    /// </remarks>
+    [TestMethod]
+    public async Task PackagedSandboxRun_WhenProgressIsDisabled_WritesNoPhaseLines()
+    {
+        var ct = TestContext.CancellationToken;
+
+        await using var loud = CreateHarness("progress-loud");
+        await RunToCompletionAsync(loud, ct);
+
+        Assert.IsTrue(
+            loud.ConsoleOutput.Contains("Windows Sandbox", StringComparison.Ordinal),
+            "A default run narrates its phases; without that a multi-minute first run looks hung.");
+
+        await using var quiet = CreateHarness("progress-quiet", NullTargetProgress.Instance);
+        await RunToCompletionAsync(quiet, ct);
+
+        Assert.IsFalse(
+            quiet.ConsoleOutput.Contains("Windows Sandbox", StringComparison.Ordinal),
+            "--quiet must reach this command's own phases too, or the run is only half quiet.");
+    }
+
+    /// <summary>Runs one packaged sandbox run to completion, letting both guest calls succeed.</summary>
+    private static async Task RunToCompletionAsync(RunHarness harness, CancellationToken cancellationToken)
+    {
+        var task = RunAsync(harness, noLaunch: false, clean: false, cancellationToken);
+
+        (await harness.Processes.WaitForNextAsync(cancellationToken)).Exit(0);
+        (await harness.Processes.WaitForNextAsync(cancellationToken)).Exit(0);
+
+        Assert.AreEqual(0, await task);
+    }
+
+    /// <summary>
     /// H2: the third, host-orchestrated <c>--unregister-on-exit</c> phase targets exactly this
     /// deployment's own layout -- the same <see cref="GuestRunPlanner.BuildUnregisterArguments"/>
     /// call the standalone <c>winapp unregister --on sandbox</c> command already sends -- rather than
@@ -543,7 +651,9 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
         bool clean,
         CancellationToken cancellationToken,
         bool withAlias = false,
-        bool unregisterOnExit = false) =>
+        bool unregisterOnExit = false,
+        bool debugOutput = false,
+        bool useSymbols = false) =>
         Task.Run(
             () => harness.Handler.ExecuteRunPipelineAsync(
                 new DirectoryInfo(harness.HostFolder ?? throw new InvalidOperationException()),
@@ -552,11 +662,11 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
                 appArgs: null,
                 noLaunch,
                 withAlias,
-                debugOutput: false,
+                debugOutput,
                 unregisterOnExit,
                 detach: false,
                 clean,
-                useSymbols: false,
+                useSymbols,
                 executable: null,
                 isJson: false,
                 runtimeArch: null,
@@ -566,6 +676,22 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
                 executionTarget: WindowsSandboxTarget.Default,
                 cancellationToken),
             cancellationToken);
+
+    private RunHarness CreateHarness(string name, ITargetProgress? progress = null) => new(
+        TestPaths.Under(_root, $"guest-{name}"),
+        TestPaths.Under(_root, $"connection-{name}"),
+        _mutationLock,
+        _deploymentStateStore,
+        _hostFolder,
+        _manifest,
+        _layout,
+        GetRequiredService<IStatusService>(),
+        GetRequiredService<ICurrentDirectoryProvider>(),
+        GetRequiredService<IPackageRegistrationService>(),
+        GetRequiredService<IDebugOutputService>(),
+        GetRequiredService<IProjectRunService>(),
+        GetRequiredService<Microsoft.Extensions.Logging.ILogger<RunCommand>>(),
+        progress);
 
     /// <summary>Waits up to <paramref name="timeout"/> for a host to start, without throwing.</summary>
     private static async Task<bool> TryWaitForNextAsync(
@@ -584,21 +710,6 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
             return false;
         }
     }
-
-    private RunHarness CreateHarness(string name) => new(
-        TestPaths.Under(_root, $"guest-{name}"),
-        TestPaths.Under(_root, $"connection-{name}"),
-        _mutationLock,
-        _deploymentStateStore,
-        _hostFolder,
-        _manifest,
-        _layout,
-        GetRequiredService<IStatusService>(),
-        GetRequiredService<ICurrentDirectoryProvider>(),
-        GetRequiredService<IPackageRegistrationService>(),
-        GetRequiredService<IDebugOutputService>(),
-        GetRequiredService<IProjectRunService>(),
-        GetRequiredService<Microsoft.Extensions.Logging.ILogger<RunCommand>>());
 
     /// <summary>
     /// One simulated <c>winapp run --on sandbox</c> caller: a real <see cref="RunCommand.Handler"/>
@@ -624,7 +735,8 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
             IPackageRegistrationService packageRegistrationService,
             IDebugOutputService debugOutputService,
             IProjectRunService projectRunService,
-            Microsoft.Extensions.Logging.ILogger<RunCommand> logger)
+            Microsoft.Extensions.Logging.ILogger<RunCommand> logger,
+            ITargetProgress? progress = null)
         {
             HostFolder = hostFolder;
             Manifest = manifest;
@@ -707,6 +819,7 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
                 orchestrator,
                 runner,
                 runtimeService,
+                progress ?? new StandardErrorTargetProgress(),
                 logger);
         }
 
@@ -719,6 +832,9 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
         public FakeGuestProcessHostFactory Processes { get; }
 
         public RunCommand.Handler Handler { get; }
+
+        /// <summary>Everything this run wrote to the console a user would have been watching.</summary>
+        public string ConsoleOutput => _console.Output;
 
         public async ValueTask DisposeAsync()
         {

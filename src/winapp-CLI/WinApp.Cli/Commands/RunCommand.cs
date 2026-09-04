@@ -218,6 +218,7 @@ internal partial class RunCommand : Command, IShortDescription, ITargetAwareComm
         ExecutionTargetOrchestrator executionTargetOrchestrator,
         GuestApplicationRunner guestApplicationRunner,
         TargetRuntimeService targetRuntimeService,
+        ITargetProgress targetProgress,
         ILogger<RunCommand> logger) : AsynchronousCommandLineAction
     {
         // Test seams for the execution-alias launch path. They isolate the two operating-system
@@ -412,7 +413,10 @@ internal partial class RunCommand : Command, IShortDescription, ITargetAwareComm
                 }
                 catch (ExecutionTargetException ex)
                 {
-                    return TargetOutput.Fail(ansiConsole, isJson, ex.Error);
+                    // Reported in run's own machine-readable shape, like every other failure it
+                    // returns: this is the fast-fail an unsupported host takes, so it is the one a
+                    // caller is most likely to have to parse.
+                    return FailTarget(ex.Error, isJson);
                 }
             }
 
@@ -548,7 +552,7 @@ internal partial class RunCommand : Command, IShortDescription, ITargetAwareComm
             {
                 return await ExecutePackagedTargetRunAsync(
                     inputFolder, manifest, outputAppXDirectory, appArgs,
-                    noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, executable, isJson,
+                    noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, isJson,
                     projectFile, framework, noRestore, cancellationToken);
             }
 

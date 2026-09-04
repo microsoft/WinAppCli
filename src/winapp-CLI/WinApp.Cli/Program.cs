@@ -54,7 +54,7 @@ internal static class Program
         bool isCompleteMode = args.Length > 0 && args[0] == "complete";
 
         var services = new ServiceCollection()
-            .ConfigureServices()
+            .ConfigureServices(quiet)
             .ConfigureCommands()
             .AddLogging(b =>
             {
@@ -105,6 +105,10 @@ internal static class Program
                 else if (ResolveEffectiveJson(parseResult) && IsFindUi(parseResult))
                 {
                     EmitFindUiJsonError(message);
+                }
+                else if (ResolveEffectiveJson(parseResult) && IsTargetDescendant(parseResult))
+                {
+                    TargetOutput.RejectParse(message);
                 }
                 else
                 {
@@ -206,6 +210,20 @@ internal static class Program
                         CommandCompletedEvent.Log(parsedArgs.CommandResult, 1);
                     }
                 }
+                else if (effectiveJson && IsTargetDescendant(parsedArgs))
+                {
+                    // Same envelope the target verbs use for every other failure, so a --json
+                    // caller never has to fall back to reading plain text.
+                    if (!isCompleteMode)
+                    {
+                        CommandInvokedEvent.Log(parsedArgs.CommandResult);
+                    }
+                    TargetOutput.RejectParse(typoMessage);
+                    if (!isCompleteMode)
+                    {
+                        CommandCompletedEvent.Log(parsedArgs.CommandResult, 1);
+                    }
+                }
                 else
                 {
                     Console.Error.WriteLine(typoMessage);
@@ -288,6 +306,10 @@ internal static class Program
         else if (effectiveJson && IsFindUi(parsedArgs))
         {
             EmitFindUiJsonError($"{message} {advice}");
+        }
+        else if (effectiveJson && IsTargetDescendant(parsedArgs))
+        {
+            TargetOutput.RejectParse($"{message} {advice}");
         }
         else
         {
@@ -404,6 +426,23 @@ internal static class Program
                 return 1;
             }
 
+            // Parse-error → JSON bridge for the `target` verbs. They exist for agents and scripts,
+            // and a malformed `target exec sandbox` (no command after `--`) or `target push sandbox
+            // a.txt` (no destination) fails in the parser, before the handler that owns the error
+            // envelope ever runs — so System.CommandLine would answer a --json caller with usage
+            // help it cannot parse. Emit the same envelope the handler emits for an unusable
+            // selector, so every `target ... --json` failure has one shape.
+            if (effectiveJson && parsedArgs.Errors.Count > 0 && IsTargetDescendant(parsedArgs))
+            {
+                var errorMsg = string.Join("; ", parsedArgs.Errors.Select(e => e.Message));
+                var exitCode = TargetOutput.RejectParse(errorMsg);
+                if (!isCompleteMode)
+                {
+                    logCommandCompleted(parsedArgs.CommandResult, exitCode);
+                }
+                return exitCode;
+            }
+
             var returnCode = await invoke();
 
             if (!isCompleteMode)
@@ -482,6 +521,33 @@ internal static class Program
     /// </summary>
     private static bool IsFindUi(System.CommandLine.ParseResult parseResult) =>
         parseResult.CommandResult.Command.Name == "find-ui";
+
+    /// <summary>
+    /// Returns <see langword="true"/> when the selected command is <c>target</c> or one of its
+    /// verbs. Scopes the target parse-error bridge to that tree alone, so no other command inherits
+    /// the target error envelope.
+    /// </summary>
+    /// <remarks>
+    /// Matched on the command tree rather than on the presence of <c>--on</c>: <c>--on</c> appears
+    /// on <c>run</c>, <c>unregister</c>, and the <c>ui</c> verbs, each of which already owns a
+    /// different documented error shape, and imposing this one on them would break the contract
+    /// their callers parse today.
+    /// </remarks>
+    private static bool IsTargetDescendant(System.CommandLine.ParseResult parseResult)
+    {
+        var cmd = parseResult.CommandResult.Command;
+        while (cmd is not null)
+        {
+            if (cmd is TargetCommand)
+            {
+                return true;
+            }
+
+            cmd = cmd.Parents.OfType<System.CommandLine.Command>().FirstOrDefault();
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// Writes a flat <c>{"error":"..."}</c> object to stdout — the same schema and sink

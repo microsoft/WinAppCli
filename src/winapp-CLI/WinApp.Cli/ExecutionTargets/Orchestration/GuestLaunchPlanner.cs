@@ -76,6 +76,14 @@ internal static class GuestLaunchPlanner
             arguments.Add("--debug-output");
         }
 
+        // Only alongside --debug-output, which is the only thing in the guest that reads them.
+        // Without this, `--symbols` never reached the guest at all and a `--on <target>` debug run
+        // silently produced the unsymbolicated stack a local one would have resolved.
+        if (options.ForwardSymbols)
+        {
+            arguments.Add("--symbols");
+        }
+
         // No --unregister-on-exit: GuestLaunchCommand does not accept it at all. Forwarding it
         // here would have no effect other than a parse error, since the verb has no option, and
         // no code path, for it.

@@ -53,6 +53,14 @@ internal static partial class StandardHandleInheritance
     /// non-inheritable is left exactly as it was found. Every step is best effort: failing to adjust
     /// a handle must not fail the command, because the consequence is a caller that waits longer for
     /// end of stream rather than a broken run.
+    /// <para>
+    /// <b>The scope must be disposed on the thread that created it, and must not be held across an
+    /// <c>await</c>.</b> It is serialized by a <see cref="Monitor"/>, whose ownership is
+    /// thread-affine, so a dispose that runs on a continuation thread throws
+    /// <see cref="SynchronizationLockException"/> and strands the gate for the life of the process.
+    /// Wrap only the launch itself — that is all the child needs to miss the handles — and await
+    /// outside the scope.
+    /// </para>
     /// </remarks>
     public static IDisposable Suppress() => new Scope();
 

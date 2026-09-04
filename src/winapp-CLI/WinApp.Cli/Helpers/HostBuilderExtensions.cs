@@ -18,7 +18,14 @@ namespace WinApp.Cli.Helpers;
 
 internal static class StoreHostBuilderExtensions
 {
-    public static IServiceCollection ConfigureServices(this IServiceCollection services)
+    /// <summary>Registers every winapp service.</summary>
+    /// <param name="services">The collection to register into.</param>
+    /// <param name="quiet">
+    /// True when <c>--quiet</c> was given. Decides, once and for the whole process, whether target
+    /// progress is reported: see <see cref="ITargetProgress.IsEnabled"/>. Failures are reported by
+    /// each command's error envelope rather than through progress, so this never hides one.
+    /// </param>
+    public static IServiceCollection ConfigureServices(this IServiceCollection services, bool quiet = false)
     {
         return services
             .AddSingleton<ICurrentDirectoryProvider>(sp => new CurrentDirectoryProvider(Directory.GetCurrentDirectory()))
@@ -76,7 +83,9 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IControlsSearchService, ControlsSearchService>()
             // Execution targets (Windows Sandbox and any future target)
             .AddSingleton<ITargetStateDirectoryProvider>(_ => new TargetStateDirectoryProvider())
-            .AddSingleton<ITargetProgress, StandardErrorTargetProgress>()
+            .AddSingleton<ITargetProgress>(_ => quiet
+                ? NullTargetProgress.Instance
+                : new StandardErrorTargetProgress())
             .AddSingleton<ITargetStateStore, TargetStateStore>()
             .AddSingleton<ITargetMutationLock, TargetMutationLock>()
             .AddSingleton<ITargetConnectionLock, TargetConnectionLock>()

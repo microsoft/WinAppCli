@@ -29,13 +29,22 @@ internal interface ITargetProgress
     /// Present-participle description of work in flight, such as "Starting Windows Sandbox...".
     /// </param>
     void Report(string message);
+
+    /// <summary>Whether progress is being reported at all.</summary>
+    /// <remarks>
+    /// This is the single place the <c>--quiet</c> decision lives for target progress. A command
+    /// that renders some of its own phases somewhere other than standard error — <c>run</c> writes
+    /// its human-mode phases to the console, alongside the rest of its human output — asks here
+    /// rather than re-deriving the answer from the command line, so one flag cannot silence the
+    /// orchestrator's phases while leaving a command's own phases on screen.
+    /// </remarks>
+    bool IsEnabled { get; }
 }
 
 /// <summary>Writes progress to standard error.</summary>
 /// <remarks>
-/// Deliberately unconditional and unbuffered. A progress line that appears only after the slow
-/// operation it describes has finished is worse than none, because it reports the past as if it
-/// were the present.
+/// Deliberately unbuffered. A progress line that appears only after the slow operation it describes
+/// has finished is worse than none, because it reports the past as if it were the present.
 /// </remarks>
 internal sealed class StandardErrorTargetProgress : ITargetProgress
 {
@@ -59,6 +68,9 @@ internal sealed class StandardErrorTargetProgress : ITargetProgress
     internal StandardErrorTargetProgress(Func<TextWriter> writer) => _writer = writer;
 
     /// <inheritdoc/>
+    public bool IsEnabled => true;
+
+    /// <inheritdoc/>
     public void Report(string message)
     {
         if (string.IsNullOrWhiteSpace(message))
@@ -72,11 +84,21 @@ internal sealed class StandardErrorTargetProgress : ITargetProgress
     }
 }
 
-/// <summary>Discards progress, for tests and for callers that render their own.</summary>
+/// <summary>
+/// Discards progress: for <c>--quiet</c>, for tests, and for callers that render their own.
+/// </summary>
+/// <remarks>
+/// Only progress is discarded. Failures do not come through this interface at all — they are
+/// reported by the invoking command's error envelope — so silencing progress never silences the
+/// reason a command failed.
+/// </remarks>
 internal sealed class NullTargetProgress : ITargetProgress
 {
     /// <summary>The shared instance.</summary>
     public static NullTargetProgress Instance { get; } = new();
+
+    /// <inheritdoc/>
+    public bool IsEnabled => false;
 
     /// <inheritdoc/>
     public void Report(string message)

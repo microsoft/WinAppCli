@@ -42,6 +42,7 @@ internal partial class RunCommand
             bool unregisterOnExit,
             bool detach,
             bool clean,
+            bool useSymbols,
             string? executable,
             bool isJson,
             FileInfo? projectFile,
@@ -101,7 +102,7 @@ internal partial class RunCommand
             }
 
             var options = new GuestRunOptions(
-                noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, isJson, appArgs);
+                noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, isJson, useSymbols, appArgs);
 
             // When this run also launches, RunInGuestAsync pulls registration out into its own
             // locked call (see RegisterPackageAsync) so the mutation lease never has to keep
@@ -184,7 +185,7 @@ internal partial class RunCommand
             }
             catch (ExecutionTargetException ex)
             {
-                return TargetOutput.Fail(ansiConsole, isJson, ex.Error);
+                return FailTarget(ex.Error, isJson);
             }
 
             // A non-apphost RunCommand (for example dotnet) carries leading arguments that must
@@ -442,9 +443,25 @@ internal partial class RunCommand
             }
             catch (ExecutionTargetException ex)
             {
-                return TargetOutput.Fail(ansiConsole, isJson, ex.Error);
+                return FailTarget(ex.Error, isJson);
             }
         }
+
+        /// <summary>
+        /// Reports a target infrastructure failure in <c>run</c>'s own machine-readable shape.
+        /// </summary>
+        /// <remarks>
+        /// A local <c>run --json</c> failure publishes a <see cref="RunCommandResult"/> carrying the
+        /// message on stdout, and adding <c>--on &lt;target&gt;</c> must not change where a caller
+        /// finds that answer. The structured target detail still reaches stderr — see
+        /// <see cref="TargetOutput.FailInCommandResult"/>.
+        /// </remarks>
+        private int FailTarget(ExecutionTargetErrorInfo error, bool isJson) =>
+            TargetOutput.FailInCommandResult(
+                ansiConsole,
+                isJson,
+                error,
+                message => PrintJson(aumid: null, processId: null, message));
 
         /// <summary>
         /// Registers the packaged application in the guest without launching it -- the only guest
@@ -795,11 +812,26 @@ internal partial class RunCommand
         }
 
         /// <summary>Writes a progress line without disturbing a machine-readable stdout.</summary>
+        /// <remarks>
+        /// Whether the line is written at all is <see cref="ITargetProgress"/>'s decision, not this
+        /// method's, so <c>--quiet</c> silences these phases and the orchestrator's together.
+        /// Splitting that decision in two is how a "quiet" run ends up half quiet.
+        /// <para>
+        /// Where it is written still depends on the mode, and that is the point of the split:
+        /// standard error under <c>--json</c>, so the one machine-readable document on stdout stays
+        /// parseable, and the console otherwise, alongside the rest of the command's human output.
+        /// </para>
+        /// </remarks>
         private void WriteProgress(bool isJson, string message)
         {
+            if (!targetProgress.IsEnabled)
+            {
+                return;
+            }
+
             if (isJson)
             {
-                Console.Error.WriteLine(message);
+                targetProgress.Report(message);
                 return;
             }
 

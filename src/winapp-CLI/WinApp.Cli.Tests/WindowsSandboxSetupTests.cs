@@ -446,6 +446,8 @@ public class WindowsSandboxSetupTests
     {
         public List<string> Messages { get; } = [];
 
+        public bool IsEnabled => true;
+
         public void Report(string message) => Messages.Add(message);
     }
 

@@ -97,7 +97,12 @@ internal partial class UnregisterCommand
             }
             catch (ExecutionTargetException ex)
             {
-                return TargetOutput.Fail(ansiConsole, isJson, ex.Error);
+                // Published in `unregister`'s own documented shape on stdout, not only as the
+                // generic target envelope on stderr: a caller parsing `unregister --json` looks at
+                // stdout, and adding `--on <target>` must not leave that empty. The structured
+                // target detail still reaches stderr.
+                return TargetOutput.FailInCommandResult(
+                    ansiConsole, isJson, ex.Error, message => PrintJson([], [], message));
             }
         }
 

@@ -493,6 +493,13 @@ internal static class TargetOutput
     /// <remarks>
     /// Always on stderr, in both modes. Under <c>--json</c> stdout carries the command's result and
     /// nothing else, so a caller can parse it without stripping diagnostics first.
+    /// <para>
+    /// This overload leaves stdout untouched, which is right only for the <c>target</c> verbs: their
+    /// stdout is the target command's own output, and there is no separate result document to
+    /// publish. A command that <em>does</em> publish a documented result object of its own on stdout
+    /// — <c>run</c> and <c>unregister</c> — must use <see cref="FailInCommandResult"/> instead, or a
+    /// caller parsing that stdout would find it empty exactly when something went wrong.
+    /// </para>
     /// </remarks>
     public static int Fail(IAnsiConsole console, bool json, ExecutionTargetErrorInfo error)
     {
@@ -528,6 +535,46 @@ internal static class TargetOutput
     }
 
     /// <summary>
+    /// Reports an infrastructure failure and lets the invoking command publish its own result.
+    /// </summary>
+    /// <param name="console">Console used for human output.</param>
+    /// <param name="json">Whether the invoking command is in machine-readable mode.</param>
+    /// <param name="error">The structured failure.</param>
+    /// <param name="publishResult">
+    /// Publishes the command's own documented result on stdout, carrying
+    /// <see cref="ExecutionTargetErrorInfo.Message"/> as its error text. Called only under
+    /// <paramref name="json"/>.
+    /// </param>
+    /// <remarks>
+    /// <c>winapp run --json</c> and <c>winapp unregister --json</c> each publish exactly one
+    /// documented object on stdout, and that is where a scripted caller looks to learn what
+    /// happened. Adding <c>--on &lt;target&gt;</c> must not move that answer: a caller that has to
+    /// parse a differently shaped document on a different stream, but only when a target was used,
+    /// is being asked to write two parsers for one command. So the command's own result is
+    /// published on stdout exactly as a local failure would publish it, and the structured target
+    /// detail — code, user action, recovery command — is added on stderr, where it can be read
+    /// without disturbing that stdout.
+    /// </remarks>
+    public static int FailInCommandResult(
+        IAnsiConsole console,
+        bool json,
+        ExecutionTargetErrorInfo error,
+        Action<string> publishResult)
+    {
+        ArgumentNullException.ThrowIfNull(error);
+        ArgumentNullException.ThrowIfNull(publishResult);
+
+        var exitCode = Fail(console, json, error);
+
+        if (json)
+        {
+            publishResult(error.Message);
+        }
+
+        return exitCode;
+    }
+
+    /// <summary>
     /// Reports a command line that names no usable target, and returns the process exit code.
     /// </summary>
     /// <remarks>
@@ -540,6 +587,41 @@ internal static class TargetOutput
     public static int RejectSelection(IAnsiConsole console, bool json, ExecutionTargetErrorInfo error)
     {
         Fail(console, json, error);
+        return InvalidCommandLineExitCode;
+    }
+
+    /// <summary>
+    /// Reports a <c>winapp target</c> command line the parser rejected, and returns the exit code.
+    /// </summary>
+    /// <param name="message">What was wrong with the command line.</param>
+    /// <remarks>
+    /// System.CommandLine answers a parse failure with usage help as plain text. That is fine for a
+    /// person and useless to the <c>--json</c> caller these verbs exist to serve: it carries no
+    /// code to branch on and does not parse. <see cref="Program"/>'s bridge routes those failures
+    /// here so <c>target ... --json</c> has one error shape whether the command line was rejected
+    /// before the handler ran — a missing selector, a missing path, an unparseable option — or by
+    /// the handler itself.
+    /// <para>
+    /// stderr and exit code 1, matching <see cref="RejectSelection"/>: every envelope in this
+    /// contract is on stderr, and a malformed command line is a parse mistake rather than a target
+    /// that could not be reached.
+    /// </para>
+    /// </remarks>
+    public static int RejectParse(string message)
+    {
+        Console.Error.WriteLine(JsonSerializer.Serialize(
+            new TargetErrorOutput
+            {
+                Error = new ExecutionTargetErrorInfo
+                {
+                    Code = ExecutionTargetErrorCodes.TargetInvalid,
+                    Message = message,
+                    UserAction = "Correct the command line and run it again.",
+                    Example = "winapp target exec sandbox -- dotnet --info",
+                },
+            },
+            TargetJsonContext.Default.TargetErrorOutput));
+
         return InvalidCommandLineExitCode;
     }
 

@@ -13,6 +13,10 @@ namespace WinApp.Cli.ExecutionTargets.Orchestration;
 /// <param name="Detach">Return once the guest process has started.</param>
 /// <param name="Clean">Clear only this deployment's guest application data before deploying.</param>
 /// <param name="Json">Keep the guest's stdout machine-readable.</param>
+/// <param name="Symbols">
+/// Download symbols in the guest for the debug loop's native crash analysis. Meaningful only
+/// alongside <paramref name="DebugOutput"/>, which is the only thing that consumes them.
+/// </param>
 /// <param name="AppArguments">Arguments for the application itself, forwarded verbatim.</param>
 internal sealed record GuestRunOptions(
     bool NoLaunch = false,
@@ -22,7 +26,20 @@ internal sealed record GuestRunOptions(
     bool Detach = false,
     bool Clean = false,
     bool Json = false,
-    string? AppArguments = null);
+    bool Symbols = false,
+    string? AppArguments = null)
+{
+    /// <summary>
+    /// Whether <c>--symbols</c> should be forwarded to the guest at all.
+    /// </summary>
+    /// <remarks>
+    /// Symbols feed the debug loop and nothing else, so forwarding them without
+    /// <see cref="DebugOutput"/> would hand the guest a flag it can only warn about and ignore --
+    /// a second warning for a mistake the host already reported. The host's own warning is what
+    /// tells the user the flag had no effect; this just keeps the guest from repeating it.
+    /// </remarks>
+    public bool ForwardSymbols => Symbols && DebugOutput;
+}
 
 /// <summary>
 /// Builds the guest winapp command lines that <c>--on sandbox</c> forwards.
@@ -64,6 +81,12 @@ internal static class GuestRunPlanner
         if (options.DebugOutput)
         {
             arguments.Add("--debug-output");
+        }
+
+        // Only alongside --debug-output, which is the only thing in the guest that reads them.
+        if (options.ForwardSymbols)
+        {
+            arguments.Add("--symbols");
         }
 
         if (options.UnregisterOnExit)

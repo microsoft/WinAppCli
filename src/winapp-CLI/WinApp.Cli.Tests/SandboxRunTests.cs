@@ -31,7 +31,7 @@ public class SandboxRunTests
     [
         "run", @"C:\WinApp\deployments\abc",
         "--output-appx-directory", @"C:\WinApp\deployments\abc-layout",
-        "--no-launch", "--with-alias", "--debug-output", "--unregister-on-exit",
+        "--no-launch", "--with-alias", "--debug-output", "--symbols", "--unregister-on-exit",
         "--detach", "--clean", "--json", "--args", "--flag value",
     ];
 
@@ -94,6 +94,7 @@ public class SandboxRunTests
                 Detach: true,
                 Clean: true,
                 Json: true,
+                Symbols: true,
                 AppArguments: "--flag value"));
 
         // Every option is the guest's ordinary winapp run option, so its meaning cannot drift from

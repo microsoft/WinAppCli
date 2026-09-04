@@ -142,18 +142,51 @@ internal sealed class WindowsFeatureEnabler : IWindowsFeatureEnabler
         }
     }
 
-    private static async Task<int> RunElevatedAsync(ProcessStartInfo startInfo, CancellationToken cancellationToken)
-    {
-        // ShellExecute does not inherit handles, so an elevated child cannot hold a caller's
-        // captured stdout open. Suppressed anyway, for the same reason every other long-lived child
-        // launch in this backend is: the guarantee should not depend on a flag staying set.
-        using (Helpers.StandardHandleInheritance.Suppress())
-        {
-            using var process = Process.Start(startInfo)
-                ?? throw new InvalidOperationException("Windows did not start the servicing tool.");
+    /// <summary>Runs the servicing tool elevated and returns its exit code.</summary>
+    private static Task<int> RunElevatedAsync(ProcessStartInfo startInfo, CancellationToken cancellationToken) =>
+        RunElevatedAsync(startInfo, StartSuppressed, cancellationToken);
 
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-            return process.ExitCode;
-        }
+    /// <summary>
+    /// Runs <paramref name="start"/>'s child to completion and returns its exit code.
+    /// </summary>
+    /// <remarks>
+    /// The launch is a parameter so the wait-and-exit-code half can be covered by a test that starts
+    /// a harmless child of its own, rather than one that changes this machine's optional-feature
+    /// state.
+    /// </remarks>
+    internal static async Task<int> RunElevatedAsync(
+        ProcessStartInfo startInfo,
+        Func<ProcessStartInfo, Process?> start,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(start);
+
+        using var process = start(startInfo)
+            ?? throw new InvalidOperationException("Windows did not start the servicing tool.");
+
+        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        return process.ExitCode;
+    }
+
+    /// <summary>Starts the child with this process's standard handles temporarily non-inheritable.</summary>
+    /// <remarks>
+    /// ShellExecute does not inherit handles, so an elevated child cannot hold a caller's captured
+    /// stdout open. Suppressed anyway, for the same reason every other long-lived child launch in
+    /// this backend is: the guarantee should not depend on a flag staying set.
+    /// <para>
+    /// Scoped to the launch alone, and deliberately never across the wait that follows.
+    /// <see cref="Helpers.StandardHandleInheritance.Suppress"/> serializes on a
+    /// <see cref="Monitor"/>, whose ownership is thread-affine: a scope left open across
+    /// <c>await WaitForExitAsync</c> would be disposed on whichever thread happened to resume the
+    /// method, which throws <see cref="SynchronizationLockException"/> and leaves the gate held for
+    /// the life of the process — deadlocking every later suppressed launch in it. Clearing the flag
+    /// only has to cover <c>CreateProcess</c> for the child to miss the handles, so holding it any
+    /// longer buys nothing.
+    /// </para>
+    /// </remarks>
+    private static Process? StartSuppressed(ProcessStartInfo startInfo)
+    {
+        using var suppression = Helpers.StandardHandleInheritance.Suppress();
+        return Process.Start(startInfo);
     }
 }
