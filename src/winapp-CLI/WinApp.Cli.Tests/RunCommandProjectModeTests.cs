@@ -71,7 +71,7 @@ public class RunCommandProjectModeTests : BaseCommandTests
 
     private FileInfo CreateCsproj(string name = "App.csproj")
     {
-        var path = Path.Combine(_tempDirectory.FullName, name);
+        var path = TempPath(name);
         File.WriteAllText(path, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
         return new FileInfo(path);
     }
@@ -81,14 +81,14 @@ public class RunCommandProjectModeTests : BaseCommandTests
         var dir = _tempDirectory.CreateSubdirectory($"bin_{Guid.NewGuid():N}");
         if (withManifest)
         {
-            File.WriteAllText(Path.Combine(dir.FullName, "appxmanifest.xml"), TestManifestContent);
+            File.WriteAllText(ChildPath(dir.FullName, "appxmanifest.xml"), TestManifestContent);
         }
         return dir;
     }
 
     private void SetUnpackagedOutcome(FileInfo csproj, DirectoryInfo targetDir, bool selfContained, string arch = "x64")
     {
-        var exe = Path.Combine(targetDir.FullName, "App.exe");
+        var exe = ChildPath(targetDir.FullName, "App.exe");
         _fakeProjectRunService.BuildOutcome = new ProjectBuildOutcome(
             new ProjectRunResolution(csproj, targetDir.FullName, exe, ProjectPackaging.Unpackaged, selfContained, arch), 0);
     }
@@ -113,7 +113,7 @@ public class RunCommandProjectModeTests : BaseCommandTests
 
     private FileInfo WriteRejectionManifest()
     {
-        var path = Path.Combine(_tempDirectory.FullName, $"manifest_{Guid.NewGuid():N}.xml");
+        var path = TempPath($"manifest_{Guid.NewGuid():N}.xml");
         File.WriteAllText(path, TestManifestContent);
         return new FileInfo(path);
     }
@@ -131,7 +131,7 @@ public class RunCommandProjectModeTests : BaseCommandTests
        bool publishAot,
        bool selfContained = true)
     {
-       var executable = Path.Combine(publishDirectory.FullName, "App.exe");
+       var executable = ChildPath(publishDirectory.FullName, "App.exe");
        File.WriteAllText(executable, "fixture");
        _fakeProjectRunService.PreparationOutcome = new ProjectPreparationOutcome(
            new ProjectRunResolution(
@@ -199,7 +199,7 @@ public class RunCommandProjectModeTests : BaseCommandTests
         // flag has to reach EnsureWindowsAppRuntimeInstalledAsync (which forwards it to dotnet list package).
         var csproj = CreateCsproj();
         var targetDir = CreateTargetDir(withManifest: false);
-        var exe = Path.Combine(targetDir.FullName, "App.exe");
+        var exe = ChildPath(targetDir.FullName, "App.exe");
         _fakeProjectRunService.BuildOutcome = new ProjectBuildOutcome(
             new ProjectRunResolution(csproj, targetDir.FullName, exe, ProjectPackaging.Unpackaged, false, "x64", NoRestore: true), 0);
         var command = GetRequiredService<RunCommand>();
@@ -584,7 +584,7 @@ public class RunCommandProjectModeTests : BaseCommandTests
     {
         var csproj = CreateCsproj();
         var outputDirectory = CreateTargetDir(withManifest: false);
-        var executable = Path.Combine(outputDirectory.FullName, "App.exe");
+        var executable = ChildPath(outputDirectory.FullName, "App.exe");
         _fakeProjectRunService.BuildOutcome = new ProjectBuildOutcome(
             new ProjectRunResolution(
                 csproj,
@@ -808,7 +808,7 @@ public class RunCommandProjectModeTests : BaseCommandTests
        Assert.AreEqual(0, exitCode);
        Assert.AreEqual(ProjectPreparationOperation.Publish, _fakeProjectRunService.PreparationOperations.Single());
        Assert.AreEqual(
-           Path.Combine(publishDirectory.FullName, "App.exe"),
+           ChildPath(publishDirectory.FullName, "App.exe"),
            _fakeAppLauncherService.LaunchExecutableCalls.Single().ExePath);
     }
 
@@ -836,9 +836,9 @@ public class RunCommandProjectModeTests : BaseCommandTests
        var csproj = CreateCsproj();
        var targetDirectory = CreateTargetDir(withManifest: true);
        var publishDirectory = CreateTargetDir(withManifest: false);
-       var executable = Path.Combine(publishDirectory.FullName, "TestApp.exe");
+       var executable = ChildPath(publishDirectory.FullName, "TestApp.exe");
        File.WriteAllText(executable, "fixture");
-       var generatedManifest = Path.Combine(targetDirectory.FullName, "appxmanifest.xml");
+       var generatedManifest = ChildPath(targetDirectory.FullName, "appxmanifest.xml");
        _fakeProjectRunService.PreparationOutcome = new ProjectPreparationOutcome(
            new ProjectRunResolution(
                csproj,
@@ -910,7 +910,7 @@ public class RunCommandProjectModeTests : BaseCommandTests
        Assert.AreEqual("Publish", root.GetProperty("Operation").GetString());
        Assert.AreEqual(publishDirectory.FullName, root.GetProperty("PublishDirectory").GetString());
        Assert.AreEqual(
-           Path.Combine(publishDirectory.FullName, "App.exe"),
+           ChildPath(publishDirectory.FullName, "App.exe"),
            root.GetProperty("SourceExecutable").GetString());
        Assert.IsTrue(root.GetProperty("NativeAotVerified").GetBoolean());
        Assert.IsTrue(root.GetProperty("Verification").GetProperty("RuntimeModules").GetBoolean());
@@ -952,7 +952,7 @@ public class RunCommandProjectModeTests : BaseCommandTests
        SetPublishOutcome(csproj, publishDirectory, ProjectPackaging.Unpackaged, publishAot: true);
        _fakeNativeAotVerifier.StaticResult = new(
            Succeeded: false,
-           ForbiddenFiles: [Path.Combine(publishDirectory.FullName, "App.dll")]);
+           ForbiddenFiles: [ChildPath(publishDirectory.FullName, "App.dll")]);
        var command = GetRequiredService<RunCommand>();
 
        var exitCode = await ParseAndInvokeWithCaptureAsync(
@@ -972,7 +972,7 @@ public class RunCommandProjectModeTests : BaseCommandTests
        SetPublishOutcome(csproj, publishDirectory, ProjectPackaging.Unpackaged, publishAot: true);
        _fakeNativeAotVerifier.StaticResult = new NativeAotStaticVerification(
            Succeeded: false,
-           ForbiddenFiles: [Path.Combine(publishDirectory.FullName, "App.exe")],
+           ForbiddenFiles: [ChildPath(publishDirectory.FullName, "App.exe")],
            Error: "The published executable is a .NET single-file bundle.",
            SingleFileBundle: true);
        var command = GetRequiredService<RunCommand>();
@@ -1032,13 +1032,13 @@ public class RunCommandProjectModeTests : BaseCommandTests
     {
         var csproj = CreateCsproj();
         var publishDirectory = CreateTargetDir(withManifest: false);
-        var sourceExecutable = Path.Combine(publishDirectory.FullName, "TestApp.exe");
+        var sourceExecutable = ChildPath(publishDirectory.FullName, "TestApp.exe");
         File.WriteAllText(sourceExecutable, "native fixture");
-        var generatedManifest = Path.Combine(_tempDirectory.FullName, "generated-AppxManifest.xml");
+        var generatedManifest = TempPath("generated-AppxManifest.xml");
         File.WriteAllText(generatedManifest, TestManifestContent);
         var stagingDirectory = _tempDirectory.CreateSubdirectory("verification-failure-stage");
-        File.WriteAllText(Path.Combine(stagingDirectory.FullName, "appxmanifest.xml"), TestManifestContent);
-        File.Copy(sourceExecutable, Path.Combine(stagingDirectory.FullName, "TestApp.exe"));
+        File.WriteAllText(ChildPath(stagingDirectory.FullName, "appxmanifest.xml"), TestManifestContent);
+        File.Copy(sourceExecutable, ChildPath(stagingDirectory.FullName, "TestApp.exe"));
         _fakeProjectRunService.PreparationOutcome = new ProjectPreparationOutcome(
            new ProjectRunResolution(
                csproj,
@@ -1060,7 +1060,7 @@ public class RunCommandProjectModeTests : BaseCommandTests
            RuntimeModules: false,
            ProcessProvenance: true,
            PackageRegistration: true,
-           ProcessPath: Path.Combine(stagingDirectory.FullName, "TestApp.exe"),
+           ProcessPath: ChildPath(stagingDirectory.FullName, "TestApp.exe"),
            LoadedModules: ["coreclr.dll"],
            MainWindowHandle: 0,
            MainWindowTitle: string.Empty,
@@ -1079,7 +1079,7 @@ public class RunCommandProjectModeTests : BaseCommandTests
                "TestPackage_1.0.0.0_x64__unrelated",
                "TestPackage",
                "1.0.0.0",
-               Path.Combine(_tempDirectory.FullName, "unrelated-stage"),
+               TempPath("unrelated-stage"),
                IsDevelopmentMode: true),
         ];
         var command = GetRequiredService<RunCommand>();
@@ -1117,7 +1117,7 @@ public class RunCommandProjectModeTests : BaseCommandTests
     [TestMethod]
     public async Task FolderMode_RejectsProjectOnlyPublishOptions()
     {
-       File.WriteAllText(Path.Combine(_tempDirectory.FullName, "appxmanifest.xml"), TestManifestContent);
+       File.WriteAllText(TempPath("appxmanifest.xml"), TestManifestContent);
        var command = GetRequiredService<RunCommand>();
 
        var exitCode = await ParseAndInvokeWithCaptureAsync(
@@ -1138,7 +1138,7 @@ public class RunCommandProjectModeTests : BaseCommandTests
     {
         // Folder mode must pass null runtimeArch/projectFile so behavior is byte-identical to before
         // project mode existed.
-        File.WriteAllText(Path.Combine(_tempDirectory.FullName, "appxmanifest.xml"), TestManifestContent);
+        File.WriteAllText(TempPath("appxmanifest.xml"), TestManifestContent);
         var command = GetRequiredService<RunCommand>();
 
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--no-launch"]);
@@ -1151,4 +1151,24 @@ public class RunCommandProjectModeTests : BaseCommandTests
     }
 
     #endregion
+
+    private string TempPath(params string[] segments) =>
+        ChildPath(_tempDirectory.FullName, segments);
+
+    private static string ChildPath(string root, params string[] segments)
+    {
+        if (!Path.IsPathFullyQualified(root) ||
+            segments.Any(segment =>
+                string.IsNullOrWhiteSpace(segment) ||
+                Path.IsPathRooted(segment) ||
+                segment is "." or ".." ||
+                !string.Equals(Path.GetFileName(segment), segment, StringComparison.Ordinal)))
+        {
+            throw new ArgumentException("Fixture path contains an invalid segment.", nameof(segments));
+        }
+
+        return Path.GetFullPath(
+            string.Join(Path.DirectorySeparatorChar, segments),
+            root);
+    }
 }
