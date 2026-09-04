@@ -30,6 +30,18 @@ internal sealed partial class ProjectRunService(
         "EnableMsixTooling",
         "_WinAppRunSupportActive",
         "OutputType",
+        "PublishTrimmed",
+        "PublishAot",
+        "SelfContained",
+        "PublishProfile",
+        "PublishProfileName",
+        "PublishProfileFullPath",
+        "WebPublishProfileFile",
+        "PublishProfileImported",
+        "_PublishProfileRootFolder",
+        "TargetFramework",
+        "Platform",
+        "RuntimeIdentifier",
     ];
 
     /// <summary>
@@ -155,6 +167,12 @@ internal sealed partial class ProjectRunService(
         // arch, so it can't desync a no-<Platforms> reference (MSB3030/PRI252). Threaded into every pass
         // below (restore/build/evaluate) via `options`, keeping them in lock-step.
         options = ResolvePlatformInjection(csproj, options);
+        options = await ResolveRequiredPublishProfileAsync(
+            csproj,
+            options,
+            workingDir,
+            csWinRTMetadata,
+            cancellationToken);
         var buildOptions = options;
 
         // When the target lives in a solution, restore the whole solution's managed projects up front so
@@ -305,19 +323,21 @@ internal sealed partial class ProjectRunService(
             if (!string.IsNullOrEmpty(primaryTargetDir) && !Directory.Exists(primaryTargetDir))
             {
                 // Ordered from "closest to what winapp would have built" to "plain dotnet build".
-                (bool Rid, bool Platform)[] fallbacks =
-                [
-                    (false, true),   // no RID, keep resolved Platform
-                    (false, false),  // no RID, no Platform  → plain `dotnet build` / VS layout
-                    (true, false),   // RID, no Platform
-                ];
+                var fallbacks = new List<(bool Rid, bool Platform, bool PublishProfile)>();
+                if (!string.IsNullOrWhiteSpace(options.Platform))
+                {
+                    fallbacks.Add((false, true, true)); // no RID, keep resolved Platform/profile
+                }
+                fallbacks.Add((false, false, false)); // plain `dotnet build` / VS layout
+                fallbacks.Add((true, false, false));  // RID-only (including older winapp versions)
 
-                foreach (var (includeRid, includePlatform) in fallbacks)
+                foreach (var (includeRid, includePlatform, includePublishProfile) in fallbacks)
                 {
                     var args = BuildEvaluateArguments(
                         csproj, options, csWinRTMetadata,
                         includeRuntimeIdentifier: includeRid,
-                        includePlatform: includePlatform);
+                        includePlatform: includePlatform,
+                        includePublishProfile: includePublishProfile);
                     logger.LogDebug("{UISymbol} dotnet {Arguments}", UiSymbols.Note, RedactSecretsForDisplay(args));
 
                     var (fallbackExit, fallbackStdout, _) = await dotNetService.RunDotnetCommandAsync(workingDir, args, cancellationToken);
@@ -331,8 +351,8 @@ internal sealed partial class ProjectRunService(
                     if (!string.IsNullOrEmpty(fallbackTargetDir) && Directory.Exists(fallbackTargetDir))
                     {
                         logger.LogDebug(
-                            "{UISymbol} --no-build: '{Primary}' not found; using existing output '{Fallback}' (RID={Rid}, Platform={Platform}).",
-                            UiSymbols.Note, primaryTargetDir, fallbackTargetDir, includeRid, includePlatform);
+                            "{UISymbol} --no-build: '{Primary}' not found; using existing output '{Fallback}' (RID={Rid}, Platform={Platform}, PublishProfile={PublishProfile}).",
+                            UiSymbols.Note, primaryTargetDir, fallbackTargetDir, includeRid, includePlatform, includePublishProfile);
                         props = fallbackProps;
                         break;
                     }
@@ -434,6 +454,13 @@ internal sealed partial class ProjectRunService(
         options = await ResolveEffectiveFrameworkAsync(csproj, options, workingDir, cancellationToken);
         var shimFramework = await ResolveShimFrameworkAsync(csproj, options, workingDir, cancellationToken);
         var csWinRTMetadata = ResolveCsWinRTMetadataShim(options, shimFramework);
+        options = ResolvePlatformInjection(csproj, options);
+        options = await ResolveRequiredPublishProfileAsync(
+            csproj,
+            options,
+            workingDir,
+            csWinRTMetadata,
+            cancellationToken);
 
         // Reuse the exact evaluate pass (same -p/RID/TFM/shim as a real build) so the WindowsPackageType we
         // read matches what the build would see. Evaluate-only — no build is triggered.
@@ -564,7 +591,10 @@ internal sealed partial class ProjectRunService(
             return false;
         }
 
-        if (allManaged)
+        // An inferred PublishProfile belongs only to the selected app. Restoring the whole solution would
+        // pass it to unrelated projects, so restore siblings individually and let the target build restore
+        // itself under the inferred profile.
+        if (allManaged && string.IsNullOrWhiteSpace(options.PublishProfile))
         {
             // Closest to VS: one restore over the whole solution pulls the target and every sibling.
             var args = BuildRestorePassArguments(options.Solution, options);
@@ -598,9 +628,10 @@ internal sealed partial class ProjectRunService(
         DirectoryInfo workingDir,
         CancellationToken cancellationToken)
     {
+        var siblingOptions = options with { PublishProfile = null };
         foreach (var sibling in siblings)
         {
-            var args = BuildRestorePassArguments(sibling, options);
+            var args = BuildRestorePassArguments(sibling, siblingOptions);
             logger.LogDebug("{UISymbol} Restoring solution sibling before build (build-dependency parity): dotnet {Arguments}", UiSymbols.Note, RedactSecretsForDisplay(args));
             var (exitCode, _, _) = await dotNetService.RunDotnetCommandAsync(workingDir, args, cancellationToken);
             if (exitCode != 0)

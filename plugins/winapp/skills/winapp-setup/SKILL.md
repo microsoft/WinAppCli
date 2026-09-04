@@ -206,7 +206,7 @@ winapp run . -p WindowsPackageType=None
 winapp run . --verbose
 ```
 
-Project mode supports both **packaged** and **unpackaged** WinUI apps, detected from the project's effective `WindowsPackageType` (`MSIX` ⇒ loose-layout register + AUMID launch; `None` ⇒ launch the built `.exe`), and installs the matching-architecture Windows App Runtime before launching. Requires .NET SDK 8.0.100+.
+Project mode supports both **packaged** and **unpackaged** WinUI apps, detected from the project's effective `WindowsPackageType` (`MSIX` ⇒ loose-layout register + AUMID launch; `None` ⇒ launch the built `.exe`), and installs the matching-architecture Windows App Runtime before launching. RID-only remains the default; when the effective configuration requires a self-contained profile, winapp selects the architecture-matching profile without forcing that platform onto referenced `AnyCPU` libraries. Requires .NET SDK 8.0.100+.
 
 - **Build inputs:** `-c/--configuration`, `--arch`, `-r/--runtime`, `-f/--framework`, `--no-build`, `--no-restore`, `-p/--property` (repeatable).
 - **Packaged-only options:** `--manifest`, `--no-launch`, `--with-alias`, `--clean`, `--unregister-on-exit`, `--output-appx-directory`, `--executable` — rejected for unpackaged apps.

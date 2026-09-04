@@ -46,6 +46,8 @@ internal sealed partial class ProjectRunService
             tokens.Add($"-p:Platform={options.Platform}");
         }
 
+        AppendInferredPublishProfile(tokens, csproj, options);
+
         // Drop dedicated-flag user -p (RID/Configuration/TFM) so the restored graph can't diverge from
         // what the --no-restore build resolves; WarnOnOverriddenFlags surfaces the conflict.
         foreach (var property in ForwardableProperties(options.Properties))
@@ -122,6 +124,8 @@ internal sealed partial class ProjectRunService
             tokens.Add($"-p:Platform={options.Platform}");
         }
 
+        AppendInferredPublishProfile(tokens, csproj, options);
+
         AppendSolutionProperties(tokens, options);
 
         // SHIM (temporary): inject the resolved ref-pack winmd folder so cswinrt.exe finds contract winmds
@@ -141,7 +145,8 @@ internal sealed partial class ProjectRunService
     /// <c>RunCommand</c> match what was built. <c>dotnet msbuild</c> rejects <c>-c</c>/<c>-r</c> (MSB1001),
     /// so Configuration/RID/TFM/Platform go as <c>-p:</c> emitted LAST (MSBuild last-wins beats a
     /// conflicting user <c>-p</c>). <paramref name="includeRuntimeIdentifier"/> and
-    /// <paramref name="includePlatform"/> are <see langword="false"/> only for the <c>--no-build</c>
+    /// <paramref name="includePlatform"/> and <paramref name="includePublishProfile"/> are
+    /// <see langword="false"/> only for the <c>--no-build</c>
     /// output-discovery fallback (see <c>BuildAndResolveAsync</c>): an app previously built by Visual Studio
     /// or a plain <c>dotnet build</c> injects NEITHER a RID nor a Platform, so its output sits at
     /// <c>bin\&lt;cfg&gt;\&lt;tfm&gt;\</c> — which only resolves when both are omitted.
@@ -151,7 +156,8 @@ internal sealed partial class ProjectRunService
         ProjectRunOptions options,
         string? csWinRTMetadataFolder = null,
         bool includeRuntimeIdentifier = true,
-        bool includePlatform = true)
+        bool includePlatform = true,
+        bool includePublishProfile = true)
     {
         var rid = RunArchHelper.ToRuntimeIdentifier(options.Architecture);
 
@@ -186,6 +192,8 @@ internal sealed partial class ProjectRunService
         {
             tokens.Add($"-p:Platform={options.Platform}");
         }
+
+        AppendInferredPublishProfile(tokens, csproj, options, includePublishProfile);
 
         // SHIM (temporary): keep the evaluate pass's inputs identical to the build pass.
         if (!string.IsNullOrEmpty(csWinRTMetadataFolder))
@@ -375,13 +383,37 @@ internal sealed partial class ProjectRunService
     }
 
     /// <summary>
+    /// Adds an inferred profile and scopes its import to the selected app. The .NET SDK honors
+    /// <c>ProjectToOverrideProjectExtensionsPath</c> by setting <c>PublishProfileImported=false</c> in every
+    /// referenced project whose <c>MSBuildProjectFullPath</c> differs, so the global property cannot activate
+    /// a same-named profile elsewhere in the project graph.
+    /// </summary>
+    private static void AppendInferredPublishProfile(
+        List<string> tokens,
+        FileInfo project,
+        ProjectRunOptions options,
+        bool include = true)
+    {
+        if (!include || string.IsNullOrWhiteSpace(options.PublishProfile))
+        {
+            return;
+        }
+
+        tokens.Add($"-p:PublishProfile={EscapeMsBuildPropertyValue(options.PublishProfile)}");
+        tokens.Add(
+            $"-p:ProjectToOverrideProjectExtensionsPath={EscapeMsBuildPropertyValue(project.FullName)}");
+    }
+
+    /// <summary>
     /// Percent-escapes the characters MSBuild treats specially in a <c>-p:Name=Value</c> property value —
-    /// <c>;</c> (property separator) and <c>%</c> (escape lead-in, escaped first to stay idempotent-safe).
+    /// <c>;</c>/<c>,</c> (property separators) and <c>%</c> (escape lead-in, escaped first to stay
+    /// idempotent-safe).
     /// Other special chars are inert here and left as-is so paths stay readable in logs.
     /// </summary>
     private static string EscapeMsBuildPropertyValue(string value) =>
         value.Replace("%", "%25", StringComparison.Ordinal)
-             .Replace(";", "%3B", StringComparison.Ordinal);
+             .Replace(";", "%3B", StringComparison.Ordinal)
+             .Replace(",", "%2C", StringComparison.Ordinal);
 
     /// <summary>Name fragments that mark a <c>-p:Name=Value</c> property whose value must not be echoed.</summary>
     private static readonly string[] SecretPropertyNameFragments =
