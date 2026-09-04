@@ -17,7 +17,7 @@ public sealed class NativeAotVerifierTests
         0x13, 0xf5, 0xb9, 0xe6, 0xef, 0xae, 0x33, 0x18,
         0xee, 0x3b, 0x2d, 0xce, 0x24, 0xb3, 0x6a, 0xae,
     ];
-   private static readonly string CmdPath = Path.Combine(Environment.SystemDirectory, "cmd.exe");
+   private static readonly string CmdPath = Path.GetFullPath("cmd.exe", Environment.SystemDirectory);
     private static readonly string[] ExpectedForbiddenPayloadFiles =
       ["coreclr.dll", "clrjit.dll", "App.dll", "App.runtimeconfig.json"];
    private DirectoryInfo _tempDirectory = null!;

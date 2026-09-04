@@ -510,13 +510,13 @@ public class MsixServiceIdentityTests : BaseCommandTests
     public async Task AddLooseLayoutIdentityAsync_FrameworkDependentPublishFailsWhenRuntimeDependencyCannotResolve()
     {
        var srcDir = _tempDirectory.CreateSubdirectory("publish-output");
-       var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "AppxManifest.xml"));
+       var srcManifest = new FileInfo(Path.GetFullPath("AppxManifest.xml", srcDir.FullName));
        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
        await File.WriteAllTextAsync(
-           Path.Combine(srcDir.FullName, "TestApp.exe"),
+           Path.GetFullPath("TestApp.exe", srcDir.FullName),
            "exe",
            TestContext.CancellationToken);
-       var output = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "layout"));
+       var output = _tempDirectory.CreateSubdirectory("layout");
 
        var error = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
            _msixService.AddLooseLayoutIdentityAsync(
@@ -524,7 +524,7 @@ public class MsixServiceIdentityTests : BaseCommandTests
                srcDir,
                output,
                TestTaskContext,
-               projectFile: new FileInfo(Path.Combine(srcDir.FullName, "App.csproj")),
+               projectFile: new FileInfo(Path.GetFullPath("App.csproj", srcDir.FullName)),
                windowsAppSdkSelfContained: false,
                requireExactRuntimeDependency: true,
                cancellationToken: TestContext.CancellationToken));
@@ -537,7 +537,7 @@ public class MsixServiceIdentityTests : BaseCommandTests
     public async Task AddLooseLayoutIdentityAsync_SelfContainedPublishRejectsFrameworkDependencyHybrid()
     {
        var srcDir = _tempDirectory.CreateSubdirectory("self-contained-publish");
-       var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "AppxManifest.xml"));
+       var srcManifest = new FileInfo(Path.GetFullPath("AppxManifest.xml", srcDir.FullName));
        var manifest = BuildMSBuildManifest().Replace(
            "<Applications>",
            """
@@ -549,10 +549,10 @@ public class MsixServiceIdentityTests : BaseCommandTests
            StringComparison.Ordinal);
        await File.WriteAllTextAsync(srcManifest.FullName, manifest, TestContext.CancellationToken);
        await File.WriteAllTextAsync(
-           Path.Combine(srcDir.FullName, "TestApp.exe"),
+           Path.GetFullPath("TestApp.exe", srcDir.FullName),
            "exe",
            TestContext.CancellationToken);
-       var output = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "layout"));
+       var output = _tempDirectory.CreateSubdirectory("layout");
 
        var error = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
            _msixService.AddLooseLayoutIdentityAsync(
