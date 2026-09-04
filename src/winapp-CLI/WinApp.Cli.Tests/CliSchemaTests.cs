@@ -287,12 +287,31 @@ public class CliSchemaTests : BaseCommandTests
 
         Assert.AreEqual(0, exitCode);
         using var jsonDoc = JsonDocument.Parse(TestAnsiConsole.Output);
-        var commands = jsonDoc.RootElement.GetProperty("subcommands");
+        var root = jsonDoc.RootElement;
+        var commands = root.GetProperty("subcommands");
 
+        Assert.IsFalse(root.TryGetProperty("targetAware", out _));
         Assert.IsTrue(commands.GetProperty("run").GetProperty("targetAware").GetBoolean());
         Assert.IsTrue(commands.GetProperty("unregister").GetProperty("targetAware").GetBoolean());
         Assert.IsTrue(commands.GetProperty("ui").GetProperty("subcommands")
             .GetProperty("click").GetProperty("targetAware").GetBoolean());
         Assert.IsFalse(commands.GetProperty("cert").TryGetProperty("targetAware", out _));
+    }
+
+    [TestMethod]
+    public async Task CliSchema_SubtreePreservesInheritedTargetAwareness()
+    {
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand, ["ui", "--cli-schema"]);
+
+        Assert.AreEqual(0, exitCode);
+        using var jsonDoc = JsonDocument.Parse(TestAnsiConsole.Output);
+        var root = jsonDoc.RootElement;
+
+        Assert.AreEqual("ui", root.GetProperty("name").GetString());
+        Assert.IsTrue(root.GetProperty("targetAware").GetBoolean());
+        Assert.IsTrue(root.GetProperty("subcommands").GetProperty("click")
+            .GetProperty("targetAware").GetBoolean());
     }
 }

@@ -102,9 +102,10 @@ internal static class CliSchema
 
     private static RootCommandDetails CreateRootCommandDetails(Command command)
     {
+        var targetAware = IsTargetAware(command);
         var arguments = CreateArgumentsDictionary(command.Arguments);
         var options = CreateOptionsDictionary(command.Options);
-        var subcommands = CreateSubcommandsDictionary(command.Subcommands, targetAware: false);
+        var subcommands = CreateSubcommandsDictionary(command.Subcommands, targetAware);
 
         // Use only major.minor.patch (3 components) to avoid build number churn in generated docs
         var fullVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version!;
@@ -123,8 +124,16 @@ internal static class CliSchema
             arguments: arguments,
             options: options,
             subcommands: subcommands,
-            targetAware: null
+            targetAware: targetAware ? true : null
         );
+    }
+
+    private static bool IsTargetAware(Command command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        return command is ITargetAwareCommand ||
+            command.Parents.OfType<Command>().Any(parent => parent is ITargetAwareCommand);
     }
 
     private static Dictionary<string, ArgumentDetails>? CreateArgumentsDictionary(IList<Argument> arguments)
