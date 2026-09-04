@@ -796,8 +796,6 @@ Project mode requires the **.NET SDK 8.0.100 or newer** (for MSBuild `--getPrope
 
 For `--verify-native-aot`, WinApp also checks that the process remains alive during a short internal startup window. A self-contained single-file JIT app can hide CoreCLR inside its executable, so WinApp rejects the official .NET single-file bundle marker rather than certifying it from missing sidecar files. Packaged output must be registered in development mode at this invocation's staging directory; unpackaged output must run directly from the evaluated `PublishDir`. JSON output includes the source executable, staging/process paths, package identity, PID, exit code when available, window information, and layered verification results.
 
-Publish mode replaces only a same-identity development registration rooted in the current project or selected staging directory. It fails closed for production registrations and unrelated development registrations. Use a distinct package identity, or explicitly unregister a conflicting package you own.
-
 If the app exits during verification, the error reports its exit code when available. Re-run without `--verify-native-aot` or `--detach` and add `--debug-output`; add `--symbols` for native crash details.
 
 **Build output & verbosity:** the project is built in two steps — a `dotnet build` whose output **streams live** to your console, followed by a fast property-evaluation pass. winapp prints the exact `dotnet build …` invocation before the output, and streams warnings even on a successful build. Verbosity:
