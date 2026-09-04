@@ -4,6 +4,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using WinApp.Cli.ExecutionTargets.Abstractions;
+using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.ExecutionTargets.Orchestration;
 
@@ -162,8 +163,11 @@ internal sealed class RuntimeProvisionStateStore(ITargetStateDirectoryProvider d
             UpdatedUtc = DateTimeOffset.UtcNow,
         };
 
+        // The state file sits directly in the target root, which GetStateFile has just created. The
+        // write publishes through a sibling temporary and a single rename, so a concurrent reader
+        // sees either the previous record or this one, never a partial write.
         var file = GetStateFile(target, create: true);
-        WriteAtomic(file, JsonSerializer.Serialize(committed, RuntimeProvisionStateJsonContext.Default.RuntimeProvisionState));
+        AtomicFile.WriteAllText(file, JsonSerializer.Serialize(committed, RuntimeProvisionStateJsonContext.Default.RuntimeProvisionState));
         return committed;
     }
 
@@ -171,42 +175,6 @@ internal sealed class RuntimeProvisionStateStore(ITargetStateDirectoryProvider d
         TargetPathSafety.CombineInsideRoot(
             directoryProvider.GetTargetRoot(target, create).FullName,
             StateFileName);
-
-    private static void WriteAtomic(string path, string contents)
-    {
-        var directory = Path.GetDirectoryName(path)!;
-        Directory.CreateDirectory(directory);
-
-        var temporary = TargetPathSafety.CombineInsideRoot(
-            directory,
-            $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
-
-        try
-        {
-            File.WriteAllText(temporary, contents);
-            File.Move(temporary, path, overwrite: true);
-        }
-        catch
-        {
-            TryDelete(temporary);
-            throw;
-        }
-    }
-
-    private static void TryDelete(string path)
-    {
-        try
-        {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // A leftover temporary is harmless and must never mask the original error.
-        }
-    }
 
     private static ExecutionTargetException Unreadable(string file, Exception? innerException) =>
         ExecutionTargetException.Create(

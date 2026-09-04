@@ -3,6 +3,7 @@
 
 using System.Text.Json;
 using WinApp.Cli.ExecutionTargets.Abstractions;
+using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.ExecutionTargets.Orchestration;
 
@@ -159,8 +160,11 @@ internal sealed class TargetStateStore(ITargetStateDirectoryProvider directoryPr
             UpdatedUtc = DateTimeOffset.UtcNow,
         };
 
+        // The state file sits directly in the target root, which GetStateFile has just created. The
+        // write publishes through a sibling temporary and a single rename, so a concurrent reader
+        // sees either the previous record or this one, never a partial write.
         var file = GetStateFile(target, create: true);
-        WriteAtomic(file, JsonSerializer.Serialize(committed, TargetStateJsonContext.Default.TargetState));
+        AtomicFile.WriteAllText(file, JsonSerializer.Serialize(committed, TargetStateJsonContext.Default.TargetState));
         return committed;
     }
 
@@ -180,51 +184,6 @@ internal sealed class TargetStateStore(ITargetStateDirectoryProvider directoryPr
         TargetPathSafety.CombineInsideRoot(
             directoryProvider.GetTargetRoot(target, create).FullName,
             StateFileName);
-
-    /// <summary>
-    /// Writes <paramref name="contents"/> so readers observe either the previous file or the new
-    /// one, never a partial write. The temporary file is a sibling so the replace stays on one
-    /// volume and is therefore atomic.
-    /// </summary>
-    private static void WriteAtomic(string path, string contents)
-    {
-        var directory = Path.GetDirectoryName(path)!;
-        Directory.CreateDirectory(directory);
-
-        var temporary = TargetPathSafety.CombineInsideRoot(
-            directory,
-            $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
-        try
-        {
-            File.WriteAllText(temporary, contents);
-            File.Move(temporary, path, overwrite: true);
-        }
-        catch
-        {
-            TryDelete(temporary);
-            throw;
-        }
-    }
-
-    private static void TryDelete(string path)
-    {
-        try
-        {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-        }
-        catch (IOException)
-        {
-            // Best effort: a leftover temporary file is harmless and is overwritten by name on the
-            // next attempt. Failing cleanup must never mask the original error.
-        }
-        catch (UnauthorizedAccessException)
-        {
-            // Same reasoning as above.
-        }
-    }
 
     private static ExecutionTargetException Unreadable(
         ExecutionTargetRef target,

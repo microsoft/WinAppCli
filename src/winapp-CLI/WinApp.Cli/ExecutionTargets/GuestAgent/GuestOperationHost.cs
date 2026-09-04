@@ -84,7 +84,7 @@ internal static class GuestOperationHost
 
         var arguments = new List<string>
         {
-            GuestAgentCommandNames.Verb,
+            GuestAgentIdentity.Verb,
             OperationHostOption,
             ReadyEventOption,
             readyEventName,

@@ -243,63 +243,17 @@ internal static class TargetFileTransferService
             var destination = ResolveHostDestination(request.HostPath, prefix, file.RelativePath, matches.Count);
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
 
-            // Received into a temporary and verified before the destination is touched, so an
-            // interrupted copy never publishes a partial file over something that was correct.
-            var temporary = $"{destination}.{Guid.NewGuid():n}.part";
-
-            try
-            {
-                await using (var stream = new FileStream(
-                    temporary, FileMode.Create, FileAccess.Write, FileShare.None, 64 * 1024, useAsync: true))
-                {
-                    await channel.GetFileAsync(WorkScope, file.RelativePath, stream, cancellationToken)
-                        .ConfigureAwait(false);
-                }
-
-                await VerifyAsync(temporary, file, cancellationToken).ConfigureAwait(false);
-
-                File.Move(temporary, destination, overwrite: true);
-                File.SetLastWriteTimeUtc(destination, new DateTime(file.LastWriteUtcTicks, DateTimeKind.Utc));
-            }
-            catch
-            {
-                TryDelete(temporary);
-                throw;
-            }
+            // A pulled file keeps the guest's last-write time so a user can see at a glance what
+            // changed. Nothing in winapp reads it: every matched file is re-copied.
+            await GuestFilePull.ReceiveAsync(
+                channel, WorkScope, file, destination, applyGuestTimestamp: true, cancellationToken)
+                .ConfigureAwait(false);
 
             transferred++;
             bytes += file.Size;
         }
 
         return new TargetTransferResult(transferred, Skipped: 0, bytes);
-    }
-
-    /// <summary>Proves what arrived is what the guest said it was sending.</summary>
-    private static async Task VerifyAsync(
-        string path,
-        GuestFileInfo expected,
-        CancellationToken cancellationToken)
-    {
-        var actualSize = new FileInfo(path).Length;
-        var actualHash = await GuestFileService.ComputeHashAsync(path, cancellationToken).ConfigureAwait(false);
-
-        if (actualSize == expected.Size &&
-            string.Equals(actualHash, expected.Sha256, StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        throw ExecutionTargetException.Create(
-            ExecutionTargetErrorCodes.TransferInterrupted,
-            $"Copying '{expected.RelativePath}' out of the Sandbox did not complete.",
-            userAction: "Retry the command.",
-            context: new Dictionary<string, string>
-            {
-                ["relativePath"] = expected.RelativePath,
-                ["expectedSize"] = expected.Size.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                ["receivedBytes"] = actualSize.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                ["phase"] = "verify",
-            });
     }
 
     /// <summary>Expands a host file or directory into the files to send.</summary>

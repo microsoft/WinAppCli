@@ -884,8 +884,6 @@ internal partial class RunCommand
             // name.
             return new RunCommandResult
             {
-                Sandbox = true,
-                ProcessScope = reference.Selector,
                 ExecutionTarget = new ExecutionTargetInfo
                 {
                     Kind = reference.Kind,
@@ -935,14 +933,11 @@ internal partial class RunCommand
                 return null;
             }
 
-            result.Sandbox = true;
             result.ExecutionTarget = executionTarget;
 
             var selector = string.Equals(executionTarget.Id, ExecutionTargetRef.DefaultId, StringComparison.Ordinal)
                 ? executionTarget.Kind
                 : $"{executionTarget.Kind}:{executionTarget.Id}";
-
-            result.ProcessScope = selector;
 
             // The guest's own process ID when it reported one — that is the application. The agent's
             // child is only the winapp that launched it, and pointing a UI command at that would

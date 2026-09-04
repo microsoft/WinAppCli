@@ -4,6 +4,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using WinApp.Cli.ExecutionTargets.Abstractions;
+using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.ExecutionTargets.Orchestration;
 
@@ -237,8 +238,11 @@ internal sealed class DeploymentStateStore(ITargetStateDirectoryProvider directo
             UpdatedUtc = DateTimeOffset.UtcNow,
         };
 
+        // GetStateFile has just created the deployments folder. The write publishes through a
+        // sibling temporary and a single rename, so a concurrent reader sees either the previous
+        // record or this one, never a partial write.
         var file = GetStateFile(target, state.DeploymentId, create: true);
-        WriteAtomic(file, JsonSerializer.Serialize(committed, DeploymentStateJsonContext.Default.DeploymentState));
+        AtomicFile.WriteAllText(file, JsonSerializer.Serialize(committed, DeploymentStateJsonContext.Default.DeploymentState));
         return committed;
     }
 
@@ -285,42 +289,6 @@ internal sealed class DeploymentStateStore(ITargetStateDirectoryProvider directo
         }
 
         return file;
-    }
-
-    private static void WriteAtomic(string path, string contents)
-    {
-        var directory = Path.GetDirectoryName(path)!;
-        Directory.CreateDirectory(directory);
-
-        var temporary = TargetPathSafety.CombineInsideRoot(
-            directory,
-            $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
-
-        try
-        {
-            File.WriteAllText(temporary, contents);
-            File.Move(temporary, path, overwrite: true);
-        }
-        catch
-        {
-            TryDelete(temporary);
-            throw;
-        }
-    }
-
-    private static void TryDelete(string path)
-    {
-        try
-        {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // A leftover temporary is harmless and must never mask the original error.
-        }
     }
 
     private static ExecutionTargetException Unreadable(string file, Exception? innerException) =>

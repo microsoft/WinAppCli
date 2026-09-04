@@ -889,8 +889,6 @@ public class SandboxRunTests
 
         Assert.AreEqual("Contoso.MyApp_abc!App", root.GetProperty("AUMID").GetString());
         Assert.AreEqual(4212u, root.GetProperty("ProcessId").GetUInt32());
-        Assert.IsTrue(root.GetProperty("Sandbox").GetBoolean());
-        Assert.AreEqual("sandbox", root.GetProperty("ProcessScope").GetString());
 
         // The guest's own process ID, not the agent's child: a UI command pointed at the launcher
         // would target the wrong process.
@@ -942,11 +940,25 @@ public class SandboxRunTests
             epoch: "epoch-1");
 
         Assert.IsNull(result.ProcessId);
-        Assert.IsTrue(result.Sandbox);
-        Assert.AreEqual("sandbox", result.ProcessScope);
         Assert.IsNull(result.UiTargetArgs);
-        Assert.AreEqual("arm64", result.ExecutionTarget!.Architecture);
+        Assert.AreEqual("sandbox", result.ExecutionTarget!.Kind);
+        Assert.AreEqual("default", result.ExecutionTarget.Id);
+        Assert.AreEqual("arm64", result.ExecutionTarget.Architecture);
         Assert.AreEqual("epoch-1", result.ExecutionTarget.Epoch);
+    }
+
+    /// <summary>
+    /// A local run's document must stay byte-for-byte what it has always been: the execution-target
+    /// members are additive, so a run that never touched a target emits none of them.
+    /// </summary>
+    [TestMethod]
+    public void LocalRunJson_CarriesNoExecutionTargetMembers()
+    {
+        var local = new RunCommandResult { AUMID = "Contoso.MyApp_abc!App", ProcessId = 4212 };
+
+        var json = JsonSerializer.Serialize(local, RunCommandJsonContext.Default.RunCommandResult);
+
+        Assert.AreEqual("{\n  \"AUMID\": \"Contoso.MyApp_abc!App\",\n  \"ProcessId\": 4212\n}", json);
     }
 
     private static ExecutionTargetInfo TargetInfo() => new()

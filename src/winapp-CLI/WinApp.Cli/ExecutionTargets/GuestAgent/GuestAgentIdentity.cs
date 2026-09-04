@@ -32,6 +32,12 @@ internal sealed record GuestAgentIdentity(
     int ProtocolMinimum,
     int ProtocolMaximum)
 {
+    /// <summary>File name every copy of the agent binary uses, inside the guest and out.</summary>
+    internal const string BinaryName = "winapp.exe";
+
+    /// <summary>The hidden verb that runs winapp as a persistent guest agent.</summary>
+    internal const string Verb = "guest-agent";
+
     /// <summary>Describes the winapp binary at <paramref name="binaryPath"/>.</summary>
     public static async Task<GuestAgentIdentity> ForBinaryAsync(
         string binaryPath,

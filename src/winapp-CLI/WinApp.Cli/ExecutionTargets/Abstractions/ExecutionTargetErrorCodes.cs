@@ -48,7 +48,7 @@ internal static class ExecutionTargetErrorCodes
     /// <summary>The guest agent's protocol version is not compatible with this host.</summary>
     public const string AgentIncompatible = "sandbox_agent_incompatible";
 
-    /// <summary>Staging, self-testing, or activating a replacement guest agent failed.</summary>
+    /// <summary>Locating or staging the guest agent binary the host boots from failed.</summary>
     public const string AgentUpgradeFailed = "sandbox_agent_upgrade_failed";
 
     /// <summary>The guest agent is already serving as many channels or operations as it allows.</summary>

@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using WinApp.Cli.ExecutionTargets.Abstractions;
+using WinApp.Cli.ExecutionTargets.GuestAgent;
 
 namespace WinApp.Cli.ExecutionTargets.Orchestration;
 
@@ -22,7 +23,7 @@ internal sealed class HostWinappBinaryProvider : IHostWinappBinaryProvider
         if (processPath is not { Length: > 0 } ||
             !string.Equals(
                 Path.GetFileName(processPath),
-                GuestAgentInstaller.BinaryName,
+                GuestAgentIdentity.BinaryName,
                 StringComparison.OrdinalIgnoreCase) ||
             !File.Exists(processPath))
         {

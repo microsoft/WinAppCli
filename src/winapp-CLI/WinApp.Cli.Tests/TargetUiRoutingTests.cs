@@ -231,10 +231,9 @@ public class TargetUiRoutingTests
         await File.WriteAllTextAsync(path, "half", TestContext.CancellationToken);
 
         var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() =>
-            TargetArtifactService.VerifyAsync(
+            GuestFilePull.VerifyAsync(
                 path,
                 new GuestFileInfo("result.mp4", Size: 1000, LastWriteUtcTicks: 0, Sha256: "irrelevant"),
-                Artifact("result.mp4", path),
                 TestContext.CancellationToken));
 
         Assert.AreEqual(ExecutionTargetErrorCodes.TransferInterrupted, failure.Error.Code);
@@ -250,10 +249,9 @@ public class TargetUiRoutingTests
         await File.WriteAllTextAsync(path, "abcd", TestContext.CancellationToken);
 
         var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() =>
-            TargetArtifactService.VerifyAsync(
+            GuestFilePull.VerifyAsync(
                 path,
                 new GuestFileInfo("result.png", Size: 4, LastWriteUtcTicks: 0, Sha256: new string('0', 64)),
-                Artifact("result.png", path),
                 TestContext.CancellationToken));
 
         Assert.AreEqual(ExecutionTargetErrorCodes.TransferInterrupted, failure.Error.Code);

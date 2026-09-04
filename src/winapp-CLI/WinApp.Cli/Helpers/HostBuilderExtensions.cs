@@ -88,8 +88,6 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<WindowsSandboxLifecycle>()
             .AddSingleton<IGuestSessionProbe, GuestSessionProbe>()
             .AddSingleton<IGuestProcessHostFactory, GuestProcessHostFactory>()
-            .AddSingleton<IGuestAgentSelfTest, GuestAgentSelfTest>()
-            .AddSingleton<GuestAgentInstaller>()
             .AddSingleton<IHostWinappBinaryProvider, HostWinappBinaryProvider>()
             .AddSingleton<IDeploymentStateStore, DeploymentStateStore>()
             .AddSingleton<IRuntimeProvisionStateStore, RuntimeProvisionStateStore>()

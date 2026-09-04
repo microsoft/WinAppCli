@@ -1064,26 +1064,20 @@ internal sealed class RunCommandResult
     public uint? ProcessId { get; set; }
     public string? Error { get; set; }
 
-    /// <summary>True when the app ran on an execution target rather than on this machine.</summary>
-    /// <remarks>
-    /// Every member below is additive and omitted entirely when absent, so a local run's payload is
-    /// byte-for-byte what it has always been.
-    /// </remarks>
-    public bool? Sandbox { get; set; }
-
-    /// <summary>Where <see cref="ProcessId"/> is meaningful, for example <c>sandbox</c>.</summary>
-    public string? ProcessScope { get; set; }
-
     /// <summary>
     /// The exact arguments to append to a <c>winapp ui</c> command to reach this app, for example
     /// <c>--on sandbox -a 4212</c>.
     /// </summary>
     /// <remarks>
+    /// This and <see cref="ExecutionTarget"/> are additive and omitted entirely when absent, so a
+    /// local run's payload is byte-for-byte what it has always been.
+    /// <para>
     /// Both halves are here on purpose. A process ID means nothing without the target it belongs to,
     /// so this never contains a bare number and never encodes the target into the application value:
     /// a caller that copies this string gets a command that runs where the app actually is, and a
     /// caller that copies only the number gets something that visibly does not work rather than
     /// something that quietly acts on the wrong machine.
+    /// </para>
     /// </remarks>
     public string? UiTargetArgs { get; set; }
 

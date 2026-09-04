@@ -46,8 +46,17 @@ canonicalized and confined to a managed root.
 ### What path containment does and does not guarantee
 
 Paths crossing into the guest are canonicalized, confined to a managed root, and refused if any
-component is a reparse point — a junction or symbolic link. Managed folders are never enumerated
-through one either, so a link cannot make content outside a managed root appear to be inside it.
+component is a reparse point — a junction or symbolic link. Entries *inside* a managed folder are
+never enumerated through either, so a link planted below a managed root cannot make content outside
+it appear to be inside.
+
+A managed root that is *itself* replaced by a junction is a different case, and the guest does not
+refuse it: the guest walk starts by enumerating that folder's contents, so it never looks at the
+folder itself. This is bounded rather than closed on purpose — the guest is a disposable Sandbox
+under the same mutual-trust model as everything else on this list, and a guest process able to plant
+that junction can already read the files it would redirect to. The host side below does close the
+equivalent case, because a host source folder is one the developer named and a silent wrong answer
+there is not acceptable.
 
 The same rule applies on the **host** side, to the folder a deployment or `target push`/`target pull` reads from.
 Those folders are walked one level at a time with every directory tested before it is descended
@@ -207,8 +216,6 @@ ones:
 {
   "AUMID": "Contoso.MyApp_8wekyb3d8bbwe!App",
   "ProcessId": 4212,
-  "Sandbox": true,
-  "ProcessScope": "sandbox",
   "UiTargetArgs": "--on sandbox -a 4212",
   "ExecutionTarget": {
     "Kind": "sandbox",
@@ -553,11 +560,12 @@ only raises the bar against blind guessing. As with path containment above, a co
 able to exploit that can already terminate the agent outright, so it is accepted under the same
 mutually-trusted model rather than defended against.
 
-Host and guest `winapp` are versioned together. When the host is newer, the replacement binary is
-staged, hash-verified, self-tested in its own process, and activated only if it passes, with the
-previous binary retained as last-known-good. A newer guest is never downgraded: it is reused when
-protocol versions overlap, and reported incompatible when they do not — in which case updating the
-host is the fix.
+Host and guest `winapp` are versioned together. The host publishes its own binary into the target's
+read-only bootstrap share and hash-verifies what landed there; a build whose bytes already match is
+left alone. When a *different* build is already serving the Sandbox it still holds that file open, so
+winapp reports the conflict and offers `wsb stop` rather than surfacing a sharing violation. Protocol
+versions are checked on every handshake, and a guest that speaks no revision this host knows is
+reported incompatible — in which case updating the host is the fix.
 
 ## Coordination between commands
 
@@ -616,7 +624,7 @@ run your app" is always distinguishable from "your app failed".
 | `sandbox_input_not_ready` | Input could not be delivered; nothing was reported as delivered |
 | `sandbox_terminated` | The Sandbox went away underneath the command |
 | `sandbox_agent_incompatible` | The guest agent needs a newer winapp |
-| `sandbox_agent_upgrade_failed` | Staging, self-testing, or activating a replacement agent failed |
+| `sandbox_agent_upgrade_failed` | Locating or staging the guest agent binary failed |
 | `sandbox_agent_busy` | The agent is already serving as many channels or operations as it allows |
 | `sandbox_transport_failed` | The command channel could not be established or was lost |
 | `sandbox_transfer_interrupted` | A transfer stopped; no destination was published |

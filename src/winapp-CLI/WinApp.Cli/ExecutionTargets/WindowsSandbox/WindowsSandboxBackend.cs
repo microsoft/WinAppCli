@@ -719,7 +719,7 @@ internal sealed class WindowsSandboxBackend(
         {
             expected = await StageBootstrapFileAsync(
                 source,
-                TargetPathSafety.CombineInsideRoot(bootstrapDirectory, GuestAgentInstaller.BinaryName),
+                TargetPathSafety.CombineInsideRoot(bootstrapDirectory, GuestAgentIdentity.BinaryName),
                 cancellationToken).ConfigureAwait(false);
         }
         catch (IOException ex)
@@ -932,7 +932,7 @@ internal sealed class WindowsSandboxBackend(
         }
 
         var portText = port.ToString(CultureInfo.InvariantCulture);
-        var agentPath = $@"{guestBootstrapPath}\{GuestAgentInstaller.BinaryName}";
+        var agentPath = $@"{guestBootstrapPath}\{GuestAgentIdentity.BinaryName}";
         var command =
             @"powershell.exe -NoProfile -NonInteractive -Command " +
             $@"""$agent='{agentPath}'; " +
@@ -983,7 +983,7 @@ internal sealed class WindowsSandboxBackend(
         CancellationToken cancellationToken)
     {
         var command =
-            $"\"{bootstrap.GuestBootstrap}\\{GuestAgentInstaller.BinaryName}\" {GuestAgentCommandNames.Verb} " +
+            $"\"{bootstrap.GuestBootstrap}\\{GuestAgentIdentity.BinaryName}\" {GuestAgentIdentity.Verb} " +
             $"--bootstrap-dir \"{bootstrap.GuestBootstrap}\" --result-dir \"{bootstrap.GuestResult}\"";
 
         await cli.LaunchAgentAsync(instanceId, command, cancellationToken).ConfigureAwait(false);
