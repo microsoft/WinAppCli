@@ -414,6 +414,42 @@ public class TargetSelectionParserTests : BaseCommandTests
         Assert.AreEqual(@"work\out", pull.TargetPath);
     }
 
+    /// <summary>
+    /// A command line the parser rejected must be reported here, not on the target. Routing first
+    /// means a mistyped `--depth` spends minutes preparing a Sandbox, fails with a transport error
+    /// that never mentions `--depth`, and leaves the Sandbox running.
+    /// </summary>
+    [TestMethod]
+    [DataRow("--depth", "notanumber")]
+    [DataRow("--timeout", "notanumber")]
+    [DataRow("--max", "notanumber")]
+    public void CommandWithAParseError_IsNotRoutedToTheTarget(string option, string value)
+    {
+        var parsed = Parse(["ui", "inspect", "--on", "sandbox", "-a", "MyApp", option, value]);
+
+        Assert.IsGreaterThan(0, parsed.Errors.Count, $"'{option} {value}' must not parse.");
+
+        // ShouldRoute answers only about the selector; Program gates it on there being no parse
+        // error, which is what this asserts alongside.
+        Assert.IsTrue(
+            ExecutionTargetUiRouter.ShouldRoute(parsed),
+            "The selector is still valid, so the guard has to be the parse-error check.");
+    }
+
+    /// <summary>
+    /// An option-looking positional is caught even when the selector itself is fine, so the target
+    /// is never prepared for a command line that was going to fail anyway.
+    /// </summary>
+    [TestMethod]
+    public void MisspeltOptionAlongsideAValidSelector_IsStillRejected()
+    {
+        var parsed = Parse(["ui", "inspect", "--on", "sandbox", "--dpeth=8", "-a", "MyApp"]);
+
+        Assert.IsTrue(
+            WindowsCommandLine.FindOptionLikePositionals(parsed).Contains("--dpeth=8") ||
+            parsed.Errors.Count > 0);
+    }
+
     private ParseResult Parse(string[] arguments) =>
         GetRequiredService<WinAppRootCommand>().Parse(arguments, WinAppParserConfiguration.Default);
 }

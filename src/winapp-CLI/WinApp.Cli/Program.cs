@@ -243,7 +243,13 @@ internal static class Program
             // sent to another target must not perform UI Automation, window discovery, capture, or
             // input injection on this desktop, and the only way to guarantee that for every verb is
             // to divert before the handler exists.
-            if (ExecutionTargetUiRouter.ShouldRoute(parsedArgs))
+            //
+            // Only for a command line that actually parsed. Routing a broken one first means
+            // `winapp ui inspect --on sandbox --depth notanumber` boots a Sandbox, spends minutes
+            // preparing it, and then reports a transport failure that never mentions `--depth` —
+            // and leaves the Sandbox running. The ordinary parse-error path is both faster and
+            // truthful, and it runs on this machine only because it runs nothing at all.
+            if (parsedArgs.Errors.Count == 0 && ExecutionTargetUiRouter.ShouldRoute(parsedArgs))
             {
                 var router = serviceProvider.GetRequiredService<ExecutionTargetUiRouter>();
                 return router.RouteAsync(

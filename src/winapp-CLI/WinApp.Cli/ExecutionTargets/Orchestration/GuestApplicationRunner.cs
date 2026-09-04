@@ -165,8 +165,16 @@ internal sealed class GuestApplicationRunner(TargetDeploymentService deployments
     /// The started process is committed to deployment state before the command completes, so a host
     /// that dies mid-run still leaves a record of what it launched rather than a deployment that
     /// claims nothing is running.
+    /// <para>
+    /// That commit advances the stored revision, which is why the caller is handed the record back.
+    /// A caller that kept its own pre-launch <paramref name="state"/> and committed against it later
+    /// would be one revision behind, and every such commit is refused — silently, because a lost
+    /// commit must never fail a running application. Clearing package ownership after a successful
+    /// unregister is exactly that kind of later commit.
+    /// </para>
     /// </remarks>
-    public async Task<int> RunAsync(
+    /// <returns>The command's exit code and the deployment record as it now stands.</returns>
+    public async Task<GuestRunOutcome> RunAsync(
         PreparedTarget target,
         DeploymentState state,
         GuestExecRequest request,
@@ -177,6 +185,7 @@ internal sealed class GuestApplicationRunner(TargetDeploymentService deployments
         ArgumentNullException.ThrowIfNull(state);
 
         var started = false;
+        var current = state;
 
         var result = await target.Operations.ExecuteAsync(
             request,
@@ -190,13 +199,13 @@ internal sealed class GuestApplicationRunner(TargetDeploymentService deployments
                     }
 
                     started = true;
-                    TryCommitProcess(target, state, process);
+                    current = TryCommitProcess(target, current, process);
                     callbacks.OnStarted?.Invoke(process);
                 },
             },
             cancellationToken).ConfigureAwait(false);
 
-        return result.ExitCode;
+        return new GuestRunOutcome(result.ExitCode, current);
     }
 
     /// <summary>Records which guest package this deployment owns.</summary>
@@ -252,13 +261,17 @@ internal sealed class GuestApplicationRunner(TargetDeploymentService deployments
     /// <remarks>
     /// The process is already running by this point. A concurrent commit from another host process
     /// means the record is stale, which is a diagnostics loss, not a reason to report a successful
-    /// launch as a failure.
+    /// launch as a failure — so the caller gets its previous record back and carries on.
     /// </remarks>
-    private void TryCommitProcess(PreparedTarget target, DeploymentState state, GuestProcessStart process)
+    /// <returns>The committed record, or the one passed in when the commit was refused.</returns>
+    private DeploymentState TryCommitProcess(
+        PreparedTarget target,
+        DeploymentState state,
+        GuestProcessStart process)
     {
         try
         {
-            deployments.CommitProcess(
+            return deployments.CommitProcess(
                 target.Reference,
                 state,
                 process.ProcessId,
@@ -270,6 +283,17 @@ internal sealed class GuestApplicationRunner(TargetDeploymentService deployments
                 "Could not record the launched guest process for deployment {0}: {1}",
                 state.DeploymentId,
                 ex.Message);
+
+            return state;
         }
     }
 }
+
+/// <summary>What a guest run produced: the application's exit code, and the record it left behind.</summary>
+/// <param name="ExitCode">The guest application's own exit code.</param>
+/// <param name="State">
+/// The deployment record as it now stands. Committing anything later — clearing package ownership
+/// after an unregister, for example — must use this rather than the record the caller started with,
+/// because launching the process advanced the stored revision.
+/// </param>
+internal sealed record GuestRunOutcome(int ExitCode, DeploymentState State);

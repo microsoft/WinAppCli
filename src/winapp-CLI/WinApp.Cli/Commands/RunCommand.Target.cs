@@ -384,7 +384,7 @@ internal partial class RunCommand
                 // for a packaged app, so the last silent stretch gets a line too.
                 WriteProgress(isJson, "Starting the application in the Windows Sandbox...");
 
-                var exitCode = await guestApplicationRunner.RunAsync(
+                var run = await guestApplicationRunner.RunAsync(
                     target,
                     state,
                     request,
@@ -426,7 +426,7 @@ internal partial class RunCommand
                 // never covering any part of the application's own lifetime.
                 if (identity is not null && unregisterOnExit)
                 {
-                    await UnregisterDeploymentAfterExitAsync(target, deployment.LayoutPath, state, cancellationToken);
+                    await UnregisterDeploymentAfterExitAsync(target, deployment.LayoutPath, run.State, cancellationToken);
                 }
 
                 if (isJson && guestProducesRunResult && capturedOutput is not null)
@@ -438,7 +438,7 @@ internal partial class RunCommand
                     PublishDirectGuestJson(target);
                 }
 
-                return exitCode;
+                return run.ExitCode;
             }
             catch (ExecutionTargetException ex)
             {

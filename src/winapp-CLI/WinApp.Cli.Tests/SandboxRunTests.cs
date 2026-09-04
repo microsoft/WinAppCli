@@ -258,7 +258,7 @@ public class SandboxRunTests
         process.Exit(7);
 
         // The guest application's exit code survives, distinct from an infrastructure failure.
-        Assert.AreEqual(7, await run);
+        Assert.AreEqual(7, (await run).ExitCode);
     }
 
     [TestMethod]
@@ -285,6 +285,17 @@ public class SandboxRunTests
         var state = harness.States.Read(WindowsSandboxTarget.Default, "dep-1");
         Assert.AreEqual(process.ProcessId, state!.ProcessId);
         Assert.AreEqual(process.StartTicksUtc, state.ProcessStartTicksUtc);
+
+        // Recording the process advances the stored revision, so the caller has to be handed
+        // the record back. A caller that kept its pre-launch state and committed against it
+        // later — clearing package ownership after --unregister-on-exit, for example — would be
+        // one revision behind, and that commit is refused without failing anything visibly.
+        var outcome = await run;
+        Assert.AreEqual(state.Revision, outcome.State.Revision, "RunAsync must return the committed record.");
+        Assert.IsGreaterThan(deployment.State.Revision, outcome.State.Revision);
+
+        var cleared = harness.Runner.ClearPackage(WindowsSandboxTarget.Default, outcome.State);
+        Assert.IsNull(cleared.Package, "Clearing ownership against the returned record must succeed.");
     }
 
     [TestMethod]
