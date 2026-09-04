@@ -13,7 +13,7 @@ internal sealed class WindowsNativeToolchainResolver(IProcessRunner processRunne
     private const string Arm64Component = "Microsoft.VisualStudio.Component.VC.Tools.ARM64";
 
     internal Func<string> VswherePathProvider { get; set; } = static () =>
-        Path.Combine(
+        ResolveChildPath(
             Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
             "Microsoft Visual Studio",
             "Installer",
