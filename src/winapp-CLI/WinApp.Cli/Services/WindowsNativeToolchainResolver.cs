@@ -113,9 +113,7 @@ internal sealed class WindowsNativeToolchainResolver(IProcessRunner processRunne
             // diagnostic-only, so keep the usable toolchain and report an unknown display version.
         }
 
-        var vcToolsRoot = Path.GetFullPath(
-            $"VC{Path.DirectorySeparatorChar}Tools{Path.DirectorySeparatorChar}MSVC",
-            installationPath);
+        var vcToolsRoot = ResolveChildPath(installationPath, "VC", "Tools", "MSVC");
         string? vcToolsVersion;
         try
         {
@@ -135,10 +133,7 @@ internal sealed class WindowsNativeToolchainResolver(IProcessRunner processRunne
                 $"The MSVC tools directory was not found under '{vcToolsRoot}'. Install or repair the '{component}' component in Visual Studio Installer.",
                 component);
         }
-        if (!string.Equals(
-                Path.GetFileName(vcToolsVersion),
-                vcToolsVersion,
-                StringComparison.Ordinal))
+        if (!IsSafePathSegment(vcToolsVersion))
         {
             return Failure(
                 "MsvcToolsMissing",
@@ -146,11 +141,11 @@ internal sealed class WindowsNativeToolchainResolver(IProcessRunner processRunne
                 component);
         }
 
-        var vcToolsDirectory = Path.GetFullPath(vcToolsVersion, vcToolsRoot);
+        var vcToolsDirectory = ResolveChildPath(vcToolsRoot, vcToolsVersion);
         var toolDirectory = ResolveNativeToolDirectory(vcToolsDirectory, targetName);
         var linkerPath = toolDirectory is null
             ? null
-            : Path.GetFullPath("link.exe", toolDirectory);
+            : ResolveChildPath(toolDirectory, "link.exe");
         if (requirements.RequireLinker && (linkerPath is null || !File.Exists(linkerPath)))
         {
             return Failure(
@@ -161,7 +156,7 @@ internal sealed class WindowsNativeToolchainResolver(IProcessRunner processRunne
 
         var compilerPath = toolDirectory is null
             ? null
-            : Path.GetFullPath("cl.exe", toolDirectory);
+            : ResolveChildPath(toolDirectory, "cl.exe");
         if (requirements.RequireCompiler && (compilerPath is null || !File.Exists(compilerPath)))
         {
             return Failure(
@@ -233,7 +228,7 @@ internal sealed class WindowsNativeToolchainResolver(IProcessRunner processRunne
 
     private static string? ResolveVcToolsVersion(string installationPath, string vcToolsRoot)
     {
-        var defaultVersionFile = Path.Combine(
+        var defaultVersionFile = ResolveChildPath(
             installationPath,
             "VC",
             "Auxiliary",
@@ -243,7 +238,8 @@ internal sealed class WindowsNativeToolchainResolver(IProcessRunner processRunne
         if (File.Exists(defaultVersionFile))
         {
             var configured = File.ReadAllText(defaultVersionFile).Trim();
-            if (configured.Length > 0 && Directory.Exists(Path.Combine(vcToolsRoot, configured)))
+            if (IsSafePathSegment(configured) &&
+                Directory.Exists(ResolveChildPath(vcToolsRoot, configured)))
             {
                 return configured;
             }
@@ -256,25 +252,37 @@ internal sealed class WindowsNativeToolchainResolver(IProcessRunner processRunne
 
         return Directory.EnumerateDirectories(vcToolsRoot)
             .Select(Path.GetFileName)
-            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Where(name => name is not null && IsSafePathSegment(name))
             .OrderByDescending(name => ParseVersion(name!), VersionComparer.Instance)
             .FirstOrDefault();
     }
 
     private static string? ResolveNativeToolDirectory(string vcToolsDirectory, string targetName)
     {
+        if (!IsSafePathSegment(targetName))
+        {
+            return null;
+        }
+
         var hostNames = RuntimeInformation.ProcessArchitecture == Architecture.Arm64
             ? new[] { "Hostarm64", "Hostx64" }
             : new[] { "Hostx64", "Hostarm64" };
 
         return hostNames
-            .Select(host => Path.Combine(vcToolsDirectory, "bin", host, targetName))
-            .FirstOrDefault(directory => File.Exists(Path.Combine(directory, "link.exe")));
+            .Select(host => ResolveChildPath(vcToolsDirectory, "bin", host, targetName))
+            .FirstOrDefault(directory =>
+                File.Exists(ResolveChildPath(directory, "link.exe")));
     }
 
     private static WindowsSdkSelection? ResolveWindowsSdk(string kitsRoot, string targetName)
     {
-        var libRoot = Path.Combine(kitsRoot, "Lib");
+        if (!Path.IsPathFullyQualified(kitsRoot) ||
+            !IsSafePathSegment(targetName))
+        {
+            return null;
+        }
+
+        var libRoot = ResolveChildPath(kitsRoot, "Lib");
         if (!Directory.Exists(libRoot))
         {
             return null;
@@ -284,16 +292,36 @@ internal sealed class WindowsNativeToolchainResolver(IProcessRunner processRunne
                      .OrderByDescending(path => ParseVersion(Path.GetFileName(path)), VersionComparer.Instance))
         {
             var version = Path.GetFileName(versionDirectory);
-            var umLib = Path.Combine(versionDirectory, "um", targetName, "kernel32.lib");
-            var ucrtLib = Path.Combine(versionDirectory, "ucrt", targetName, "ucrt.lib");
+            if (!IsSafePathSegment(version))
+            {
+                continue;
+            }
+
+            var umLib = ResolveChildPath(
+                versionDirectory,
+                "um",
+                targetName,
+                "kernel32.lib");
+            var ucrtLib = ResolveChildPath(
+                versionDirectory,
+                "ucrt",
+                targetName,
+                "ucrt.lib");
             if (!File.Exists(umLib) || !File.Exists(ucrtLib))
             {
                 continue;
             }
 
             var hostName = RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? "arm64" : "x64";
-            var versionedBin = Path.Combine(kitsRoot, "bin", version, hostName);
-            var unversionedBin = Path.Combine(kitsRoot, "bin", hostName);
+            var versionedBin = ResolveChildPath(
+                kitsRoot,
+                "bin",
+                version,
+                hostName);
+            var unversionedBin = ResolveChildPath(
+                kitsRoot,
+                "bin",
+                hostName);
             var binDirectory = HasSdkTool(versionedBin)
                 ? versionedBin
                 : HasSdkTool(unversionedBin)
@@ -310,8 +338,8 @@ internal sealed class WindowsNativeToolchainResolver(IProcessRunner processRunne
     }
 
     private static bool HasSdkTool(string directory) =>
-        File.Exists(Path.Combine(directory, "mt.exe")) ||
-        File.Exists(Path.Combine(directory, "rc.exe"));
+        File.Exists(ResolveChildPath(directory, "mt.exe")) ||
+        File.Exists(ResolveChildPath(directory, "rc.exe"));
 
     private static string ResolveWindowsKitsRoot()
     {
@@ -337,7 +365,7 @@ internal sealed class WindowsNativeToolchainResolver(IProcessRunner processRunne
            }
         }
 
-        return Path.Combine(
+        return ResolveChildPath(
            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
            "Windows Kits",
            "10");
@@ -352,6 +380,13 @@ internal sealed class WindowsNativeToolchainResolver(IProcessRunner processRunne
         WindowsSdkSelection? sdk,
         string targetName)
     {
+        if (!IsSafePathSegment(targetName))
+        {
+            throw new ArgumentException(
+                $"'{targetName}' is not a valid target architecture segment.",
+                nameof(targetName));
+        }
+
         var environment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["VSINSTALLDIR"] = EnsureTrailingSeparator(installationPath),
@@ -377,20 +412,20 @@ internal sealed class WindowsNativeToolchainResolver(IProcessRunner processRunne
 
             var libEntries = new[]
             {
-                Path.Combine(sdk.LibVersionDirectory, "um", targetName),
-                Path.Combine(sdk.LibVersionDirectory, "ucrt", targetName),
-                Path.Combine(vcToolsDirectory, "lib", targetName),
+                ResolveChildPath(sdk.LibVersionDirectory, "um", targetName),
+                ResolveChildPath(sdk.LibVersionDirectory, "ucrt", targetName),
+                ResolveChildPath(vcToolsDirectory, "lib", targetName),
             };
             environment["LIB"] = JoinEnvironmentPath(libEntries, Environment.GetEnvironmentVariable("LIB"));
 
-            var includeRoot = Path.Combine(sdk.Root, "Include", sdk.Version);
+            var includeRoot = ResolveChildPath(sdk.Root, "Include", sdk.Version);
             var includeEntries = new[]
             {
-                Path.Combine(vcToolsDirectory, "include"),
-                Path.Combine(includeRoot, "ucrt"),
-                Path.Combine(includeRoot, "shared"),
-                Path.Combine(includeRoot, "um"),
-                Path.Combine(includeRoot, "winrt"),
+                ResolveChildPath(vcToolsDirectory, "include"),
+                ResolveChildPath(includeRoot, "ucrt"),
+                ResolveChildPath(includeRoot, "shared"),
+                ResolveChildPath(includeRoot, "um"),
+                ResolveChildPath(includeRoot, "winrt"),
             };
             environment["INCLUDE"] = JoinEnvironmentPath(includeEntries, Environment.GetEnvironmentVariable("INCLUDE"));
         }
@@ -410,6 +445,32 @@ internal sealed class WindowsNativeToolchainResolver(IProcessRunner processRunne
         }
         return string.Join(Path.PathSeparator, all);
     }
+
+    private static string ResolveChildPath(string root, params string[] segments)
+    {
+        if (!Path.IsPathFullyQualified(root))
+        {
+            throw new ArgumentException(
+                $"Path root must be fully qualified: '{root}'.",
+                nameof(root));
+        }
+        if (segments.Any(segment => !IsSafePathSegment(segment)))
+        {
+            throw new ArgumentException(
+                $"Path contains an invalid child segment: '{string.Join(", ", segments)}'.",
+                nameof(segments));
+        }
+
+        return Path.GetFullPath(
+            string.Join(Path.DirectorySeparatorChar, segments),
+            root);
+    }
+
+    private static bool IsSafePathSegment(string? value) =>
+        !string.IsNullOrWhiteSpace(value) &&
+        !Path.IsPathRooted(value) &&
+        value is not "." and not ".." &&
+        string.Equals(Path.GetFileName(value), value, StringComparison.Ordinal);
 
     private static string EnsureTrailingSeparator(string path) =>
         path.EndsWith(Path.DirectorySeparatorChar) ? path : path + Path.DirectorySeparatorChar;
