@@ -695,9 +695,14 @@ internal partial class RunCommand : Command, IShortDescription
                            throw new InvalidOperationException(
                                "Native AOT verification could not identify the published source executable.");
                        }
+                       if (projectReport is null)
+                       {
+                           throw new InvalidOperationException(
+                               "Native AOT verification requires a project-mode result envelope.");
+                       }
 
                        var stagedExecutable = ResolveStagedExecutable(outputAppXDirectory);
-                       projectReport!.ProcessPath = stagedExecutable;
+                       projectReport.ProcessPath = stagedExecutable;
                        runtimeVerification = await nativeAotVerifier.VerifyRuntimeAsync(
                            new NativeAotRuntimeVerificationRequest(
                                processId,
@@ -1084,7 +1089,11 @@ internal partial class RunCommand : Command, IShortDescription
             {
                 throw;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (
+                ex is InvalidOperationException or
+                UnauthorizedAccessException or
+                IOException or
+                System.Runtime.InteropServices.COMException)
             {
                 logger.LogDebug(
                     "Failed to unregister current publish registration on exit: {Message}",

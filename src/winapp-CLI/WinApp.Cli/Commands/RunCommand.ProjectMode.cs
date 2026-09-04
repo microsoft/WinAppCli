@@ -733,7 +733,13 @@ internal partial class RunCommand
                             // Honor Ctrl+C instead of translating it into a runtime-prep failure message.
                             throw;
                         }
-                        catch (Exception ex)
+                        catch (Exception ex) when (
+                            ex is TimeoutException or
+                            InvalidOperationException or
+                            IOException or
+                            UnauthorizedAccessException or
+                            System.ComponentModel.Win32Exception or
+                            NotSupportedException)
                         {
                             // Capture the actionable detail so --json can surface it too (the status
                             // service consumes the tuple message for the console line only).

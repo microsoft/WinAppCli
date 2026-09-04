@@ -36,7 +36,7 @@ public sealed class NativeAotVerifierTests
         {
             _tempDirectory.Delete(recursive: true);
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // Best effort for a process that is still releasing its image file.
         }

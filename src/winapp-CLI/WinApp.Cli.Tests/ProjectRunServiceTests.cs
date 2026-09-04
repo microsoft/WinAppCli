@@ -3002,7 +3002,16 @@ public class ProjectRunServiceTests
         string? evalArgs = null;
         var dotnet = new FakeDotNetService
         {
-            RunDotnetCommandHandler = a => { evalArgs = a; return (0, PackagedPropertiesJson(), string.Empty); },
+            RunDotnetCommandHandler = a =>
+            {
+                if (a.StartsWith("msbuild ", StringComparison.Ordinal))
+                {
+                    evalArgs = a;
+                }
+                return a == "--version"
+                    ? (0, "10.0.303", string.Empty)
+                    : (0, PackagedPropertiesJson(), string.Empty);
+            },
         };
         var service = NewServiceWith(dotnet, LogLevel.Information, out _);
         var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Json: false);

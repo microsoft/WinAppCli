@@ -4,7 +4,7 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
-using Spectre.Console.Testing;
+using Spectre.Console;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
@@ -41,7 +41,7 @@ public sealed class ProjectPublishServiceTests
         {
             _tempDirectory.Delete(recursive: true);
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // Best effort for test output held by a failed process.
         }
@@ -499,11 +499,15 @@ public sealed class ProjectPublishServiceTests
             RunDotnetArgumentListHandler = _ => (0, "publish succeeded", string.Empty),
         };
         var toolchain = new FakeWindowsNativeToolchainResolver();
+        var console = AnsiConsole.Create(new AnsiConsoleSettings
+        {
+            Out = new AnsiConsoleOutput(TextWriter.Null),
+        });
         var service = new ProjectRunService(
             dotnet,
             new ProjectDetectionService(NullLogger<ProjectDetectionService>.Instance, dotnet),
             new FakeCsWinRTMetadataShimService(),
-            new TestConsole(),
+            console,
             NullLogger<ProjectRunService>.Instance,
             toolchain);
         return (service, dotnet, toolchain);
@@ -533,15 +537,15 @@ public sealed class ProjectPublishServiceTests
     private string CreateNativeAotPackages(string rid, string version)
     {
         var packageFolder = Path.Combine(_tempDirectory.FullName, "packages");
-        foreach (var packageId in new[]
+        foreach (var normalizedPackageId in new[]
                  {
                      $"Microsoft.NETCore.App.Runtime.NativeAOT.{rid}",
                      $"runtime.{rid}.Microsoft.DotNet.ILCompiler",
-                 })
+                 }.Select(packageId => packageId.ToLowerInvariant()))
         {
             var versionDirectory = Path.Combine(
                 packageFolder,
-                packageId.ToLowerInvariant(),
+                normalizedPackageId,
                 version);
             Directory.CreateDirectory(versionDirectory);
             File.WriteAllText(Path.Combine(versionDirectory, ".nupkg.metadata"), "{}");

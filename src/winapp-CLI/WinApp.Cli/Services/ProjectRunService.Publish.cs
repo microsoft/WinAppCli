@@ -91,7 +91,7 @@ internal sealed partial class ProjectRunService
             var restore = $"dotnet {BuildDryRunRestoreArguments(csproj, options, publishAot: false)}";
             return new ProjectPreparationOutcome(
                 null,
-                exitCode == 0 ? 1 : exitCode,
+                exitCode,
                 Executed: false,
                 Ready: null,
                 Reason: "RestoreRequired",

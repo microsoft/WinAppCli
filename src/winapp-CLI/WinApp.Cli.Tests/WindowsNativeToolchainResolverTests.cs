@@ -26,7 +26,7 @@ public sealed class WindowsNativeToolchainResolverTests
         {
             _tempDirectory.Delete(recursive: true);
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // Best effort for diagnostics held by a failed test.
         }
