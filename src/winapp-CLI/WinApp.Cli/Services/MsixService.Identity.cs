@@ -110,7 +110,20 @@ internal partial class MsixService
         return new MsixIdentityResult(debugIdentity.PackageName, debugIdentity.Publisher, debugIdentity.ApplicationId);
     }
 
-    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, bool clean = false, string? executable = null, string? runtimeArch = null, FileInfo? projectFile = null, string? framework = null, bool noRestore = false, CancellationToken cancellationToken = default)
+    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(
+        FileInfo appxManifestPath,
+        DirectoryInfo inputDirectory,
+        DirectoryInfo outputAppXDirectory,
+        TaskContext taskContext,
+        bool clean = false,
+        string? executable = null,
+        string? runtimeArch = null,
+        FileInfo? projectFile = null,
+        string? framework = null,
+        bool noRestore = false,
+        bool windowsAppSdkSelfContained = false,
+        bool requireExactRuntimeDependency = false,
+        CancellationToken cancellationToken = default)
     {
         // Validate inputs
         if (!appxManifestPath.Exists)
@@ -167,13 +180,34 @@ internal partial class MsixService
             // (which always restores) and packaged project mode (which honors the run's --no-restore), so
             // thread the caller's setting through instead of forcing a restore during discovery.
             var msbuildPackageList = await ResolveDotNetPackageListAsync(projectFile, framework, noRestore, cancellationToken);
-            await EnsureWindowsAppRuntimeInstalledAsync(msbuildPackageList, runtimeArch, taskContext, cancellationToken);
 
             // Resolve the manifest that would be registered (issue #537 / TrySkipRegistration).
             // ManifestHelper.FindManifest already probes both canonical filenames; if it
             // returns a non-existent FileInfo, downstream RegisterLooseLayoutPackageAsync
             // will surface the missing-manifest error.
             var registrationManifest = ManifestHelper.FindManifest(outputAppXDirectory.FullName);
+
+            if (windowsAppSdkSelfContained)
+            {
+               ValidateSelfContainedManifest(registrationManifest);
+            }
+            else if (requireExactRuntimeDependency)
+            {
+               await EnsureFrameworkDependentPublishRuntimeAsync(
+                   msbuildPackageList,
+                   runtimeArch,
+                   registrationManifest,
+                   taskContext,
+                   cancellationToken);
+            }
+            else
+            {
+               await EnsureWindowsAppRuntimeInstalledAsync(
+                   msbuildPackageList,
+                   runtimeArch,
+                   taskContext,
+                   cancellationToken);
+            }
 
             var skipResult = TrySkipRegistration(
                 identity.PackageName, identity.Publisher, identity.ApplicationId,
@@ -281,7 +315,7 @@ internal partial class MsixService
         // ProcessorArchitecture auto-detection, and build metadata
         (manifestContent, _) = await UpdateAppxManifestContentAsync(
             manifestContent, null, null, executableMatch.FullName,
-            sparse: false, selfContained: false,
+            sparse: false, selfContained: windowsAppSdkSelfContained,
             dotNetPackageList, taskContext, cancellationToken);
 
         await File.WriteAllTextAsync(copiedAppxManifestPath.FullName, manifestContent, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
@@ -302,8 +336,27 @@ internal partial class MsixService
         {
             var identity = ParseAppxManifestAsync(manifestContent);
 
-            // Install the Windows App Runtime framework packages if not already present
-            await EnsureWindowsAppRuntimeInstalledAsync(dotNetPackageList, runtimeArch, taskContext, cancellationToken);
+            if (windowsAppSdkSelfContained)
+            {
+                ValidateSelfContainedManifest(copiedAppxManifestPath);
+            }
+            else if (requireExactRuntimeDependency)
+            {
+                await EnsureFrameworkDependentPublishRuntimeAsync(
+                    dotNetPackageList,
+                    runtimeArch,
+                    copiedAppxManifestPath,
+                    taskContext,
+                    cancellationToken);
+            }
+            else
+            {
+                await EnsureWindowsAppRuntimeInstalledAsync(
+                    dotNetPackageList,
+                    runtimeArch,
+                    taskContext,
+                    cancellationToken);
+            }
 
             // See MSBuild branch above for the rationale (issue #537).
             var skipResult = TrySkipRegistration(
@@ -323,6 +376,95 @@ internal partial class MsixService
 
             return new MsixIdentityResult(identity.PackageName, identity.Publisher, identity.ApplicationId);
         }
+    }
+
+    private async Task EnsureFrameworkDependentPublishRuntimeAsync(
+       DotNetPackageListJson? packageList,
+       string? runtimeArch,
+       FileInfo registrationManifest,
+       TaskContext taskContext,
+       CancellationToken cancellationToken)
+    {
+       if (packageList is null)
+       {
+           throw new InvalidOperationException(
+               "The packaged publish is framework-dependent, but the restored Windows App SDK package graph could not be resolved. " +
+               "Run 'dotnet restore' for the selected runtime and retry, or publish with WindowsAppSDKSelfContained=true.");
+       }
+
+       if (!ReferencesWindowsAppSdk(packageList))
+       {
+           taskContext.AddDebugMessage(
+               $"{UiSymbols.Note} No Windows App SDK reference found; no Microsoft.WindowsAppRuntime package dependency is required.");
+           return;
+       }
+
+       var manifestContent = await File.ReadAllTextAsync(
+           registrationManifest.FullName,
+           Encoding.UTF8,
+           cancellationToken);
+       var updatedManifest = await UpdateWindowsAppSdkDependencyAsync(
+           manifestContent,
+           packageList,
+           taskContext,
+           cancellationToken);
+
+       var updatedDocument = AppxManifestDocument.Parse(updatedManifest);
+       var hasRuntimeDependency = updatedDocument.Document
+           .Descendants(AppxManifestDocument.DefaultNs + "PackageDependency")
+           .Any(element => element.Attribute("Name")?.Value
+               ?.StartsWith("Microsoft.WindowsAppRuntime.", StringComparison.OrdinalIgnoreCase) == true);
+       if (!hasRuntimeDependency)
+       {
+           throw new InvalidOperationException(
+               "The packaged publish depends on the Windows App SDK, but the Microsoft.WindowsAppRuntime package dependency could not be resolved. " +
+               "Restore the project for the selected runtime and retry, or publish with WindowsAppSDKSelfContained=true.");
+       }
+
+       if (!string.Equals(updatedManifest, manifestContent, StringComparison.Ordinal))
+       {
+           await File.WriteAllTextAsync(
+               registrationManifest.FullName,
+               updatedManifest,
+               new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+               cancellationToken);
+       }
+
+       var expectedRuntimePackages = await EnsureWindowsAppRuntimeInstalledAsync(
+           packageList,
+           runtimeArch,
+           taskContext,
+           cancellationToken,
+           requireExactVersion: true);
+       if (expectedRuntimePackages.Count == 0)
+       {
+           throw new InvalidOperationException(
+               "The exact Windows App Runtime required by this packaged publish could not be located. " +
+               "Restore the project for the selected runtime and retry, install that runtime manually, or publish with WindowsAppSDKSelfContained=true.");
+       }
+
+       if (!windowsAppRuntimeService.IsWindowsAppRuntimeRegistered(runtimeArch, expectedRuntimePackages))
+       {
+           var arch = runtimeArch ?? WorkspaceSetupService.GetSystemArchitecture();
+           throw new InvalidOperationException(
+               $"The exact Windows App Runtime required by this packaged publish is not registered for '{arch}'. " +
+               "Install the matching Framework and DDLM packages, or publish with WindowsAppSDKSelfContained=true.");
+       }
+    }
+
+    private static void ValidateSelfContainedManifest(FileInfo registrationManifest)
+    {
+       var document = AppxManifestDocument.Load(registrationManifest.FullName);
+       var runtimeDependency = document.Document
+           .Descendants(AppxManifestDocument.DefaultNs + "PackageDependency")
+           .FirstOrDefault(element => element.Attribute("Name")?.Value
+               ?.StartsWith("Microsoft.WindowsAppRuntime.", StringComparison.OrdinalIgnoreCase) == true);
+       if (runtimeDependency is not null)
+       {
+           throw new InvalidOperationException(
+               "The project evaluated WindowsAppSDKSelfContained=true, but the generated manifest still declares a Microsoft.WindowsAppRuntime framework dependency. " +
+               "Clean and republish the project so its deployment mode and manifest agree.");
+       }
     }
 
     /// <summary>

@@ -1864,7 +1864,7 @@
       }
     },
     "run": {
-      "description": "Builds and runs a Windows app from a .csproj/.sln or a build-output folder. In project mode, invokes dotnet build then launches the app (packaged or unpackaged); in folder mode, creates a debug-signed layout, registers the package, and launches it.",
+      "description": "Builds or publishes and runs a Windows app from a .csproj/.sln, or runs a build-output folder. Project mode launches packaged or unpackaged output; folder mode creates a debug-signed layout, registers it, and launches it.",
       "hidden": false,
       "arguments": {
         "input": {
@@ -1969,6 +1969,19 @@
           "required": false,
           "recursive": false
         },
+        "--dry-run": {
+          "description": "Project mode: evaluate and validate the selected build or publish plan without building, publishing, registering, or launching.",
+          "hidden": false,
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
         "--executable": {
           "description": "Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder.",
           "hidden": false,
@@ -2025,7 +2038,7 @@
           "recursive": false
         },
         "--no-build": {
-          "description": "Project mode: skip building and run the existing build output (still evaluates output properties). Ignored in folder mode.",
+          "description": "Project mode: without --publish, skip dotnet build and run existing TargetDir output; with --publish, pass --no-build to dotnet publish.",
           "hidden": false,
           "valueType": "System.Boolean",
           "hasDefaultValue": true,
@@ -2051,7 +2064,7 @@
           "recursive": false
         },
         "--no-restore": {
-          "description": "Project mode: skip restoring the project before building. Ignored in folder mode.",
+          "description": "Project mode: skip restoring during dotnet build or dotnet publish.",
           "hidden": false,
           "valueType": "System.Boolean",
           "hasDefaultValue": true,
@@ -2097,6 +2110,19 @@
           "hasDefaultValue": false,
           "arity": {
             "minimum": 0
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--publish": {
+          "description": "Project mode: run dotnet publish and launch the exact evaluated PublishDir artifact instead of build output.",
+          "hidden": false,
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
           },
           "required": false,
           "recursive": false
@@ -2164,6 +2190,19 @@
           "aliases": [
             "-v"
           ],
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--verify-native-aot": {
+          "description": "Project mode: implies --publish and fails unless the published payload and running process are verified as Native AOT.",
+          "hidden": false,
           "valueType": "System.Boolean",
           "hasDefaultValue": true,
           "defaultValue": false,

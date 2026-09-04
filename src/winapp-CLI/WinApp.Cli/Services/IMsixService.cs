@@ -91,6 +91,8 @@ internal interface IMsixService
         FileInfo? projectFile = null,
         string? framework = null,
         bool noRestore = false,
+        bool windowsAppSdkSelfContained = false,
+        bool requireExactRuntimeDependency = false,
         CancellationToken cancellationToken = default);
 
     /// <summary>

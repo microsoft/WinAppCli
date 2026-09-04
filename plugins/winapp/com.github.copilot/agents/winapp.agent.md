@@ -189,7 +189,10 @@ Building a WinUI 3 UI and need to find the right control or a working sample?
 - `-r, --runtime <rid>` — (project mode) target .NET RID (e.g. `win-x64`); **only the RID's architecture is used** — project mode reduces it and always builds the canonical `win-<arch>` RID, so a version-specific or non-Windows RID is not forwarded (a non-Windows RID like `linux-x64` is rejected). Overrides `--arch`.
 - `-f, --framework <tfm>` — (project mode) target framework for multi-targeted projects
 - `--project <name-or-path>` — (project mode) select which project to launch when a solution/directory has multiple runnable app projects (errors listing candidates if ambiguous)
-- `--no-build` / `--no-restore` — (project mode) skip build / restore
+- `--publish` — (project mode) run `dotnet publish` and launch the evaluated `PublishDir`
+- `--verify-native-aot` — (project mode) imply `--publish` and enforce AOT settings, payload, startup, module, and process-provenance checks
+- `--dry-run` — (project mode) validate the build/publish plan and native toolchain without restoring, building, publishing, registering, or launching
+- `--no-build` / `--no-restore` — (project mode) skip build / restore; with `--publish`, `--no-build` is forwarded to `dotnet publish --no-build`
 - `-p, --property <Name=Value>` — (project mode) MSBuild property forwarded to build + evaluation; repeatable (e.g. `-p WindowsPackageType=None`)
 - `--debug-output` — capture `OutputDebugString` messages and first-chance exceptions (prevents other debuggers like VS/VS Code from attaching). For WinUI apps it also auto-runs a stowed-exception (`0xC000027B`) triage pass (`!xamlstowed`/`!xamltriage`) that recovers the originating HRESULT and native XAML dispatch stack. The first triage run downloads debugger components (engine bits from NuGet + `JsProvider.dll` from the WinDbg CDN) and caches them under `~\.winapp\dbgtools\`; if downloads are blocked, install Debugging Tools for Windows or point `WINAPP_DBGTOOLS_DIR` at a debugger directory containing `dbgeng.dll` and `JsProvider.dll`.
 - `--symbols` — with `--debug-output`, download Microsoft public symbols for richer native crash stacks (first run downloads and caches them)

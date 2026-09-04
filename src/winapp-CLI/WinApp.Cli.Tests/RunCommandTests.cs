@@ -400,6 +400,9 @@ public class RunCommandTests : BaseCommandTests
         Assert.AreEqual("TestPackage_fakefamily!TestApp", json.GetProperty("AUMID").GetString());
         Assert.IsFalse(json.TryGetProperty("ProcessId", out _), "ProcessId should not be present in no-launch mode");
         Assert.IsFalse(json.TryGetProperty("Error", out _), "Error should not be present on success");
+       Assert.IsFalse(json.TryGetProperty("SchemaVersion", out _), "Folder-mode JSON must retain its existing shape");
+       Assert.IsFalse(json.TryGetProperty("Operation", out _), "Project provenance fields are project-mode only");
+       Assert.IsFalse(json.TryGetProperty("Ready", out _), "Project readiness fields are project-mode only");
     }
 
     [TestMethod]
@@ -516,6 +519,7 @@ public class RunCommandTests : BaseCommandTests
             GetRequiredService<IAnsiConsole>(),
             GetRequiredService<IStatusService>(),
             GetRequiredService<IProjectRunService>(),
+            GetRequiredService<INativeAotVerifier>(),
             GetRequiredService<IProjectContextDetector>(),
             GetRequiredService<ILogger<RunCommand>>());
 

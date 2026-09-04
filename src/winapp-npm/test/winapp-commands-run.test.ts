@@ -88,6 +88,32 @@ test('run accepts a single scalar --property value', async () => {
   assert.equal(argv.indexOf('--'), -1, 'no passthrough separator without appArgs');
 });
 
+test('run forwards publish, Native AOT verification, and dry-run flags', async () => {
+  const state = captureSpawnArgs();
+
+  await run({
+    input: './App.csproj',
+    publish: true,
+    verifyNativeAot: true,
+    dryRun: true,
+    noBuild: true,
+  });
+
+  const argv = state.calls[0];
+  assert.deepEqual(
+    argv,
+    [
+      'run',
+      './App.csproj',
+      '--dry-run',
+      '--no-build',
+      '--publish',
+      '--verify-native-aot',
+    ],
+    'the generated TypeScript wrapper should expose every project publish flag'
+  );
+});
+
 test('run forwards the canonical `input` property as the first positional', async () => {
   const state = captureSpawnArgs();
 

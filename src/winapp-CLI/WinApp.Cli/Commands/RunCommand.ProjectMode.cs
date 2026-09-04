@@ -30,6 +30,24 @@ internal partial class RunCommand
             return 1;
         }
 
+        private static string NativeAotRuntimeErrorCode(
+           NativeAotRuntimeVerification verification)
+        {
+           if (!verification.Alive)
+           {
+               return "ProcessExitedDuringVerification";
+           }
+           if (!verification.RuntimeModules)
+           {
+               return "ManagedRuntimeModulesDetected";
+           }
+           if (!verification.ProcessProvenance)
+           {
+               return "ProcessProvenanceMismatch";
+           }
+           return "NativeAotVerificationFailed";
+        }
+
         /// <summary>
         /// Collects the launch/identity options that are only valid for a packaged (MSIX) app and so
         /// must be rejected for an unpackaged one. Shared by the pre-build fast-fail in
@@ -98,6 +116,12 @@ internal partial class RunCommand
             var runtimeOption = parseResult.GetValue(RuntimeOption);
             var noBuild = parseResult.GetValue(NoBuildOption);
             var noRestore = parseResult.GetValue(NoRestoreOption);
+            var verifyNativeAot = parseResult.GetValue(VerifyNativeAotOption);
+            var publish = parseResult.GetValue(PublishOption) || verifyNativeAot;
+            var dryRun = parseResult.GetValue(DryRunOption);
+            var operation = publish
+               ? ProjectPreparationOperation.Publish
+               : ProjectPreparationOperation.Build;
             var properties = parseResult.GetValue(PropertyOption) ?? [];
 
             // Resolve the explicit effective framework ONCE (--framework > bare -p:TargetFramework) so the
@@ -144,6 +168,21 @@ internal partial class RunCommand
             var manifest = parseResult.GetValue(ManifestOption);
             var outputAppXDirectory = parseResult.GetValue(OutputAppXDirectoryOption);
 
+            if (verifyNativeAot && noLaunch)
+            {
+               return Fail("--verify-native-aot cannot be combined with --no-launch because runtime verification requires a launched process.", isJson);
+            }
+
+            if (verifyNativeAot && withAlias)
+            {
+               return Fail("--verify-native-aot cannot be combined with --with-alias; packaged verification requires AUMID activation from the registered staging layout.", isJson);
+            }
+
+            if (verifyNativeAot && debugOutput)
+            {
+               return Fail("--verify-native-aot cannot be combined with --debug-output because only one startup inspection workflow can own the process.", isJson);
+            }
+
             // Resolve the target architecture: --runtime's arch beats --arch; else the process arch.
             if (!TryResolveArchitecture(archOption, runtimeOption, out var architecture, out var archError))
             {
@@ -156,7 +195,21 @@ internal partial class RunCommand
             // (stdout must stay pure) and --quiet (Information off).
             if (!isJson && logger.IsEnabled(LogLevel.Information))
             {
-                var context = new StringBuilder($"{csproj.Name}  ·  {configuration} | {architecture}");
+               if (dryRun)
+               {
+                   var planName = verifyNativeAot
+                       ? "Native AOT publish plan"
+                       : publish
+                           ? "Publish run plan"
+                           : "Build run plan";
+                   ansiConsole.MarkupLineInterpolated($"{UiSymbols.Search} {planName}");
+               }
+               else if (publish)
+               {
+                   ansiConsole.MarkupLineInterpolated($"{UiSymbols.Wrench} Publishing {csproj.Name}");
+               }
+
+               var context = new StringBuilder($"{csproj.Name}  ·  {configuration} | {RunArchHelper.ToRuntimeIdentifier(architecture)}");
                 if (solution != null)
                 {
                     context.Append($"  ·  {solution.Name}");
@@ -167,7 +220,7 @@ internal partial class RunCommand
                     context.Append($" ({selectionReason})");
                 }
 
-                ansiConsole.MarkupLineInterpolated($"{UiSymbols.Search} {context}");
+               ansiConsole.MarkupLineInterpolated($"  {context}");
             }
 
             // A capable SDK (≥ 8.0.100) is required for MSBuild --getProperty.
@@ -181,14 +234,24 @@ internal partial class RunCommand
             // Build (unless --no-build) and resolve the output properties. ProjectRunService owns the build
             // UX: it streams dotnet's output live and prints the exact invocation; in --json/--quiet mode it
             // routes both to stderr to keep stdout pure.
-            var buildOptions = new ProjectRunOptions(configuration, architecture, framework, noBuild, noRestore, properties, isJson, solution);
+            var buildOptions = new ProjectRunOptions(
+                configuration,
+                architecture,
+                framework,
+                noBuild,
+                noRestore,
+                properties,
+                isJson,
+                solution,
+                DryRun: dryRun,
+                VerifyNativeAot: verifyNativeAot);
 
             // Fail fast (issue #676): identity-only options like --no-launch are meaningless for an
             // unpackaged app but are only rejected authoritatively AFTER packaging is known (post-build).
             // Cheaply evaluate WindowsPackageType first and reject now when the project is DEFINITIVELY
             // unpackaged, so the user doesn't pay the full build cost only to be rejected. Skipped under
             // --no-build (no build cost to save).
-            if (!noBuild)
+            if (!dryRun && (operation == ProjectPreparationOperation.Publish || !noBuild))
             {
                 var incompatible = CollectUnpackagedIncompatibleOptions(noLaunch, withAlias, unregisterOnExit, clean, manifest, outputAppXDirectory, executable);
                 if (incompatible.Count > 0
@@ -198,38 +261,285 @@ internal partial class RunCommand
                 }
             }
 
-            ProjectBuildOutcome outcome;
+            ProjectPreparationOutcome outcome;
             try
             {
-                outcome = await projectRunService.BuildAndResolveAsync(csproj, buildOptions, cancellationToken);
+               outcome = await projectRunService.PrepareAndResolveAsync(
+                   csproj,
+                   buildOptions,
+                   operation,
+                   cancellationToken);
             }
             catch (ProjectRunException ex)
             {
                 return Fail(ex.Message, isJson);
             }
 
-            if (outcome.Resolution is null)
+           var report = CreateProjectReport(
+               csproj,
+               buildOptions,
+               operation,
+               outcome);
+
+           if (outcome.Resolution is null)
             {
-                // Build failed — dotnet already surfaced its diagnostics. Propagate its exit code.
                 var code = outcome.ExitCode == 0 ? 1 : outcome.ExitCode;
                 if (isJson)
                 {
-                    PrintJson(aumid: null, processId: null, $"Build failed (exit code {code}).");
+                   PrintJson(report);
+               }
+               else if (!string.IsNullOrWhiteSpace(outcome.Error))
+               {
+                   logger.LogError("{UISymbol} {Message}", UiSymbols.Error, outcome.Error);
+                   PrintSuggestedCommand(outcome.SuggestedCommand);
                 }
                 return code;
             }
 
             var resolution = outcome.Resolution;
+           PopulatePreparationReport(report, resolution, outcome);
+
+           if (dryRun)
+           {
+              if (resolution.Packaging == ProjectPackaging.Unpackaged)
+              {
+                  var rejected = CollectUnpackagedIncompatibleOptions(
+                      noLaunch,
+                      withAlias,
+                      unregisterOnExit,
+                      clean,
+                      manifest,
+                      outputAppXDirectory,
+                      executable);
+                  if (rejected.Count > 0)
+                  {
+                      report.Ready = false;
+                      report.ErrorCode = "InvalidUnpackagedOption";
+                      report.Error = BuildUnpackagedIncompatibleMessage(rejected, csproj.Name);
+                      if (isJson)
+                      {
+                          PrintJson(report);
+                      }
+                      else
+                      {
+                          logger.LogError("{UISymbol} {Message}", UiSymbols.Error, report.Error);
+                      }
+                      return 1;
+                  }
+              }
+
+               if (isJson)
+               {
+                   PrintJson(report);
+               }
+               else
+               {
+                   if (logger.IsEnabled(LogLevel.Information))
+                   {
+                       PrintDryRunResult(report);
+                   }
+               }
+               return outcome.Ready == true ? 0 : outcome.ExitCode == 0 ? 1 : outcome.ExitCode;
+           }
+
+           NativeAotStaticVerification? staticVerification = null;
+           if (verifyNativeAot)
+           {
+               staticVerification = nativeAotVerifier.VerifyPayload(
+                   new DirectoryInfo(resolution.PublishDirectory!),
+                   new FileInfo(resolution.SourceExecutable!),
+                   resolution.Packaging == ProjectPackaging.Packaged
+                      ? outputAppXDirectory ??
+                          new DirectoryInfo(Path.Combine(resolution.PublishDirectory!, "AppX"))
+                      : null);
+               report.Verification = new RunVerificationResult
+               {
+                   StaticPayload = staticVerification.Succeeded,
+               };
+
+               if (!staticVerification.Succeeded)
+               {
+                   report.ErrorCode = staticVerification.ForbiddenFiles.Count > 0
+                       ? "ManagedRuntimePayloadDetected"
+                       : "NativeAotPayloadInspectionFailed";
+                   report.Error = staticVerification.Error ??
+                       $"Native AOT payload verification failed. Forbidden files: {string.Join(", ", staticVerification.ForbiddenFiles)}";
+                   report.NativeAotVerified = false;
+                   if (isJson)
+                   {
+                       PrintJson(report);
+                   }
+                   else
+                   {
+                       logger.LogError("{UISymbol} {Message}", UiSymbols.Error, report.Error);
+                   }
+                   return 1;
+               }
+           }
 
             return resolution.Packaging == ProjectPackaging.Packaged
                 ? await RunPackagedProjectAsync(
                     resolution, csproj, manifest, outputAppXDirectory, appArgs,
                     noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, noBuild, isJson,
+                   report, verifyNativeAot, staticVerification,
                     cancellationToken)
                 : await RunUnpackagedProjectAsync(
                     resolution, csproj, appArgs,
                     noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, manifest, outputAppXDirectory, isJson,
+                   report, verifyNativeAot, staticVerification,
                     cancellationToken);
+        }
+
+        private static ProjectRunCommandResult CreateProjectReport(
+           FileInfo csproj,
+           ProjectRunOptions options,
+           ProjectPreparationOperation operation,
+           ProjectPreparationOutcome outcome) =>
+           new()
+           {
+               SchemaVersion = 1,
+               Operation = options.DryRun ? "DryRun" : operation.ToString(),
+               Executed = outcome.Executed,
+               Ready = outcome.Ready,
+               Reason = outcome.Reason,
+               SuggestedCommand = outcome.SuggestedCommand,
+               Configuration = options.Configuration,
+               RuntimeIdentifier = RunArchHelper.ToRuntimeIdentifier(options.Architecture),
+               Architecture = options.Architecture,
+               Platform = options.Platform ?? options.Architecture,
+               ProjectPath = csproj.FullName,
+               ErrorCode = outcome.ErrorCode,
+               Error = outcome.Error,
+           };
+
+        private static void PopulatePreparationReport(
+           ProjectRunCommandResult report,
+           ProjectRunResolution resolution,
+           ProjectPreparationOutcome outcome)
+        {
+           report.Executed = outcome.Executed;
+           report.Ready = outcome.Ready;
+           report.Reason = outcome.Reason;
+           report.SuggestedCommand = outcome.SuggestedCommand;
+           report.RuntimeIdentifier = resolution.RuntimeIdentifier ?? report.RuntimeIdentifier;
+           report.Platform = resolution.EvaluatedPlatform ?? report.Platform;
+           report.PublishAot = resolution.Operation == ProjectPreparationOperation.Publish
+               ? resolution.PublishAot
+               : null;
+           report.PublishDirectory = resolution.PublishDirectory;
+           report.SourceExecutable = resolution.SourceExecutable;
+           report.Packaging = resolution.Packaging.ToString();
+           report.DotnetSdk = resolution.DotnetSdk;
+           report.ErrorCode = outcome.ErrorCode;
+           report.Error = outcome.Error;
+
+           if (resolution.NativeToolchain is { } toolchain)
+           {
+               report.VisualStudio = toolchain.VisualStudioVersion;
+               report.Msvc = toolchain.VcToolsVersion;
+               report.Linker = toolchain.LinkerPath;
+               report.WindowsSdk = toolchain.WindowsSdkVersion;
+           }
+        }
+
+        private void PrintDryRunResult(ProjectRunCommandResult report)
+        {
+           ansiConsole.MarkupLineInterpolated($"  Project:       {report.ProjectPath}");
+           ansiConsole.MarkupLineInterpolated($"  Configuration: {report.Configuration}");
+           ansiConsole.MarkupLineInterpolated($"  Runtime:       {report.RuntimeIdentifier}");
+           if (!string.IsNullOrWhiteSpace(report.Packaging))
+           {
+               ansiConsole.MarkupLineInterpolated($"  Packaging:     {report.Packaging}");
+           }
+           if (!string.IsNullOrWhiteSpace(report.PublishDirectory))
+           {
+               ansiConsole.MarkupLineInterpolated($"  PublishDir:    {report.PublishDirectory}");
+           }
+
+           ansiConsole.WriteLine();
+           if (report.Ready == true)
+           {
+               ansiConsole.MarkupLineInterpolated(
+                   $"{UiSymbols.Check} Ready. No restore, build, publish, registration, or launch was performed.");
+               return;
+           }
+
+           if (report.Ready is null)
+           {
+               ansiConsole.MarkupLineInterpolated(
+                   $"{UiSymbols.Warning} Readiness is indeterminate ({report.Reason ?? "RestoreRequired"}). No mutating operation was performed.");
+           }
+           else
+           {
+               ansiConsole.MarkupLineInterpolated(
+                   $"{UiSymbols.Error} The execution plan is not ready.");
+           }
+
+           if (!string.IsNullOrWhiteSpace(report.Error))
+           {
+               ansiConsole.MarkupLineInterpolated($"  {report.Error}");
+           }
+           PrintSuggestedCommand(report.SuggestedCommand);
+        }
+
+        private void PrintSuggestedCommand(string? suggestedCommand)
+        {
+           if (string.IsNullOrWhiteSpace(suggestedCommand))
+           {
+               return;
+           }
+
+           ansiConsole.WriteLine();
+           ansiConsole.MarkupLine("Run:");
+           ansiConsole.MarkupLineInterpolated($"  {suggestedCommand}");
+        }
+
+        private static void PopulateRuntimeVerificationReport(
+           ProjectRunCommandResult report,
+           NativeAotStaticVerification? staticVerification,
+           NativeAotRuntimeVerification runtimeVerification)
+        {
+           report.Alive = runtimeVerification.Alive;
+           report.ProcessPath = runtimeVerification.ProcessPath;
+           report.MainWindowHandle = runtimeVerification.MainWindowHandle;
+           report.MainWindowTitle = runtimeVerification.MainWindowTitle;
+           report.NativeAotVerified = runtimeVerification.Succeeded &&
+               staticVerification?.Succeeded == true;
+           report.Verification ??= new RunVerificationResult();
+           report.Verification.StaticPayload = staticVerification?.Succeeded == true;
+           report.Verification.RuntimeModules = runtimeVerification.RuntimeModules;
+           report.Verification.ProcessProvenance = runtimeVerification.ProcessProvenance;
+           report.Verification.PackageRegistration = runtimeVerification.PackageRegistration;
+           report.Details = runtimeVerification.LoadedModules.Count == 0
+               ? null
+               : $"Loaded modules: {string.Join(", ", runtimeVerification.LoadedModules)}";
+        }
+
+        private void PrintNativeAotVerificationSuccess(ProjectRunCommandResult report, bool isJson)
+        {
+           if (isJson || !logger.IsEnabled(LogLevel.Information))
+           {
+               return;
+           }
+
+           ansiConsole.MarkupLineInterpolated($"{UiSymbols.Search} Verifying Native AOT...");
+           ansiConsole.MarkupLineInterpolated($"  {UiSymbols.Check} Native AOT payload verified");
+           ansiConsole.MarkupLineInterpolated($"  {UiSymbols.Check} Running process loaded no CoreCLR or JIT modules");
+           ansiConsole.MarkupLineInterpolated($"  {UiSymbols.Check} Process originated from this invocation's published layout");
+        }
+
+        private void LogNativeAotVerification(NativeAotRuntimeVerification verification)
+        {
+           logger.LogDebug(
+              "{UISymbol} Native AOT verification: process={ProcessPath}; alive={Alive}; window={WindowHandle} '{WindowTitle}'; modules={Modules}",
+              UiSymbols.Note,
+              verification.ProcessPath ?? "(unavailable)",
+              verification.Alive,
+              verification.MainWindowHandle,
+              verification.MainWindowTitle,
+              verification.LoadedModules.Count == 0
+                  ? "(unavailable)"
+                  : string.Join(", ", verification.LoadedModules));
         }
 
         /// <summary>
@@ -253,29 +563,44 @@ internal partial class RunCommand
             string? executable,
             bool noBuild,
             bool isJson,
+           ProjectRunCommandResult report,
+           bool verifyNativeAot,
+           NativeAotStaticVerification? staticVerification,
             CancellationToken cancellationToken)
         {
-            var targetDir = new DirectoryInfo(resolution.TargetDir);
+           var outputDir = new DirectoryInfo(resolution.OutputDirectory);
+           var effectiveManifest = manifest ??
+               (string.IsNullOrWhiteSpace(resolution.FinalAppxManifestPath)
+                   ? null
+                   : new FileInfo(resolution.FinalAppxManifestPath));
 
             // Guardrail: packaged (per the evaluated WindowsPackageType) but no manifest in the
             // build output is a misconfiguration — surface it clearly instead of the generic
             // "manifest not found" from the shared pipeline (which would also probe the cwd).
-            if (manifest == null && !FindManifest(targetDir.FullName).Exists)
+           if (effectiveManifest == null && !FindManifest(outputDir.FullName).Exists)
             {
                 // Under --no-build the missing manifest most often means --no-build is pointing at a stale
                 // or unpackaged build output, not that the project is misconfigured — lead with that.
                 var message = noBuild
-                    ? $"'{csproj.Name}' resolves to a packaged (MSIX) app but no AppxManifest.xml was found in the build output ({targetDir.FullName}). " +
+                   ? $"'{csproj.Name}' resolves to a packaged (MSIX) app but no AppxManifest.xml was found in the selected output ({outputDir.FullName}). " +
                       "Remove --no-build to rebuild the packaged layout, or point the run at an up-to-date packaged build."
-                    : $"'{csproj.Name}' resolves to a packaged (MSIX) app but no AppxManifest.xml was found in the build output ({targetDir.FullName}). " +
+                   : $"'{csproj.Name}' resolves to a packaged (MSIX) app but no AppxManifest.xml was found in the selected output ({outputDir.FullName}). " +
                       "Ensure the project is a packaged WinUI app (EnableMsixTooling=true with a Package.appxmanifest), or force an unpackaged run with -p:WindowsPackageType=None.";
                 return Fail(message, isJson);
             }
 
             return await ExecuteRunPipelineAsync(
-                targetDir, manifest, outputAppXDirectory, appArgs,
+               outputDir, effectiveManifest, outputAppXDirectory, appArgs,
                 noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, isJson,
-                runtimeArch: resolution.Architecture, projectFile: csproj, framework: resolution.Framework, noRestore: resolution.NoRestore, cancellationToken);
+               runtimeArch: resolution.Architecture,
+               projectFile: csproj,
+               framework: resolution.Framework,
+               noRestore: resolution.NoRestore,
+               projectResolution: resolution,
+               projectReport: report,
+               verifyNativeAot: verifyNativeAot,
+               staticVerification: staticVerification,
+               cancellationToken);
         }
 
         /// <summary>
@@ -298,6 +623,9 @@ internal partial class RunCommand
             FileInfo? manifest,
             DirectoryInfo? outputAppXDirectory,
             bool isJson,
+            ProjectRunCommandResult report,
+            bool verifyNativeAot,
+            NativeAotStaticVerification? staticVerification,
             CancellationToken cancellationToken)
         {
             // AUTHORITATIVE gate — rejects packaged-only options once packaging is definitively known.
@@ -367,7 +695,9 @@ internal partial class RunCommand
                         var jsonError = string.IsNullOrWhiteSpace(runtimeErrorMessage)
                             ? "Failed to prepare the Windows App Runtime."
                             : $"Failed to prepare the Windows App Runtime: {runtimeErrorMessage}";
-                        PrintJson(aumid: null, processId: null, jsonError);
+                       report.ErrorCode = "WindowsAppRuntimeUnavailable";
+                       report.Error = jsonError;
+                       PrintJson(report);
                     }
                     return runtimeResult;
                 }
@@ -393,7 +723,9 @@ internal partial class RunCommand
                 logger.LogError("{UISymbol} Failed to launch '{Exe}': {Message}", UiSymbols.Error, exePath, detail);
                 if (isJson)
                 {
-                    PrintJson(aumid: null, processId: null, detail);
+                   report.ErrorCode = "LaunchFailed";
+                   report.Error = detail;
+                   PrintJson(report);
                 }
                 return 1;
             }
@@ -404,13 +736,50 @@ internal partial class RunCommand
             using (launched)
             {
                 var processId = launched.ProcessId;
+                report.ProcessId = processId;
+                report.ProcessPath = resolution.SourceExecutable ?? exePath;
+                report.Alive = true;
+
+                if (verifyNativeAot)
+                {
+                   var runtimeVerification = await nativeAotVerifier.VerifyRuntimeAsync(
+                       new NativeAotRuntimeVerificationRequest(
+                           processId,
+                           resolution.SourceExecutable ?? exePath,
+                           resolution.SourceExecutable ?? exePath,
+                           ProjectPackaging.Unpackaged),
+                       cancellationToken);
+                   PopulateRuntimeVerificationReport(
+                       report,
+                       staticVerification,
+                       runtimeVerification);
+                    LogNativeAotVerification(runtimeVerification);
+
+                   if (!runtimeVerification.Succeeded)
+                   {
+                       launched.Kill();
+                       report.ErrorCode = NativeAotRuntimeErrorCode(runtimeVerification);
+                       report.Error = runtimeVerification.Error ?? "Native AOT runtime verification failed.";
+                       if (isJson)
+                       {
+                           PrintJson(report);
+                       }
+                       else
+                       {
+                           logger.LogError("{UISymbol} {Message}", UiSymbols.Error, report.Error);
+                       }
+                       return 1;
+                   }
+
+                   PrintNativeAotVerificationSuccess(report, isJson);
+                }
 
                 // --detach: return immediately, surfacing the PID for automation.
                 if (detach)
                 {
                     if (isJson)
                     {
-                        PrintJson(aumid: null, processId, errorMessage: null);
+                       PrintJson(report);
                     }
                     else
                     {
@@ -421,7 +790,7 @@ internal partial class RunCommand
 
                 if (isJson)
                 {
-                    PrintJson(aumid: null, processId, errorMessage: null);
+                   PrintJson(report);
                 }
                 else if (logger.IsEnabled(LogLevel.Information))
                 {
@@ -436,7 +805,7 @@ internal partial class RunCommand
                 if (debugOutput)
                 {
                     var debugExit = await debugOutputService.RunDebugLoopAsync(processId, cancellationToken, useSymbols,
-                        symbolSearchPaths: [resolution.TargetDir]);
+                       symbolSearchPaths: [resolution.OutputDirectory]);
                     if (cancellationToken.IsCancellationRequested)
                     {
                         launched.Kill();

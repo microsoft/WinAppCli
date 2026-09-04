@@ -195,6 +195,9 @@ winapp run .
 
 # ...or run a specific project / configuration / architecture
 winapp run .\dotnet-app.csproj -c Debug --arch x64
+
+# Publish and run the exact PublishDir artifact
+winapp run .\dotnet-app.csproj --publish -c Release -r win-x64 --detach
 ```
 
 You can still point `winapp run` at a pre-built output folder if you prefer (folder mode):
@@ -205,6 +208,20 @@ winapp run .\bin\Debug\net10.0-windows10.0.26100.0
 ```
 
 Project mode supports both **packaged** and **unpackaged** WinUI apps — it detects which from the project's `WindowsPackageType` and installs the matching-architecture Windows App Runtime automatically. To force an unpackaged run of a packaged project, add `-p WindowsPackageType=None`.
+
+To enforce a Native AOT publish, set `PublishAot=true` in the project (or pass `-p PublishAot=true`) and run:
+
+```powershell
+winapp run .\dotnet-app.csproj --verify-native-aot -c Release -r win-x64 --detach
+```
+
+Before a long publish, check the project, restored Native AOT pack, MSVC linker, and Windows SDK without changing anything:
+
+```powershell
+winapp run .\dotnet-app.csproj --verify-native-aot -c Release -r win-x64 --dry-run
+```
+
+If the dry run says `RestoreRequired`, run the printed `dotnet restore` command and repeat it. Windows Native AOT supports `win-x64` and `win-arm64`; install Desktop development with C++ in Visual Studio Installer if WinApp reports a missing target-specific component. `--no-build` keeps .NET CLI semantics: it skips the build in normal mode, but with `--publish` it is forwarded to `dotnet publish --no-build`.
 
 **Multi-project apps** (an app referencing class libraries) build correctly: winapp negotiates each project reference's platform automatically, so referencing an `AnyCPU`/`netstandard2.0` library doesn't fail with `CS0006` "metadata file could not be found".
 

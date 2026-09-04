@@ -58,13 +58,14 @@ internal interface IProjectRunService
     Task<string?> CheckSdkAsync(DirectoryInfo workingDirectory, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Builds the project (unless <see cref="ProjectRunOptions.NoBuild"/>) and resolves the evaluated
-    /// MSBuild output properties, returning the packaging determination and launch paths.
+    /// Prepares the requested build or publish operation and resolves the evaluated MSBuild output
+    /// properties, returning the packaging determination and launch paths.
     /// </summary>
     /// <exception cref="ProjectRunException">Thrown on a guardrail violation (e.g. a non-executable project).</exception>
-    Task<ProjectBuildOutcome> BuildAndResolveAsync(
+    Task<ProjectPreparationOutcome> PrepareAndResolveAsync(
         FileInfo csproj,
         ProjectRunOptions options,
+        ProjectPreparationOperation operation,
         CancellationToken cancellationToken);
 
     /// <summary>

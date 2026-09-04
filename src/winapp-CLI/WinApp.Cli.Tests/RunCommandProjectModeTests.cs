@@ -20,6 +20,7 @@ public class RunCommandProjectModeTests : BaseCommandTests
     private FakeAppLauncherService _fakeAppLauncherService = null!;
     private FakeDebugOutputService _fakeDebugOutputService = null!;
     private FakeProjectRunService _fakeProjectRunService = null!;
+    private FakeNativeAotVerifier _fakeNativeAotVerifier = null!;
 
     private const string TestManifestContent = """
         <?xml version="1.0" encoding="utf-8"?>
@@ -55,11 +56,13 @@ public class RunCommandProjectModeTests : BaseCommandTests
         _fakeAppLauncherService = new FakeAppLauncherService();
         _fakeDebugOutputService = new FakeDebugOutputService();
         _fakeProjectRunService = new FakeProjectRunService();
+        _fakeNativeAotVerifier = new FakeNativeAotVerifier();
         return services
             .AddSingleton<IMsixService>(_fakeMsixService)
             .AddSingleton<IAppLauncherService>(_fakeAppLauncherService)
             .AddSingleton<IDebugOutputService>(_fakeDebugOutputService)
             .AddSingleton<IProjectRunService>(_fakeProjectRunService)
+            .AddSingleton<INativeAotVerifier>(_fakeNativeAotVerifier)
             .AddSingleton<INugetService, FakeNugetService>();
     }
 
@@ -116,6 +119,32 @@ public class RunCommandProjectModeTests : BaseCommandTests
     {
         _fakeProjectRunService.BuildOutcome = new ProjectBuildOutcome(
             new ProjectRunResolution(csproj, targetDir.FullName, null, ProjectPackaging.Packaged, false, arch), 0);
+    }
+
+    private void SetPublishOutcome(
+       FileInfo csproj,
+       DirectoryInfo publishDirectory,
+       ProjectPackaging packaging,
+       bool publishAot,
+       bool selfContained = true)
+    {
+       var executable = Path.Combine(publishDirectory.FullName, "App.exe");
+       File.WriteAllText(executable, "fixture");
+       _fakeProjectRunService.PreparationOutcome = new ProjectPreparationOutcome(
+           new ProjectRunResolution(
+               csproj,
+               publishDirectory.FullName,
+               executable,
+               packaging,
+               selfContained,
+               "x64",
+               Operation: ProjectPreparationOperation.Publish,
+               PublishDirectory: publishDirectory.FullName,
+               PublishAot: publishAot,
+               RuntimeIdentifier: "win-x64",
+               SourceExecutable: executable,
+               DotnetSdk: "10.0.303"),
+           0);
     }
 
     #region Unpackaged
@@ -703,6 +732,229 @@ public class RunCommandProjectModeTests : BaseCommandTests
         var doc = System.Text.Json.JsonDocument.Parse(output[jsonStart..(jsonEnd + 1)]);
         Assert.IsTrue(doc.RootElement.TryGetProperty("Error", out var error), "JSON must carry an 'Error' field");
         StringAssert.Contains(error.GetString(), "';'", "Error must explain the ';' packing is not allowed");
+    }
+
+    #endregion
+
+    #region Publish and Native AOT
+
+    [TestMethod]
+    public async Task ProjectMode_Publish_UsesPublishOperationAndLaunchesFromPublishDirectory()
+    {
+       var csproj = CreateCsproj();
+       var publishDirectory = CreateTargetDir(withManifest: false);
+       SetPublishOutcome(csproj, publishDirectory, ProjectPackaging.Unpackaged, publishAot: false);
+       var command = GetRequiredService<RunCommand>();
+
+       var exitCode = await ParseAndInvokeWithCaptureAsync(
+           command,
+           [csproj.FullName, "--publish", "--detach"]);
+
+       Assert.AreEqual(0, exitCode);
+       Assert.AreEqual(ProjectPreparationOperation.Publish, _fakeProjectRunService.PreparationOperations.Single());
+       Assert.AreEqual(
+           Path.Combine(publishDirectory.FullName, "App.exe"),
+           _fakeAppLauncherService.LaunchExecutableCalls.Single().ExePath);
+    }
+
+    [TestMethod]
+    public async Task ProjectMode_PublishNoBuild_ForwardsNoBuildWithoutSkippingPublishPreparation()
+    {
+       var csproj = CreateCsproj();
+       var publishDirectory = CreateTargetDir(withManifest: false);
+       SetPublishOutcome(csproj, publishDirectory, ProjectPackaging.Unpackaged, publishAot: false);
+       var command = GetRequiredService<RunCommand>();
+
+       var exitCode = await ParseAndInvokeWithCaptureAsync(
+           command,
+           [csproj.FullName, "--publish", "--no-build", "--detach"]);
+
+       Assert.AreEqual(0, exitCode);
+       Assert.AreEqual(1, _fakeProjectRunService.BuildAndResolveCalls.Count);
+       Assert.IsTrue(_fakeProjectRunService.BuildOptions.Single().NoBuild);
+       Assert.AreEqual(ProjectPreparationOperation.Publish, _fakeProjectRunService.PreparationOperations.Single());
+    }
+
+    [TestMethod]
+    public async Task ProjectMode_PackagedPublishStagesPublishDirWithEvaluatedGeneratedManifest()
+    {
+       var csproj = CreateCsproj();
+       var targetDirectory = CreateTargetDir(withManifest: true);
+       var publishDirectory = CreateTargetDir(withManifest: false);
+       var executable = Path.Combine(publishDirectory.FullName, "TestApp.exe");
+       File.WriteAllText(executable, "fixture");
+       var generatedManifest = Path.Combine(targetDirectory.FullName, "appxmanifest.xml");
+       _fakeProjectRunService.PreparationOutcome = new ProjectPreparationOutcome(
+           new ProjectRunResolution(
+               csproj,
+               targetDirectory.FullName,
+               null,
+               ProjectPackaging.Packaged,
+               SelfContained: false,
+               Architecture: "x64",
+               Operation: ProjectPreparationOperation.Publish,
+               PublishDirectory: publishDirectory.FullName,
+               PublishAot: false,
+               RuntimeIdentifier: "win-x64",
+               SourceExecutable: executable,
+               FinalAppxManifestPath: generatedManifest),
+           0);
+       var command = GetRequiredService<RunCommand>();
+
+       var exitCode = await ParseAndInvokeWithCaptureAsync(
+           command,
+           [csproj.FullName, "--publish", "--detach"]);
+
+       Assert.AreEqual(0, exitCode);
+       Assert.AreEqual(publishDirectory.FullName, _fakeMsixService.AddLooseLayoutInputDirectories.Single());
+       Assert.AreEqual(generatedManifest, _fakeMsixService.AddLooseLayoutCalls.Single().ManifestPath);
+       Assert.IsTrue(_fakeMsixService.AddLooseLayoutDeploymentCalls.Single().RequireExactRuntimeDependency);
+       Assert.IsFalse(_fakeMsixService.AddLooseLayoutDeploymentCalls.Single().SelfContained);
+    }
+
+    [TestMethod]
+    public async Task ProjectMode_DryRun_DoesNotPublishRegisterOrLaunch()
+    {
+       var csproj = CreateCsproj();
+       var publishDirectory = CreateTargetDir(withManifest: false);
+       SetPublishOutcome(csproj, publishDirectory, ProjectPackaging.Unpackaged, publishAot: false);
+       _fakeProjectRunService.PreparationOutcome =
+           _fakeProjectRunService.PreparationOutcome! with { Executed = false, Ready = true };
+       var command = GetRequiredService<RunCommand>();
+
+       var exitCode = await ParseAndInvokeWithCaptureAsync(
+           command,
+           [csproj.FullName, "--publish", "--dry-run"]);
+
+       Assert.AreEqual(0, exitCode);
+       Assert.IsTrue(_fakeProjectRunService.BuildOptions.Single().DryRun);
+       Assert.AreEqual(0, _fakeMsixService.AddLooseLayoutCalls.Count);
+       Assert.AreEqual(0, _fakeAppLauncherService.LaunchExecutableCalls.Count);
+       StringAssert.Contains(TestAnsiConsole.Output, "No restore, build, publish, registration, or launch");
+    }
+
+    [TestMethod]
+    public async Task ProjectMode_VerifyNativeAot_ImpliesPublishAndEmitsJsonProvenance()
+    {
+       var csproj = CreateCsproj();
+       var publishDirectory = CreateTargetDir(withManifest: false);
+       SetPublishOutcome(csproj, publishDirectory, ProjectPackaging.Unpackaged, publishAot: true);
+       var command = GetRequiredService<RunCommand>();
+
+       var exitCode = await ParseAndInvokeWithCaptureAsync(
+           command,
+           [csproj.FullName, "--verify-native-aot", "--detach", "--json"]);
+
+       Assert.AreEqual(0, exitCode);
+       Assert.AreEqual(ProjectPreparationOperation.Publish, _fakeProjectRunService.PreparationOperations.Single());
+       Assert.AreEqual(1, _fakeNativeAotVerifier.StaticCalls.Count);
+       Assert.AreEqual(1, _fakeNativeAotVerifier.RuntimeCalls.Count);
+
+       using var json = System.Text.Json.JsonDocument.Parse(TestAnsiConsole.Output);
+       var root = json.RootElement;
+       Assert.AreEqual("Publish", root.GetProperty("Operation").GetString());
+       Assert.AreEqual(publishDirectory.FullName, root.GetProperty("PublishDirectory").GetString());
+       Assert.AreEqual(
+           Path.Combine(publishDirectory.FullName, "App.exe"),
+           root.GetProperty("SourceExecutable").GetString());
+       Assert.IsTrue(root.GetProperty("NativeAotVerified").GetBoolean());
+       Assert.IsTrue(root.GetProperty("Verification").GetProperty("RuntimeModules").GetBoolean());
+       Assert.IsTrue(root.GetProperty("Verification").GetProperty("ProcessProvenance").GetBoolean());
+    }
+
+    [TestMethod]
+    public async Task ProjectMode_IndeterminateDryRun_EmitsReadyNullAndRestoreCommand()
+    {
+       var csproj = CreateCsproj();
+       _fakeProjectRunService.PreparationOutcome = new ProjectPreparationOutcome(
+           null,
+           1,
+           Executed: false,
+           Ready: null,
+           Reason: "RestoreRequired",
+           SuggestedCommand: $"dotnet restore {csproj.FullName} -r win-x64 -p:PublishAot=true",
+           ErrorCode: "RestoreRequired",
+           Error: "Restored Native AOT assets are unavailable.");
+       var command = GetRequiredService<RunCommand>();
+
+       var exitCode = await ParseAndInvokeWithCaptureAsync(
+           command,
+           [csproj.FullName, "--verify-native-aot", "--dry-run", "--json"]);
+
+       Assert.AreNotEqual(0, exitCode);
+       using var json = System.Text.Json.JsonDocument.Parse(TestAnsiConsole.Output);
+       var root = json.RootElement;
+       Assert.AreEqual(System.Text.Json.JsonValueKind.Null, root.GetProperty("Ready").ValueKind);
+       Assert.AreEqual("RestoreRequired", root.GetProperty("Reason").GetString());
+       StringAssert.Contains(root.GetProperty("SuggestedCommand").GetString(), "dotnet restore");
+    }
+
+    [TestMethod]
+    public async Task ProjectMode_VerifyNativeAot_RejectsJitPayloadBeforeLaunch()
+    {
+       var csproj = CreateCsproj();
+       var publishDirectory = CreateTargetDir(withManifest: false);
+       SetPublishOutcome(csproj, publishDirectory, ProjectPackaging.Unpackaged, publishAot: true);
+       _fakeNativeAotVerifier.StaticResult = new(
+           Succeeded: false,
+           ForbiddenFiles: [Path.Combine(publishDirectory.FullName, "App.dll")]);
+       var command = GetRequiredService<RunCommand>();
+
+       var exitCode = await ParseAndInvokeWithCaptureAsync(
+           command,
+           [csproj.FullName, "--verify-native-aot", "--detach"]);
+
+       Assert.AreNotEqual(0, exitCode);
+       Assert.AreEqual(0, _fakeAppLauncherService.LaunchExecutableCalls.Count);
+       StringAssert.Contains(ConsoleStdErr.ToString(), "Forbidden files");
+    }
+
+    [TestMethod]
+    public async Task ProjectMode_VerifyNativeAot_ProcessExitsDuringWindowFailsAndDoesNotCertify()
+    {
+       var csproj = CreateCsproj();
+       var publishDirectory = CreateTargetDir(withManifest: false);
+       SetPublishOutcome(csproj, publishDirectory, ProjectPackaging.Unpackaged, publishAot: true);
+       _fakeNativeAotVerifier.RuntimeResult = new NativeAotRuntimeVerification(
+           Succeeded: false,
+           Alive: false,
+           RuntimeModules: false,
+           ProcessProvenance: false,
+           PackageRegistration: null,
+           ProcessPath: null,
+           LoadedModules: [],
+           MainWindowHandle: 0,
+           MainWindowTitle: string.Empty,
+           Error: "The app exited before Native AOT verification completed.");
+       var command = GetRequiredService<RunCommand>();
+
+       var exitCode = await ParseAndInvokeWithCaptureAsync(
+           command,
+           [csproj.FullName, "--verify-native-aot", "--detach", "--json"]);
+
+       Assert.AreNotEqual(0, exitCode);
+       Assert.IsNotNull(_fakeAppLauncherService.LastLaunchedProcess);
+       Assert.IsTrue(_fakeAppLauncherService.LastLaunchedProcess!.Killed);
+       using var json = System.Text.Json.JsonDocument.Parse(TestAnsiConsole.Output);
+       Assert.IsFalse(json.RootElement.GetProperty("NativeAotVerified").GetBoolean());
+       Assert.AreEqual(
+           "ProcessExitedDuringVerification",
+           json.RootElement.GetProperty("ErrorCode").GetString());
+    }
+
+    [TestMethod]
+    public async Task FolderMode_RejectsProjectOnlyPublishOptions()
+    {
+       File.WriteAllText(Path.Combine(_tempDirectory.FullName, "appxmanifest.xml"), TestManifestContent);
+       var command = GetRequiredService<RunCommand>();
+
+       var exitCode = await ParseAndInvokeWithCaptureAsync(
+           command,
+           [_tempDirectory.FullName, "--publish"]);
+
+       Assert.AreEqual(1, exitCode);
+       Assert.AreEqual(0, _fakeMsixService.AddLooseLayoutCalls.Count);
+       StringAssert.Contains(ConsoleStdErr.ToString(), "can only be used");
     }
 
     #endregion

@@ -507,6 +507,68 @@ public class MsixServiceIdentityTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task AddLooseLayoutIdentityAsync_FrameworkDependentPublishFailsWhenRuntimeDependencyCannotResolve()
+    {
+       var srcDir = _tempDirectory.CreateSubdirectory("publish-output");
+       var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "AppxManifest.xml"));
+       await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+       await File.WriteAllTextAsync(
+           Path.Combine(srcDir.FullName, "TestApp.exe"),
+           "exe",
+           TestContext.CancellationToken);
+       var output = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "layout"));
+
+       var error = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
+           _msixService.AddLooseLayoutIdentityAsync(
+               srcManifest,
+               srcDir,
+               output,
+               TestTaskContext,
+               projectFile: new FileInfo(Path.Combine(srcDir.FullName, "App.csproj")),
+               windowsAppSdkSelfContained: false,
+               requireExactRuntimeDependency: true,
+               cancellationToken: TestContext.CancellationToken));
+
+       StringAssert.Contains(error.Message, "package graph could not be resolved");
+       Assert.AreEqual(0, _fakeRegistration.RegisterLooseLayoutCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task AddLooseLayoutIdentityAsync_SelfContainedPublishRejectsFrameworkDependencyHybrid()
+    {
+       var srcDir = _tempDirectory.CreateSubdirectory("self-contained-publish");
+       var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "AppxManifest.xml"));
+       var manifest = BuildMSBuildManifest().Replace(
+           "<Applications>",
+           """
+             <Dependencies>
+               <PackageDependency Name="Microsoft.WindowsAppRuntime.1.8" MinVersion="8000.0.0.0" Publisher="CN=Microsoft Corporation" />
+             </Dependencies>
+             <Applications>
+           """,
+           StringComparison.Ordinal);
+       await File.WriteAllTextAsync(srcManifest.FullName, manifest, TestContext.CancellationToken);
+       await File.WriteAllTextAsync(
+           Path.Combine(srcDir.FullName, "TestApp.exe"),
+           "exe",
+           TestContext.CancellationToken);
+       var output = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "layout"));
+
+       var error = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
+           _msixService.AddLooseLayoutIdentityAsync(
+               srcManifest,
+               srcDir,
+               output,
+               TestTaskContext,
+               windowsAppSdkSelfContained: true,
+               requireExactRuntimeDependency: true,
+               cancellationToken: TestContext.CancellationToken));
+
+       StringAssert.Contains(error.Message, "WindowsAppSDKSelfContained=true");
+       Assert.AreEqual(0, _fakeRegistration.RegisterLooseLayoutCalls.Count);
+    }
+
+    [TestMethod]
     public async Task AddLooseLayoutIdentityAsync_RawManifest_ProcessesAndRegisters()
     {
         var srcDir = _tempDirectory.CreateSubdirectory("raw-input");
@@ -1246,4 +1308,3 @@ internal sealed class ScriptedMtBuildToolsService : IBuildToolsService
         return _inner.RunBuildToolAsync(tool, arguments, taskContext, printErrors, toolPathOverride, environment, workingDirectory, cancellationToken);
     }
 }
-

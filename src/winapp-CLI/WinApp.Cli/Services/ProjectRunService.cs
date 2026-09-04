@@ -17,12 +17,26 @@ internal sealed partial class ProjectRunService(
     IProjectDetectionService projectDetectionService,
     ICsWinRTMetadataShimService csWinRTMetadataShimService,
     IAnsiConsole ansiConsole,
-    ILogger<ProjectRunService> logger) : IProjectRunService
+    ILogger<ProjectRunService> logger,
+    IWindowsNativeToolchainResolver? windowsNativeToolchainResolver = null) : IProjectRunService
 {
+    private readonly IWindowsNativeToolchainResolver nativeToolchainResolver =
+        windowsNativeToolchainResolver ?? new WindowsNativeToolchainResolver(new ProcessRunner());
+
     /// <summary>MSBuild properties requested from the evaluate step (always ≥2 → JSON output).</summary>
     private static readonly string[] RequestedProperties =
     [
         "TargetDir",
+        "PublishDir",
+        "PublishAot",
+        "RuntimeIdentifier",
+        "Platform",
+        "AssemblyName",
+        "TargetName",
+        "TargetFileName",
+        "FinalAppxManifestName",
+        "ProjectAssetsFile",
+        "PublishProfile",
         "RunCommand",
         "RunArguments",
         "WindowsPackageType",
@@ -193,8 +207,7 @@ internal sealed partial class ProjectRunService(
         return (options, buildOptions, csWinRTMetadata);
     }
 
-    /// <inheritdoc />
-    public async Task<ProjectBuildOutcome> BuildAndResolveAsync(
+    private async Task<ProjectBuildOutcome> BuildAndResolveCoreAsync(
         FileInfo csproj,
         ProjectRunOptions options,
         CancellationToken cancellationToken)
