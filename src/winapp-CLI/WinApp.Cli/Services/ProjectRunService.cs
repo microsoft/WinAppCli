@@ -36,6 +36,7 @@ internal sealed partial class ProjectRunService(
         "TargetFileName",
         "FinalAppxManifestName",
         "ProjectAssetsFile",
+        "BundledNETCoreAppPackageVersion",
         "PublishProfile",
         "RunCommand",
         "RunArguments",

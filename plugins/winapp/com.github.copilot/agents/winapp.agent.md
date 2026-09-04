@@ -190,7 +190,7 @@ Building a WinUI 3 UI and need to find the right control or a working sample?
 - `-f, --framework <tfm>` — (project mode) target framework for multi-targeted projects
 - `--project <name-or-path>` — (project mode) select which project to launch when a solution/directory has multiple runnable app projects (errors listing candidates if ambiguous)
 - `--publish` — (project mode) run `dotnet publish` and launch the evaluated `PublishDir`
-- `--verify-native-aot` — (project mode) imply `--publish` and enforce AOT settings, payload, startup, module, and process-provenance checks
+- `--verify-native-aot` — (project mode) imply `--publish`, reject .NET single-file bundles, and enforce AOT settings, payload, startup, module, and process-provenance checks
 - `--dry-run` — (project mode) validate the build/publish plan and native toolchain without restoring, building, publishing, registering, or launching
 - `--no-build` / `--no-restore` — (project mode) skip build / restore; with `--publish`, `--no-build` is forwarded to `dotnet publish --no-build`
 - `-p, --property <Name=Value>` — (project mode) MSBuild property forwarded to build + evaluation; repeatable (e.g. `-p WindowsPackageType=None`)

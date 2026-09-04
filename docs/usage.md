@@ -784,7 +784,7 @@ Project mode requires the **.NET SDK 8.0.100 or newer** (for MSBuild `--getPrope
 - `-f, --framework <tfm>` - Target framework moniker for multi-targeted projects (e.g. `net10.0-windows10.0.26100.0`).
 - `--project <name-or-path>` - When the input is a solution (`.sln`/`.slnx`) or a directory with multiple runnable app projects, selects which project to launch (by project name or path).
 - `--publish` - Run `dotnet publish`, evaluate `PublishDir` with the same configuration, RID, framework, platform, publish profile, and `-p` properties, then launch that published artifact.
-- `--verify-native-aot` - Implies `--publish`. Requires `PublishAot=true`, a `win-x64` or `win-arm64` RID, a payload without CoreCLR/JIT artifacts, and a running process whose modules and image path pass Native AOT provenance checks.
+- `--verify-native-aot` - Implies `--publish`. Requires `PublishAot=true`, a `win-x64` or `win-arm64` RID, a payload without CoreCLR/JIT artifacts or a .NET single-file bundle, and a running process whose modules and image path pass Native AOT provenance checks.
 - `--dry-run` - Evaluate the build or publish plan and validate settings/toolchain readiness without restoring, building, publishing, registering, or launching. If restored Native AOT assets are missing, it reports an indeterminate result and prints the exact `dotnet restore` command to run.
 - `--no-build` - Without `--publish`, skip `dotnet build` and use existing `TargetDir` output. With `--publish`, invoke `dotnet publish --no-build` and resolve its `PublishDir`; it does not mean “skip publish.”
 - `--no-restore` - Skip restoring during `dotnet build` or `dotnet publish`.
@@ -794,7 +794,24 @@ Project mode requires the **.NET SDK 8.0.100 or newer** (for MSBuild `--getPrope
 
 **Native AOT prerequisites:** Windows Native AOT publishing requires .NET SDK 8.0.100 or newer plus Visual Studio or Visual Studio Build Tools with Desktop development with C++. WinApp validates `vswhere.exe`, the target-specific MSVC linker, and a compatible Windows SDK before publishing. Install `Microsoft.VisualStudio.Component.VC.Tools.x86.x64` for x64 or `Microsoft.VisualStudio.Component.VC.Tools.ARM64` for ARM64 when prompted; WinApp does not install workloads automatically.
 
-For `--verify-native-aot`, WinApp also checks that the process remains alive during a short internal startup window. Packaged output must be registered in development mode at this invocation's staging directory; unpackaged output must run directly from the evaluated `PublishDir`. JSON output includes the source executable, staging/process paths, package identity, PID, window information, and layered verification results.
+For `--verify-native-aot`, WinApp also checks that the process remains alive during a short internal startup window. A self-contained single-file JIT app can hide CoreCLR inside its executable, so WinApp rejects the official .NET single-file bundle marker rather than certifying it from missing sidecar files. Packaged output must be registered in development mode at this invocation's staging directory; unpackaged output must run directly from the evaluated `PublishDir`. JSON output includes the source executable, staging/process paths, package identity, PID, exit code when available, window information, and layered verification results.
+
+Publish mode replaces only a same-identity development registration rooted in the current project or selected staging directory. It fails closed for production registrations and unrelated development registrations. Use a distinct package identity, or explicitly unregister a conflicting package you own.
+
+If the app exits during verification, the error reports its exit code when available. Re-run without `--verify-native-aot` or `--detach` and add `--debug-output`; add `--symbols` for native crash details.
+
+**Real-device acceptance:** run both packaged and unpackaged Native AOT workflows with isolated identities and cleanup:
+
+```powershell
+# x64 device
+.\scripts\test-native-aot-run.ps1 -Architecture x64
+
+# Windows ARM64 device (requires the ARM64 C++ tools)
+.\scripts\test-native-aot-run.ps1 -Architecture arm64 `
+  -WinappPath .\artifacts\cli\win-arm64\winapp.exe
+```
+
+The ARM64 command must run on Windows ARM64. An x64 machine can validate ARM64 discovery and publish planning, but cannot claim ARM64 runtime verification.
 
 **Build output & verbosity:** the project is built in two steps — a `dotnet build` whose output **streams live** to your console, followed by a fast property-evaluation pass. winapp prints the exact `dotnet build …` invocation before the output, and streams warnings even on a successful build. Verbosity:
 

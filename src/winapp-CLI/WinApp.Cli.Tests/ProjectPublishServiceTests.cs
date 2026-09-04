@@ -247,9 +247,13 @@ public sealed class ProjectPublishServiceTests
     {
         var assets = Directory.CreateDirectory(Path.Combine(_tempDirectory.FullName, "obj"));
         var assetsFile = Path.Combine(assets.FullName, "project.assets.json");
-        File.WriteAllText(
+        var packageFolder = CreateNativeAotPackages("win-arm64", "10.0.0");
+        WriteAssetsFile(
             assetsFile,
-            """{ "libraries": { "Microsoft.NETCore.App.Runtime.NativeAOT.win-arm64/10.0.0": {} } }""");
+            packageFolder,
+            includeNativeAotGraph: true,
+            rid: "win-arm64",
+            version: "10.0.0");
         var properties = UnpackagedProperties(
             Path.Combine(_tempDirectory.FullName, "publish"),
             publishAot: true,
@@ -277,6 +281,56 @@ public sealed class ProjectPublishServiceTests
         Assert.AreEqual(Architecture.Arm64, toolchain.Calls.Single().TargetArchitecture);
         Assert.IsTrue(toolchain.Calls.Single().RequireLinker);
         Assert.IsTrue(toolchain.Calls.Single().RequireWindowsSdk);
+    }
+
+    [TestMethod]
+    public async Task PrepareNativeAotDryRun_RemainsReadyWhenAssetsGraphIsRewritten()
+    {
+        var assetsDirectory = Directory.CreateDirectory(Path.Combine(_tempDirectory.FullName, "obj"));
+        var assetsFile = Path.Combine(assetsDirectory.FullName, "project.assets.json");
+        var packageFolder = CreateNativeAotPackages("win-x64", "10.0.0");
+        WriteAssetsFile(
+            assetsFile,
+            packageFolder,
+            includeNativeAotGraph: true,
+            rid: "win-x64",
+            version: "10.0.0");
+        var properties = UnpackagedProperties(
+            Path.Combine(_tempDirectory.FullName, "publish"),
+            publishAot: true,
+            projectAssetsFile: assetsFile);
+        var (service, _, _) = CreateService(properties);
+        var options = new ProjectRunOptions(
+            "Release",
+            "x64",
+            null,
+            NoBuild: false,
+            NoRestore: false,
+            Properties: [],
+            DryRun: true,
+            VerifyNativeAot: true);
+
+        var beforeRewrite = await service.PrepareAndResolveAsync(
+            _project,
+            options,
+            ProjectPreparationOperation.Publish,
+            CancellationToken.None);
+
+        WriteAssetsFile(
+            assetsFile,
+            packageFolder,
+            includeNativeAotGraph: false,
+            rid: "win-x64",
+            version: "10.0.0");
+        var afterRewrite = await service.PrepareAndResolveAsync(
+            _project,
+            options,
+            ProjectPreparationOperation.Publish,
+            CancellationToken.None);
+
+        Assert.AreEqual(true, beforeRewrite.Ready);
+        Assert.AreEqual(true, afterRewrite.Ready,
+            "Readiness must use completed exact-version packages, not a transient PackageDownload entry.");
     }
 
     [TestMethod]
@@ -473,7 +527,57 @@ public sealed class ProjectPublishServiceTests
             ("WindowsPackageType", "None"),
             ("WindowsAppSDKSelfContained", "true"),
             ("OutputType", "WinExe"),
-            ("ProjectAssetsFile", projectAssetsFile ?? string.Empty));
+            ("ProjectAssetsFile", projectAssetsFile ?? string.Empty),
+            ("BundledNETCoreAppPackageVersion", "10.0.0"));
+
+    private string CreateNativeAotPackages(string rid, string version)
+    {
+        var packageFolder = Path.Combine(_tempDirectory.FullName, "packages");
+        foreach (var packageId in new[]
+                 {
+                     $"Microsoft.NETCore.App.Runtime.NativeAOT.{rid}",
+                     $"runtime.{rid}.Microsoft.DotNet.ILCompiler",
+                 })
+        {
+            var versionDirectory = Path.Combine(
+                packageFolder,
+                packageId.ToLowerInvariant(),
+                version);
+            Directory.CreateDirectory(versionDirectory);
+            File.WriteAllText(Path.Combine(versionDirectory, ".nupkg.metadata"), "{}");
+        }
+
+        return packageFolder;
+    }
+
+    private static void WriteAssetsFile(
+        string assetsFile,
+        string packageFolder,
+        bool includeNativeAotGraph,
+        string rid,
+        string version)
+    {
+        var libraries = includeNativeAotGraph
+            ? new Dictionary<string, object>
+            {
+                [$"Microsoft.NETCore.App.Runtime.NativeAOT.{rid}/{version}"] = new { },
+                [$"runtime.{rid}.Microsoft.DotNet.ILCompiler/{version}"] = new { },
+            }
+            : new Dictionary<string, object>
+            {
+                ["Some.Unrelated.Package/1.0.0"] = new { },
+            };
+        File.WriteAllText(
+            assetsFile,
+            JsonSerializer.Serialize(new
+            {
+                libraries,
+                packageFolders = new Dictionary<string, object>
+                {
+                    [packageFolder + Path.DirectorySeparatorChar] = new { },
+                },
+            }));
+    }
 
     private static string Properties(params (string Name, string Value)[] values) =>
         JsonSerializer.Serialize(new

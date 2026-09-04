@@ -21,6 +21,7 @@ public class RunCommandProjectModeTests : BaseCommandTests
     private FakeDebugOutputService _fakeDebugOutputService = null!;
     private FakeProjectRunService _fakeProjectRunService = null!;
     private FakeNativeAotVerifier _fakeNativeAotVerifier = null!;
+    private FakePackageRegistrationService _fakePackageRegistrationService = null!;
 
     private const string TestManifestContent = """
         <?xml version="1.0" encoding="utf-8"?>
@@ -57,12 +58,14 @@ public class RunCommandProjectModeTests : BaseCommandTests
         _fakeDebugOutputService = new FakeDebugOutputService();
         _fakeProjectRunService = new FakeProjectRunService();
         _fakeNativeAotVerifier = new FakeNativeAotVerifier();
+        _fakePackageRegistrationService = new FakePackageRegistrationService();
         return services
             .AddSingleton<IMsixService>(_fakeMsixService)
             .AddSingleton<IAppLauncherService>(_fakeAppLauncherService)
             .AddSingleton<IDebugOutputService>(_fakeDebugOutputService)
             .AddSingleton<IProjectRunService>(_fakeProjectRunService)
             .AddSingleton<INativeAotVerifier>(_fakeNativeAotVerifier)
+            .AddSingleton<IPackageRegistrationService>(_fakePackageRegistrationService)
             .AddSingleton<INugetService, FakeNugetService>();
     }
 
@@ -552,6 +555,58 @@ public class RunCommandProjectModeTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task ProjectMode_EarlyJsonErrorPreservesProjectSchema()
+    {
+        var csproj = CreateCsproj();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command,
+            [csproj.FullName, "--runtime", "linux-x64", "--json"]);
+
+        Assert.AreNotEqual(0, exitCode);
+        var jsonStart = TestAnsiConsole.Output.IndexOf('{');
+        var jsonEnd = TestAnsiConsole.Output.LastIndexOf('}');
+        Assert.IsTrue(jsonStart >= 0 && jsonEnd > jsonStart);
+        using var json = System.Text.Json.JsonDocument.Parse(
+            TestAnsiConsole.Output[jsonStart..(jsonEnd + 1)]);
+        var root = json.RootElement;
+        Assert.AreEqual(1, root.GetProperty("SchemaVersion").GetInt32());
+        Assert.AreEqual("Build", root.GetProperty("Operation").GetString());
+        Assert.IsFalse(root.GetProperty("Executed").GetBoolean());
+        Assert.IsFalse(root.GetProperty("Ready").GetBoolean());
+        Assert.AreEqual(csproj.FullName, root.GetProperty("ProjectPath").GetString());
+        Assert.AreEqual("InvalidArchitecture", root.GetProperty("ErrorCode").GetString());
+    }
+
+    [TestMethod]
+    public async Task ProjectMode_NormalOutputShowsResolvedDotnetSdk()
+    {
+        var csproj = CreateCsproj();
+        var outputDirectory = CreateTargetDir(withManifest: false);
+        var executable = Path.Combine(outputDirectory.FullName, "App.exe");
+        _fakeProjectRunService.BuildOutcome = new ProjectBuildOutcome(
+            new ProjectRunResolution(
+                csproj,
+                outputDirectory.FullName,
+                executable,
+                ProjectPackaging.Unpackaged,
+                SelfContained: true,
+                Architecture: "x64",
+                SourceExecutable: executable,
+                DotnetSdk: "10.0.303"),
+            0);
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command,
+            [csproj.FullName, "--detach"]);
+
+        Assert.AreEqual(0, exitCode);
+        StringAssert.Contains(TestAnsiConsole.Output, ".NET SDK 10.0.303");
+    }
+
+    [TestMethod]
     public async Task ProjectMode_Runtime_ResolvesArchIntoBuild()
     {
         var csproj = CreateCsproj();
@@ -910,6 +965,32 @@ public class RunCommandProjectModeTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task ProjectMode_VerifyNativeAot_ReportsSingleFileBundleErrorCode()
+    {
+       var csproj = CreateCsproj();
+       var publishDirectory = CreateTargetDir(withManifest: false);
+       SetPublishOutcome(csproj, publishDirectory, ProjectPackaging.Unpackaged, publishAot: true);
+       _fakeNativeAotVerifier.StaticResult = new NativeAotStaticVerification(
+           Succeeded: false,
+           ForbiddenFiles: [Path.Combine(publishDirectory.FullName, "App.exe")],
+           Error: "The published executable is a .NET single-file bundle.",
+           SingleFileBundle: true);
+       var command = GetRequiredService<RunCommand>();
+
+       var exitCode = await ParseAndInvokeWithCaptureAsync(
+           command,
+           [csproj.FullName, "--verify-native-aot", "--json"]);
+
+       Assert.AreNotEqual(0, exitCode);
+       using var json = System.Text.Json.JsonDocument.Parse(TestAnsiConsole.Output);
+       Assert.AreEqual(
+           "DotNetSingleFileBundleDetected",
+           json.RootElement.GetProperty("ErrorCode").GetString());
+       StringAssert.Contains(json.RootElement.GetProperty("Error").GetString(), "single-file bundle");
+       Assert.AreEqual(0, _fakeAppLauncherService.LaunchExecutableCalls.Count);
+    }
+
+    [TestMethod]
     public async Task ProjectMode_VerifyNativeAot_ProcessExitsDuringWindowFailsAndDoesNotCertify()
     {
        var csproj = CreateCsproj();
@@ -925,7 +1006,8 @@ public class RunCommandProjectModeTests : BaseCommandTests
            LoadedModules: [],
            MainWindowHandle: 0,
            MainWindowTitle: string.Empty,
-           Error: "The app exited before Native AOT verification completed.");
+           Error: "The app exited with exit code 42 before Native AOT verification completed. Re-run without --verify-native-aot or --detach and add --debug-output; add --symbols for native crash details.",
+           ExitCode: 42);
        var command = GetRequiredService<RunCommand>();
 
        var exitCode = await ParseAndInvokeWithCaptureAsync(
@@ -937,9 +1019,99 @@ public class RunCommandProjectModeTests : BaseCommandTests
        Assert.IsTrue(_fakeAppLauncherService.LastLaunchedProcess!.Killed);
        using var json = System.Text.Json.JsonDocument.Parse(TestAnsiConsole.Output);
        Assert.IsFalse(json.RootElement.GetProperty("NativeAotVerified").GetBoolean());
+       Assert.AreEqual(42, json.RootElement.GetProperty("ProcessExitCode").GetInt32());
+       StringAssert.Contains(json.RootElement.GetProperty("Error").GetString(), "--debug-output");
+       StringAssert.Contains(json.RootElement.GetProperty("Error").GetString(), "--symbols");
        Assert.AreEqual(
            "ProcessExitedDuringVerification",
            json.RootElement.GetProperty("ErrorCode").GetString());
+    }
+
+    [TestMethod]
+    public async Task ProjectMode_PackagedVerificationFailure_TerminatesAndUnregistersOnlyCurrentStage()
+    {
+        var csproj = CreateCsproj();
+        var publishDirectory = CreateTargetDir(withManifest: false);
+        var sourceExecutable = Path.Combine(publishDirectory.FullName, "TestApp.exe");
+        File.WriteAllText(sourceExecutable, "native fixture");
+        var generatedManifest = Path.Combine(_tempDirectory.FullName, "generated-AppxManifest.xml");
+        File.WriteAllText(generatedManifest, TestManifestContent);
+        var stagingDirectory = _tempDirectory.CreateSubdirectory("verification-failure-stage");
+        File.WriteAllText(Path.Combine(stagingDirectory.FullName, "appxmanifest.xml"), TestManifestContent);
+        File.Copy(sourceExecutable, Path.Combine(stagingDirectory.FullName, "TestApp.exe"));
+        _fakeProjectRunService.PreparationOutcome = new ProjectPreparationOutcome(
+           new ProjectRunResolution(
+               csproj,
+               publishDirectory.FullName,
+               null,
+               ProjectPackaging.Packaged,
+               SelfContained: true,
+               Architecture: "x64",
+               Operation: ProjectPreparationOperation.Publish,
+               PublishDirectory: publishDirectory.FullName,
+               PublishAot: true,
+               RuntimeIdentifier: "win-x64",
+               SourceExecutable: sourceExecutable,
+               FinalAppxManifestPath: generatedManifest),
+           0);
+        _fakeNativeAotVerifier.RuntimeResult = new NativeAotRuntimeVerification(
+           Succeeded: false,
+           Alive: true,
+           RuntimeModules: false,
+           ProcessProvenance: true,
+           PackageRegistration: true,
+           ProcessPath: Path.Combine(stagingDirectory.FullName, "TestApp.exe"),
+           LoadedModules: ["coreclr.dll"],
+           MainWindowHandle: 0,
+           MainWindowTitle: string.Empty,
+           Error: "The running process loaded managed runtime modules: coreclr.dll.");
+        _fakeAppLauncherService.FakePackageFullName =
+           "TestPackage_1.0.0.0_x64__fakefamily";
+        _fakePackageRegistrationService.FakeDevPackages =
+        [
+           new DevPackageInfo(
+               _fakeAppLauncherService.FakePackageFullName,
+               "TestPackage",
+               "1.0.0.0",
+               stagingDirectory.FullName,
+               IsDevelopmentMode: true),
+           new DevPackageInfo(
+               "TestPackage_1.0.0.0_x64__unrelated",
+               "TestPackage",
+               "1.0.0.0",
+               Path.Combine(_tempDirectory.FullName, "unrelated-stage"),
+               IsDevelopmentMode: true),
+        ];
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+           command,
+           [
+               csproj.FullName,
+               "--verify-native-aot",
+               "--unregister-on-exit",
+               "--output-appx-directory",
+               stagingDirectory.FullName,
+               "--json",
+           ]);
+
+        Assert.AreNotEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeAppLauncherService.TerminateCalls.Count);
+        Assert.AreEqual(_fakeAppLauncherService.FakeProcessId,
+           _fakeAppLauncherService.TerminateCalls.Single().ProcessId);
+        Assert.AreEqual(1, _fakePackageRegistrationService.UnregisterByFullNameCalls.Count);
+        Assert.AreEqual(
+           _fakeAppLauncherService.FakePackageFullName,
+           _fakePackageRegistrationService.UnregisterByFullNameCalls.Single().PackageFullName);
+        var jsonStart = TestAnsiConsole.Output.IndexOf('{');
+        var jsonEnd = TestAnsiConsole.Output.LastIndexOf('}');
+        Assert.IsTrue(jsonStart >= 0 && jsonEnd > jsonStart);
+        using var json = System.Text.Json.JsonDocument.Parse(
+            TestAnsiConsole.Output[jsonStart..(jsonEnd + 1)]);
+        Assert.AreEqual(
+           _fakeAppLauncherService.FakeProcessId,
+           json.RootElement.GetProperty("ProcessId").GetUInt32());
+        StringAssert.Contains(json.RootElement.GetProperty("Error").GetString(), "was terminated");
     }
 
     [TestMethod]

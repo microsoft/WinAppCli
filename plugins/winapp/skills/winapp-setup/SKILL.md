@@ -217,10 +217,11 @@ Project mode supports both **packaged** and **unpackaged** WinUI apps, detected 
 
 - **Preparation inputs:** `-c/--configuration`, `--arch`, `-r/--runtime`, `-f/--framework`, `--publish`, `--verify-native-aot`, `--dry-run`, `--no-build`, `--no-restore`, `-p/--property` (repeatable).
 - **Packaged-only options:** `--manifest`, `--no-launch`, `--with-alias`, `--clean`, `--unregister-on-exit`, `--output-appx-directory`, `--executable` — rejected for unpackaged apps.
-- **Publish:** `--publish` launches the evaluated `PublishDir`; `--verify-native-aot` also enforces `PublishAot=true`, static payload checks, startup liveness, loaded-module checks, and process/staging provenance. Windows Native AOT supports x64 and ARM64 and requires Desktop development with C++.
+- **Publish:** `--publish` launches the evaluated `PublishDir`; `--verify-native-aot` also enforces `PublishAot=true`, rejects .NET single-file bundles, and checks static payload, startup liveness, loaded modules, and process/staging provenance. Windows Native AOT supports x64 and ARM64 and requires Desktop development with C++.
 - **Dry run:** `--dry-run` does not restore, build, publish, register, or launch. If assets are missing, run the exact restore command it prints and repeat the dry run.
 - **`--no-build`:** skips `dotnet build` in normal mode; with `--publish`, it is forwarded to `dotnet publish --no-build`.
 - **Output:** default output shows material phases and remediation; `--verbose` adds exact commands, evaluated paths/properties, tool paths, staging, and verification evidence. Under `--json`/`--quiet`, child build/publish output goes to **stderr** so stdout stays clean.
+- **Real-device acceptance:** from the repo root, run `.\scripts\test-native-aot-run.ps1 -Architecture x64`; on Windows ARM64 run the same script with `-Architecture arm64 -WinappPath .\artifacts\cli\win-arm64\winapp.exe`. Do not claim ARM64 runtime verification from an x64 host.
 
 #### Choosing between `run` and `create-debug-identity`
 

@@ -89,7 +89,8 @@ internal sealed record ProjectRunResolution(
     string? DotnetSdk = null,
     WindowsNativeToolchain? NativeToolchain = null,
     string? PublishProfile = null,
-    string? EvaluatedPlatform = null)
+    string? EvaluatedPlatform = null,
+    string? BundledNetCoreAppPackageVersion = null)
 {
     /// <summary>The payload directory selected by the operation.</summary>
     public string OutputDirectory =>

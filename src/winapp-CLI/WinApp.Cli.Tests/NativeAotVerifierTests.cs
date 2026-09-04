@@ -10,6 +10,13 @@ namespace WinApp.Cli.Tests;
 [TestClass]
 public sealed class NativeAotVerifierTests
 {
+    private static readonly byte[] DotNetBundleSignature =
+    [
+        0x8b, 0x12, 0x02, 0xb9, 0x6a, 0x61, 0x20, 0x38,
+        0x72, 0x7b, 0x93, 0x02, 0x14, 0xd7, 0xa0, 0x32,
+        0x13, 0xf5, 0xb9, 0xe6, 0xef, 0xae, 0x33, 0x18,
+        0xee, 0x3b, 0x2d, 0xce, 0x24, 0xb3, 0x6a, 0xae,
+    ];
    private static readonly string CmdPath = Path.Combine(Environment.SystemDirectory, "cmd.exe");
     private static readonly string[] ExpectedForbiddenPayloadFiles =
       ["coreclr.dll", "clrjit.dll", "App.dll", "App.runtimeconfig.json"];
@@ -78,6 +85,26 @@ public sealed class NativeAotVerifierTests
        var result = verifier.VerifyPayload(_tempDirectory, executable, stagingDirectory);
 
        Assert.IsTrue(result.Succeeded);
+    }
+
+    [TestMethod]
+    public void VerifyPayload_RejectsSingleFileJitBundleWithoutRuntimeSidecars()
+    {
+       var executable = new FileInfo(Path.Combine(_tempDirectory.FullName, "App.exe"));
+       using (var stream = executable.Create())
+       {
+           stream.SetLength(256);
+           stream.Position = 64;
+           stream.Write(BitConverter.GetBytes(160L));
+           stream.Write(DotNetBundleSignature);
+       }
+       var verifier = new NativeAotVerifier(new FakePackageRegistrationService());
+
+       var result = verifier.VerifyPayload(_tempDirectory, executable);
+
+       Assert.IsFalse(result.Succeeded);
+       StringAssert.Contains(result.Error, "single-file bundle");
+       StringAssert.Contains(result.Error, "cannot be certified as Native AOT");
     }
 
     [TestMethod]
@@ -172,12 +199,16 @@ public sealed class NativeAotVerifierTests
                 unchecked((uint)process.Id),
                 CmdPath,
                 CmdPath,
-                ProjectPackaging.Unpackaged),
+                ProjectPackaging.Unpackaged,
+                ExitCodeProvider: () => process.ExitCode),
             CancellationToken.None);
 
         Assert.IsFalse(result.Succeeded);
         Assert.IsFalse(result.Alive);
-        StringAssert.Contains(result.Error, "exited before");
+        Assert.AreEqual(0, result.ExitCode);
+        StringAssert.Contains(result.Error, "exited with exit code 0 before");
+        StringAssert.Contains(result.Error, "--debug-output");
+        StringAssert.Contains(result.Error, "--symbols");
     }
 
     private static Process StartLongRunningCommand(string executable) =>

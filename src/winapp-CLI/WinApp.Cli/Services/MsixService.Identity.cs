@@ -125,6 +125,10 @@ internal partial class MsixService
         bool requireExactRuntimeDependency = false,
         CancellationToken cancellationToken = default)
     {
+        var publishRegistrationRoots = requireExactRuntimeDependency
+            ? BuildPublishRegistrationRoots(projectFile, outputAppXDirectory)
+            : null;
+
         // Validate inputs
         if (!appxManifestPath.Exists)
         {
@@ -219,7 +223,12 @@ internal partial class MsixService
             }
 
             // Unregister any existing package first (preserving app data by default)
-            await UnregisterExistingPackageAsync(identity.PackageName, taskContext, preserveAppData: !clean, cancellationToken);
+            await UnregisterExistingPackageAsync(
+                identity.PackageName,
+                taskContext,
+                preserveAppData: !clean,
+                allowedRegistrationRoots: publishRegistrationRoots,
+                cancellationToken);
 
             // Register from the AppX layout directory
             await RegisterLooseLayoutPackageAsync(registrationManifest, taskContext, cancellationToken);
@@ -369,7 +378,12 @@ internal partial class MsixService
             }
 
             // Unregister any existing package first (preserving app data by default)
-            await UnregisterExistingPackageAsync(identity.PackageName, taskContext, preserveAppData: !clean, cancellationToken);
+            await UnregisterExistingPackageAsync(
+                identity.PackageName,
+                taskContext,
+                preserveAppData: !clean,
+                allowedRegistrationRoots: publishRegistrationRoots,
+                cancellationToken);
 
             // Register the new debug manifest with external location
             await RegisterLooseLayoutPackageAsync(copiedAppxManifestPath, taskContext, cancellationToken);
@@ -1196,7 +1210,12 @@ internal partial class MsixService
     /// <param name="preserveAppData">When true, preserves the package's application data during removal</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>True if package was found and unregistered, false if no package was found</returns>
-    public async Task<bool> UnregisterExistingPackageAsync(string packageName, TaskContext taskContext, bool preserveAppData = true, CancellationToken cancellationToken = default)
+    public async Task<bool> UnregisterExistingPackageAsync(
+        string packageName,
+        TaskContext taskContext,
+        bool preserveAppData = true,
+        IReadOnlyList<DirectoryInfo>? allowedRegistrationRoots = null,
+        CancellationToken cancellationToken = default)
     {
         taskContext.AddDebugMessage($"{UiSymbols.Trash} Checking for existing package...");
 
@@ -1217,19 +1236,40 @@ internal partial class MsixService
             }
 
             var cwd = Path.GetFullPath(currentDirectoryProvider.GetCurrentDirectory());
+            var strictPublishScope = allowedRegistrationRoots is { Count: > 0 };
 
-            // First pass: classify packages and refuse the whole operation if any
-            // out-of-tree non-dev install is present. Doing this up front (instead of
-            // mid-loop) prevents the first removal from racing ahead and wiping data
-            // that the safety check on a *later* package was meant to protect.
+            // Classify every package before removing any of them. Publish mode supplies explicit
+            // project/staging roots and fails closed for both production installs and unrelated
+            // development registrations. The legacy folder/build path retains its existing policy.
             foreach (var pkg in installed)
             {
-                if (pkg.IsDevelopmentMode)
+                if (strictPublishScope)
                 {
+                    if (!pkg.IsDevelopmentMode)
+                    {
+                        throw new InvalidOperationException(
+                            $"A package with the same identity ('{pkg.FullName}') is installed as a non-development-mode package. " +
+                            "WinApp publish mode will not replace production registrations. Remove it manually only if you own it:" +
+                            Environment.NewLine +
+                            $"  Get-AppxPackage {packageName} | Remove-AppxPackage");
+                    }
+
+                    if (!allowedRegistrationRoots!.Any(root =>
+                            IsPathInsideDirectory(pkg.InstallLocation, root.FullName)))
+                    {
+                        var location = string.IsNullOrWhiteSpace(pkg.InstallLocation)
+                            ? "(unknown)"
+                            : Path.GetFullPath(pkg.InstallLocation);
+                        throw new InvalidOperationException(
+                            $"A development package with the same identity ('{pkg.FullName}') is registered from unrelated location '{location}'. " +
+                            "WinApp publish mode only replaces registrations rooted in the current project or selected staging directory. " +
+                            "Use a different package identity, or unregister that package explicitly if you own it.");
+                    }
+
                     continue;
                 }
 
-                if (!IsPathInsideDirectory(pkg.InstallLocation, cwd))
+                if (!pkg.IsDevelopmentMode && !IsPathInsideDirectory(pkg.InstallLocation, cwd))
                 {
                     var locationDescription = string.IsNullOrEmpty(pkg.InstallLocation)
                         ? "."
@@ -1248,7 +1288,7 @@ internal partial class MsixService
             var anyRemoved = false;
             foreach (var pkg in installed)
             {
-                if (pkg.IsDevelopmentMode)
+                if (strictPublishScope || pkg.IsDevelopmentMode)
                 {
                     await packageRegistrationService.UnregisterByFullNameAsync(pkg.FullName, preserveAppData, cancellationToken);
                 }
@@ -1284,12 +1324,36 @@ internal partial class MsixService
         }
         catch (Exception ex)
         {
+            if (allowedRegistrationRoots is { Count: > 0 })
+            {
+                throw new InvalidOperationException(
+                    $"WinApp could not safely inspect or replace the existing '{packageName}' registration: {ex.Message}",
+                    ex);
+            }
+
             // Other failures (e.g., transient deployment errors during inspection or
             // removal) shouldn't block the caller's overall flow — log and continue,
             // matching prior behavior.
             taskContext.AddDebugMessage($"{UiSymbols.Note} Could not unregister existing package: {ex.Message}");
             return false;
         }
+    }
+
+    private static List<DirectoryInfo> BuildPublishRegistrationRoots(
+        FileInfo? projectFile,
+        DirectoryInfo outputAppXDirectory)
+    {
+        var roots = new List<DirectoryInfo> { outputAppXDirectory };
+        if (projectFile?.Directory is { } projectDirectory &&
+            !roots.Any(root => string.Equals(
+                Path.GetFullPath(root.FullName),
+                Path.GetFullPath(projectDirectory.FullName),
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            roots.Add(projectDirectory);
+        }
+
+        return roots;
     }
 
     /// <summary>

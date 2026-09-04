@@ -717,9 +717,10 @@ internal partial class RunCommand : Command, IShortDescription
                        {
                            errorMessage = runtimeVerification.Error ?? "Native AOT runtime verification failed.";
                            projectReport.ErrorCode = NativeAotRuntimeErrorCode(runtimeVerification);
-                           projectReport.Error = errorMessage;
+                           projectReport.Error =
+                               $"{errorMessage} Launched process PID {processId} was terminated or had already exited.";
                            appLauncherService.TerminatePackageProcesses(packageFullName, processId);
-                           return (1, $"{UiSymbols.Error} {errorMessage}");
+                           return (1, $"{UiSymbols.Error} {projectReport.Error}");
                        }
                     }
 
@@ -727,17 +728,59 @@ internal partial class RunCommand : Command, IShortDescription
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
+                    if (processId != 0)
+                    {
+                        appLauncherService.TerminatePackageProcesses(packageFullName, processId);
+                    }
+                    if (unregisterOnExit && packageName != null)
+                    {
+                        await UnregisterOnExitAsync(
+                            packageName,
+                            packageFullName,
+                            resolvedOutputDir,
+                            strictCurrentRegistration: projectResolution?.Operation == ProjectPreparationOperation.Publish,
+                            CancellationToken.None);
+                    }
                     throw;
                 }
                 catch (Exception error)
                 {
                     errorMessage = error.Message;
-                    return (1, $"{UiSymbols.Error} Failed to launch application: {error.Message}");
+                    if (verifyNativeAot && processId != 0)
+                    {
+                        appLauncherService.TerminatePackageProcesses(packageFullName, processId);
+                        errorMessage += $" Launched process PID {processId} was terminated or had already exited.";
+                        if (projectReport is not null)
+                        {
+                            projectReport.ProcessId = processId;
+                            projectReport.ErrorCode = "NativeAotVerificationFailed";
+                            projectReport.Error = errorMessage;
+                        }
+                    }
+                    return (1, $"{UiSymbols.Error} Failed to launch application: {errorMessage}");
                 }
             }, cancellationToken);
 
             if (success != 0)
             {
+                if (unregisterOnExit && packageName != null)
+                {
+                    var cleanupError = await UnregisterOnExitAsync(
+                        packageName,
+                        packageFullName,
+                        resolvedOutputDir,
+                        strictCurrentRegistration: projectResolution?.Operation == ProjectPreparationOperation.Publish,
+                        cancellationToken);
+                    if (!string.IsNullOrWhiteSpace(cleanupError))
+                    {
+                        errorMessage = $"{errorMessage} Cleanup failed: {cleanupError}";
+                        if (projectReport is not null)
+                        {
+                            projectReport.Error = errorMessage;
+                        }
+                    }
+                }
+
                 if (isJson)
                 {
                    if (projectReport is not null)
@@ -804,7 +847,12 @@ internal partial class RunCommand : Command, IShortDescription
                 var aliasExitCode = await LaunchViaExecutionAliasAsync(resolvedOutputDir!, inputFolder, appArgs, debugOutput, useSymbols, packageFullName, cancellationToken);
                 if (unregisterOnExit && packageName != null)
                 {
-                    await UnregisterDevPackageAsync(packageName, cancellationToken);
+                    await UnregisterOnExitAsync(
+                        packageName,
+                        packageFullName,
+                        resolvedOutputDir,
+                        strictCurrentRegistration: projectResolution?.Operation == ProjectPreparationOperation.Publish,
+                        cancellationToken);
                 }
                 return aliasExitCode;
             }
@@ -833,7 +881,12 @@ internal partial class RunCommand : Command, IShortDescription
                 }
                 if (unregisterOnExit && packageName != null)
                 {
-                    await UnregisterDevPackageAsync(packageName, cancellationToken);
+                    await UnregisterOnExitAsync(
+                        packageName,
+                        packageFullName,
+                        resolvedOutputDir,
+                        strictCurrentRegistration: projectResolution?.Operation == ProjectPreparationOperation.Publish,
+                        cancellationToken);
                 }
                 return exitCode;
             }
@@ -871,7 +924,12 @@ internal partial class RunCommand : Command, IShortDescription
 
             if (unregisterOnExit && packageName != null)
             {
-                await UnregisterDevPackageAsync(packageName, cancellationToken);
+                await UnregisterOnExitAsync(
+                    packageName,
+                    packageFullName,
+                    resolvedOutputDir,
+                    strictCurrentRegistration: projectResolution?.Operation == ProjectPreparationOperation.Publish,
+                    cancellationToken);
             }
 
             return appExitCode;
@@ -982,6 +1040,79 @@ internal partial class RunCommand : Command, IShortDescription
             catch (Exception ex)
             {
                 logger.LogDebug("Failed to unregister package on exit: {Message}", ex.Message);
+            }
+        }
+
+        private async Task<string?> UnregisterOnExitAsync(
+            string packageName,
+            string? packageFullName,
+            DirectoryInfo? expectedInstallLocation,
+            bool strictCurrentRegistration,
+            CancellationToken cancellationToken)
+        {
+            if (!strictCurrentRegistration || expectedInstallLocation is null)
+            {
+                await UnregisterDevPackageAsync(packageName, cancellationToken);
+                return null;
+            }
+
+            try
+            {
+                var registrations = packageRegistrationService.FindDevPackages(packageName);
+                foreach (var registration in registrations)
+                {
+                    if (!registration.IsDevelopmentMode ||
+                        !PathsEqual(registration.InstallLocation, expectedInstallLocation.FullName) ||
+                        (!string.IsNullOrWhiteSpace(packageFullName) &&
+                         !string.Equals(registration.FullName, packageFullName, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        continue;
+                    }
+
+                    await packageRegistrationService.UnregisterByFullNameAsync(
+                        registration.FullName,
+                        preserveAppData: false,
+                        cancellationToken);
+                    logger.LogDebug(
+                        "Unregistered current publish registration {FullName} from {InstallLocation}.",
+                        registration.FullName,
+                        expectedInstallLocation.FullName);
+                }
+                return null;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(
+                    "Failed to unregister current publish registration on exit: {Message}",
+                    ex.Message);
+                return ex.Message;
+            }
+        }
+
+        private static bool PathsEqual(string? left, string? right)
+        {
+            if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
+            {
+                return false;
+            }
+
+            try
+            {
+                return string.Equals(
+                    Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                    Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                    StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception ex) when (
+                ex is ArgumentException or
+                NotSupportedException or
+                PathTooLongException)
+            {
+                return false;
             }
         }
 
@@ -1222,6 +1353,7 @@ internal sealed class ProjectRunCommandResult : RunCommandResult
     public string? ProcessPath { get; set; }
     public string? PackageIdentity { get; set; }
     public bool? Alive { get; set; }
+    public int? ProcessExitCode { get; set; }
     public long? MainWindowHandle { get; set; }
     public string? MainWindowTitle { get; set; }
     public bool? NativeAotVerified { get; set; }

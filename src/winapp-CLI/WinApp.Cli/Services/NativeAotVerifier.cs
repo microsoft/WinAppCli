@@ -57,6 +57,19 @@ internal sealed class NativeAotVerifier(IPackageRegistrationService packageRegis
 
         try
         {
+            var bundleHeaderOffset = PeHelper.GetDotNetSingleFileBundleHeaderOffset(
+                sourceExecutable.FullName);
+            if (bundleHeaderOffset is not null)
+            {
+                return new NativeAotStaticVerification(
+                    false,
+                    [sourceExecutable.FullName],
+                    $"The published executable is a .NET single-file bundle (bundle header offset {bundleHeaderOffset.Value}). " +
+                    "A self-contained single-file JIT app can omit side-by-side CoreCLR files, so it cannot be certified as Native AOT. " +
+                    "Publish with PublishAot=true and PublishSingleFile disabled, then retry.",
+                    SingleFileBundle: true);
+            }
+
             var forbidden = publishDirectory
                 .EnumerateFiles("*", SearchOption.AllDirectories)
                .Where(file => excludedStagingDirectory is null ||
@@ -95,7 +108,7 @@ internal sealed class NativeAotVerifier(IPackageRegistrationService packageRegis
         }
         catch (ArgumentException)
         {
-            return Failure("The app exited before Native AOT verification completed.");
+            return ExitFailure(request);
         }
 
         using (process)
@@ -109,13 +122,13 @@ internal sealed class NativeAotVerifier(IPackageRegistrationService packageRegis
                    process.Refresh();
                    if (process.HasExited)
                    {
-                       return Failure("The app exited before Native AOT verification completed.");
+                       return ExitFailure(request, process);
                    }
                    mainWindowHandle = process.MainWindowHandle;
                 }
                catch (InvalidOperationException)
                {
-                   return Failure("The app exited before Native AOT verification completed.");
+                   return ExitFailure(request, process);
                }
 
                // A GUI app may create its top-level window after the process itself is ready. Poll for
@@ -180,7 +193,8 @@ internal sealed class NativeAotVerifier(IPackageRegistrationService packageRegis
                 LoadedModules: modules,
                 MainWindowHandle: process.MainWindowHandle.ToInt64(),
                 MainWindowTitle: process.MainWindowTitle ?? string.Empty,
-                Error: error);
+                Error: error,
+                ExitCode: null);
         }
     }
 
@@ -288,7 +302,53 @@ internal sealed class NativeAotVerifier(IPackageRegistrationService packageRegis
         }
     }
 
-    private static NativeAotRuntimeVerification Failure(string error) =>
+    private static NativeAotRuntimeVerification ExitFailure(
+        NativeAotRuntimeVerificationRequest request,
+        Process? process = null)
+    {
+        var exitCode = TryReadExitCode(process) ?? TryReadExitCode(request.ExitCodeProvider);
+        var exitDetail = exitCode is null ? string.Empty : $" with exit code {exitCode.Value}";
+        return Failure(
+            $"The app exited{exitDetail} before Native AOT verification completed. " +
+            "Re-run without --verify-native-aot or --detach and add --debug-output; add --symbols for native crash details.",
+            exitCode);
+    }
+
+    private static int? TryReadExitCode(Process? process)
+    {
+        if (process is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return process.HasExited ? process.ExitCode : null;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private static int? TryReadExitCode(Func<int?>? provider)
+    {
+        if (provider is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return provider();
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private static NativeAotRuntimeVerification Failure(string error, int? exitCode = null) =>
         new(
             Succeeded: false,
             Alive: false,
@@ -299,5 +359,6 @@ internal sealed class NativeAotVerifier(IPackageRegistrationService packageRegis
             LoadedModules: [],
             MainWindowHandle: 0,
             MainWindowTitle: string.Empty,
-            Error: error);
+            Error: error,
+            ExitCode: exitCode);
 }

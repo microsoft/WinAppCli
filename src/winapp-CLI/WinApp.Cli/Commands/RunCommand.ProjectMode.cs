@@ -20,12 +20,27 @@ internal partial class RunCommand
         /// Logs a user-facing error, emits the error-shaped JSON envelope in <c>--json</c> mode, and
         /// returns exit code 1. Consolidates the repeated log + PrintJson + return pattern.
         /// </summary>
-        private int Fail(string message, bool isJson)
+        private int Fail(
+            string message,
+            bool isJson,
+            ProjectRunCommandResult? projectReport = null,
+            string? errorCode = null)
         {
             logger.LogError("{UISymbol} {Message}", UiSymbols.Error, message);
             if (isJson)
             {
-                PrintJson(aumid: null, processId: null, message);
+                if (projectReport is not null)
+                {
+                    projectReport.Executed = false;
+                    projectReport.Ready = false;
+                    projectReport.ErrorCode = errorCode ?? "ProjectValidationFailed";
+                    projectReport.Error = message;
+                    PrintJson(projectReport);
+                }
+                else
+                {
+                    PrintJson(aumid: null, processId: null, message);
+                }
             }
             return 1;
         }
@@ -123,6 +138,15 @@ internal partial class RunCommand
                ? ProjectPreparationOperation.Publish
                : ProjectPreparationOperation.Build;
             var properties = parseResult.GetValue(PropertyOption) ?? [];
+            var earlyReport = new ProjectRunCommandResult
+            {
+                SchemaVersion = 1,
+                Operation = dryRun ? "DryRun" : operation.ToString(),
+                Executed = false,
+                Ready = false,
+                Configuration = configuration,
+                ProjectPath = csproj.FullName,
+            };
 
             // Resolve the explicit effective framework ONCE (--framework > bare -p:TargetFramework) so the
             // build and the classification pass (BuildClassificationInputs) share the SAME TFM and never
@@ -144,7 +168,9 @@ internal partial class RunCommand
                     return Fail(
                         $"Invalid --property '{name}'. A single -p cannot pack multiple properties with ';'. " +
                         "Pass one property per repeatable -p (for example: -p A=1 -p B=2), or escape a literal ';' in a value as '%3B'.",
-                        isJson);
+                        isJson,
+                        earlyReport,
+                        "InvalidProperty");
                 }
 
                 var separator = property.IndexOf('=');
@@ -152,7 +178,11 @@ internal partial class RunCommand
                 {
                     // Show the name only — the value may hold a secret.
                     var shown = separator > 0 ? property[..separator] : (separator == 0 ? "(empty)" : property);
-                    return Fail($"Invalid --property '{shown}'. Expected Name=Value (for example: -p WindowsPackageType=None).", isJson);
+                    return Fail(
+                        $"Invalid --property '{shown}'. Expected Name=Value (for example: -p WindowsPackageType=None).",
+                        isJson,
+                        earlyReport,
+                        "InvalidProperty");
                 }
             }
 
@@ -170,24 +200,39 @@ internal partial class RunCommand
 
             if (verifyNativeAot && noLaunch)
             {
-               return Fail("--verify-native-aot cannot be combined with --no-launch because runtime verification requires a launched process.", isJson);
+               return Fail(
+                   "--verify-native-aot cannot be combined with --no-launch because runtime verification requires a launched process.",
+                   isJson,
+                   earlyReport,
+                   "InvalidOptionCombination");
             }
 
             if (verifyNativeAot && withAlias)
             {
-               return Fail("--verify-native-aot cannot be combined with --with-alias; packaged verification requires AUMID activation from the registered staging layout.", isJson);
+               return Fail(
+                   "--verify-native-aot cannot be combined with --with-alias; packaged verification requires AUMID activation from the registered staging layout.",
+                   isJson,
+                   earlyReport,
+                   "InvalidOptionCombination");
             }
 
             if (verifyNativeAot && debugOutput)
             {
-               return Fail("--verify-native-aot cannot be combined with --debug-output because only one startup inspection workflow can own the process.", isJson);
+               return Fail(
+                   "--verify-native-aot cannot be combined with --debug-output because only one startup inspection workflow can own the process.",
+                   isJson,
+                   earlyReport,
+                   "InvalidOptionCombination");
             }
 
             // Resolve the target architecture: --runtime's arch beats --arch; else the process arch.
             if (!TryResolveArchitecture(archOption, runtimeOption, out var architecture, out var archError))
             {
-                return Fail(archError!, isJson);
+                return Fail(archError!, isJson, earlyReport, "InvalidArchitecture");
             }
+            earlyReport.Architecture = architecture;
+            earlyReport.RuntimeIdentifier = RunArchHelper.ToRuntimeIdentifier(architecture);
+            earlyReport.Platform = architecture;
 
             // Immediate, persistent context line (UX): the pre-build steps below each spawn dotnet and can
             // take several silent seconds. Print WHAT we're about to run — and, when the input was
@@ -228,7 +273,7 @@ internal partial class RunCommand
             var sdkError = await projectRunService.CheckSdkAsync(workingDir, cancellationToken);
             if (sdkError != null)
             {
-                return Fail(sdkError, isJson);
+                return Fail(sdkError, isJson, earlyReport, "DotnetSdkUnavailable");
             }
 
             // Build (unless --no-build) and resolve the output properties. ProjectRunService owns the build
@@ -257,7 +302,11 @@ internal partial class RunCommand
                 if (incompatible.Count > 0
                     && await projectRunService.IsDefinitivelyUnpackagedAsync(csproj, buildOptions, cancellationToken))
                 {
-                    return Fail(BuildUnpackagedIncompatibleMessage(incompatible, csproj.Name), isJson);
+                    return Fail(
+                        BuildUnpackagedIncompatibleMessage(incompatible, csproj.Name),
+                        isJson,
+                        earlyReport,
+                        "InvalidUnpackagedOption");
                 }
             }
 
@@ -272,7 +321,7 @@ internal partial class RunCommand
             }
             catch (ProjectRunException ex)
             {
-                return Fail(ex.Message, isJson);
+                return Fail(ex.Message, isJson, earlyReport, "ProjectPreparationFailed");
             }
 
            var report = CreateProjectReport(
@@ -298,6 +347,12 @@ internal partial class RunCommand
 
             var resolution = outcome.Resolution;
            PopulatePreparationReport(report, resolution, outcome);
+            if (!isJson &&
+                logger.IsEnabled(LogLevel.Information) &&
+                !string.IsNullOrWhiteSpace(report.DotnetSdk))
+            {
+                ansiConsole.MarkupLineInterpolated($"{UiSymbols.Check} .NET SDK {report.DotnetSdk}");
+            }
 
            if (dryRun)
            {
@@ -359,9 +414,11 @@ internal partial class RunCommand
 
                if (!staticVerification.Succeeded)
                {
-                   report.ErrorCode = staticVerification.ForbiddenFiles.Count > 0
-                       ? "ManagedRuntimePayloadDetected"
-                       : "NativeAotPayloadInspectionFailed";
+                   report.ErrorCode = staticVerification.SingleFileBundle
+                       ? "DotNetSingleFileBundleDetected"
+                       : staticVerification.ForbiddenFiles.Count > 0
+                           ? "ManagedRuntimePayloadDetected"
+                           : "NativeAotPayloadInspectionFailed";
                    report.Error = staticVerification.Error ??
                        $"Native AOT payload verification failed. Forbidden files: {string.Join(", ", staticVerification.ForbiddenFiles)}";
                    report.NativeAotVerified = false;
@@ -503,6 +560,7 @@ internal partial class RunCommand
            report.ProcessPath = runtimeVerification.ProcessPath;
            report.MainWindowHandle = runtimeVerification.MainWindowHandle;
            report.MainWindowTitle = runtimeVerification.MainWindowTitle;
+           report.ProcessExitCode = runtimeVerification.ExitCode;
            report.NativeAotVerified = runtimeVerification.Succeeded &&
                staticVerification?.Succeeded == true;
            report.Verification ??= new RunVerificationResult();
@@ -586,7 +644,7 @@ internal partial class RunCommand
                       "Remove --no-build to rebuild the packaged layout, or point the run at an up-to-date packaged build."
                    : $"'{csproj.Name}' resolves to a packaged (MSIX) app but no AppxManifest.xml was found in the selected output ({outputDir.FullName}). " +
                       "Ensure the project is a packaged WinUI app (EnableMsixTooling=true with a Package.appxmanifest), or force an unpackaged run with -p:WindowsPackageType=None.";
-                return Fail(message, isJson);
+                return Fail(message, isJson, report, "GeneratedManifestMissing");
             }
 
             return await ExecuteRunPipelineAsync(
@@ -634,7 +692,11 @@ internal partial class RunCommand
             var rejected = CollectUnpackagedIncompatibleOptions(noLaunch, withAlias, unregisterOnExit, clean, manifest, outputAppXDirectory, executable);
             if (rejected.Count > 0)
             {
-                return Fail(BuildUnpackagedIncompatibleMessage(rejected, csproj.Name), isJson);
+                return Fail(
+                    BuildUnpackagedIncompatibleMessage(rejected, csproj.Name),
+                    isJson,
+                    report,
+                    "InvalidUnpackagedOption");
             }
 
             var exePath = resolution.RunCommand!; // guaranteed non-null for unpackaged by BuildAndResolveAsync
@@ -742,13 +804,40 @@ internal partial class RunCommand
 
                 if (verifyNativeAot)
                 {
-                   var runtimeVerification = await nativeAotVerifier.VerifyRuntimeAsync(
-                       new NativeAotRuntimeVerificationRequest(
-                           processId,
-                           resolution.SourceExecutable ?? exePath,
-                           resolution.SourceExecutable ?? exePath,
-                           ProjectPackaging.Unpackaged),
-                       cancellationToken);
+                   NativeAotRuntimeVerification runtimeVerification;
+                   try
+                   {
+                       runtimeVerification = await nativeAotVerifier.VerifyRuntimeAsync(
+                           new NativeAotRuntimeVerificationRequest(
+                               processId,
+                               resolution.SourceExecutable ?? exePath,
+                               resolution.SourceExecutable ?? exePath,
+                               ProjectPackaging.Unpackaged,
+                               ExitCodeProvider: () => TryReadExitCode(launched)),
+                           cancellationToken);
+                   }
+                   catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                   {
+                       launched.Kill();
+                       throw;
+                   }
+                   catch (Exception ex)
+                   {
+                       launched.Kill();
+                       report.ErrorCode = "NativeAotVerificationFailed";
+                       report.Error =
+                           $"Native AOT verification failed: {ex.Message} Launched process PID {processId} was terminated. " +
+                           "Re-run without --verify-native-aot or --detach and add --debug-output; add --symbols for native crash details.";
+                       if (isJson)
+                       {
+                           PrintJson(report);
+                       }
+                       else
+                       {
+                           logger.LogError("{UISymbol} {Message}", UiSymbols.Error, report.Error);
+                       }
+                       return 1;
+                   }
                    PopulateRuntimeVerificationReport(
                        report,
                        staticVerification,
@@ -759,7 +848,9 @@ internal partial class RunCommand
                    {
                        launched.Kill();
                        report.ErrorCode = NativeAotRuntimeErrorCode(runtimeVerification);
-                       report.Error = runtimeVerification.Error ?? "Native AOT runtime verification failed.";
+                       report.Error =
+                           $"{runtimeVerification.Error ?? "Native AOT runtime verification failed."} " +
+                           $"Launched process PID {processId} was terminated or had already exited.";
                        if (isJson)
                        {
                            PrintJson(report);
@@ -877,6 +968,18 @@ internal partial class RunCommand
                 // Ctrl+C — kill the launched process before exiting.
                 launched.Kill();
                 return -1;
+            }
+        }
+
+        private static int? TryReadExitCode(ILaunchedProcess launched)
+        {
+            try
+            {
+                return launched.ExitCode;
+            }
+            catch (InvalidOperationException)
+            {
+                return null;
             }
         }
 

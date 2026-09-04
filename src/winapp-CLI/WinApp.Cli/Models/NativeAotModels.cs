@@ -32,7 +32,8 @@ internal sealed record WindowsNativeToolchainResolution(
 internal sealed record NativeAotStaticVerification(
     bool Succeeded,
     IReadOnlyList<string> ForbiddenFiles,
-    string? Error = null);
+    string? Error = null,
+    bool SingleFileBundle = false);
 
 internal sealed record NativeAotRuntimeVerificationRequest(
     uint ProcessId,
@@ -40,7 +41,8 @@ internal sealed record NativeAotRuntimeVerificationRequest(
     string ExpectedProcessPath,
     ProjectPackaging Packaging,
     string? StagingDirectory = null,
-    string? PackageIdentity = null);
+    string? PackageIdentity = null,
+    Func<int?>? ExitCodeProvider = null);
 
 internal sealed record NativeAotRuntimeVerification(
     bool Succeeded,
@@ -52,7 +54,8 @@ internal sealed record NativeAotRuntimeVerification(
     IReadOnlyList<string> LoadedModules,
     long MainWindowHandle,
     string MainWindowTitle,
-    string? Error = null);
+    string? Error = null,
+    int? ExitCode = null);
 
 internal sealed class RunVerificationResult
 {

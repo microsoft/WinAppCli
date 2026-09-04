@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using WinApp.Cli.Helpers;
@@ -30,13 +31,24 @@ internal sealed partial class ProjectRunService
         }
 
         var build = await BuildAndResolveCoreAsync(csproj, options, cancellationToken);
+        var resolution = build.Resolution;
+        if (resolution is not null && string.IsNullOrWhiteSpace(resolution.DotnetSdk))
+        {
+            var workingDirectory = csproj.Directory ?? new DirectoryInfo(Directory.GetCurrentDirectory());
+            resolution = resolution with
+            {
+                DotnetSdk = await ResolveDotnetSdkVersionAsync(
+                    workingDirectory,
+                    cancellationToken),
+            };
+        }
         return new ProjectPreparationOutcome(
-            build.Resolution,
+            resolution,
             build.ExitCode,
             Executed: true,
-            Ready: build.Resolution is not null,
-            ErrorCode: build.Resolution is null ? "BuildFailed" : null,
-            Error: build.Resolution is null ? $"Build failed (exit code {build.ExitCode})." : null);
+            Ready: resolution is not null,
+            ErrorCode: resolution is null ? "BuildFailed" : null,
+            Error: resolution is null ? $"Build failed (exit code {build.ExitCode})." : null);
     }
 
     /// <summary>
@@ -112,7 +124,9 @@ internal sealed partial class ProjectRunService
             SourceExecutable: NullIfEmpty(GetProp(props, "RunCommand")),
             ProjectAssetsFile: ResolveAbsolutePath(GetProp(props, "ProjectAssetsFile"), workingDir),
             DotnetSdk: await ResolveDotnetSdkVersionAsync(workingDir, cancellationToken),
-            EvaluatedPlatform: NullIfEmpty(GetProp(props, "Platform")) ?? options.Platform);
+            EvaluatedPlatform: NullIfEmpty(GetProp(props, "Platform")) ?? options.Platform,
+            BundledNetCoreAppPackageVersion: NullIfEmpty(
+                GetProp(props, "BundledNETCoreAppPackageVersion")));
 
         return new ProjectPreparationOutcome(
             resolution,
@@ -235,7 +249,7 @@ internal sealed partial class ProjectRunService
                 return FailedPreparation("PublishPlanInvalid", ex.Message, executed: false);
             }
 
-            if (publishAot && !NativeAotRuntimePackIsRestored(resolution))
+            if (publishAot && !NativeAotRuntimePacksAreAvailable(resolution))
             {
                 return RestoreRequiredOutcome(csproj, options, publishAot, 1, null, resolution);
             }
@@ -517,7 +531,9 @@ internal sealed partial class ProjectRunService
             DotnetSdk: dotnetSdk,
             NativeToolchain: toolchain,
             PublishProfile: NullIfEmpty(GetProp(properties, "PublishProfile")),
-            EvaluatedPlatform: NullIfEmpty(GetProp(properties, "Platform")) ?? options.Platform);
+            EvaluatedPlatform: NullIfEmpty(GetProp(properties, "Platform")) ?? options.Platform,
+            BundledNetCoreAppPackageVersion: NullIfEmpty(
+                GetProp(properties, "BundledNETCoreAppPackageVersion")));
     }
 
     private static string ResolvePublishedExecutable(
@@ -608,7 +624,7 @@ internal sealed partial class ProjectRunService
         return candidates.FirstOrDefault();
     }
 
-    private static bool NativeAotRuntimePackIsRestored(ProjectRunResolution resolution)
+    internal static bool NativeAotRuntimePacksAreAvailable(ProjectRunResolution resolution)
     {
         if (string.IsNullOrWhiteSpace(resolution.ProjectAssetsFile) ||
             !File.Exists(resolution.ProjectAssetsFile))
@@ -618,16 +634,101 @@ internal sealed partial class ProjectRunService
 
         try
         {
-            var assets = File.ReadAllText(resolution.ProjectAssetsFile);
+            using var assets = JsonDocument.Parse(File.ReadAllText(resolution.ProjectAssetsFile));
             var rid = resolution.RuntimeIdentifier ?? RunArchHelper.ToRuntimeIdentifier(resolution.Architecture);
-            return assets.Contains(
-                $"Microsoft.NETCore.App.Runtime.NativeAOT.{rid}",
-                StringComparison.OrdinalIgnoreCase);
+            var runtimePackId = $"Microsoft.NETCore.App.Runtime.NativeAOT.{rid}";
+            var compilerPackId = $"runtime.{rid}.Microsoft.DotNet.ILCompiler";
+            var version = resolution.BundledNetCoreAppPackageVersion
+                ?? FindPackageVersion(assets.RootElement, runtimePackId)
+                ?? FindPackageVersion(assets.RootElement, compilerPackId);
+            if (string.IsNullOrWhiteSpace(version) ||
+                !assets.RootElement.TryGetProperty("packageFolders", out var packageFolders) ||
+                packageFolders.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            foreach (var packageFolder in packageFolders.EnumerateObject())
+            {
+                if (IsCompletePackage(packageFolder.Name, runtimePackId, version) &&
+                    IsCompletePackage(packageFolder.Name, compilerPackId, version))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (
+            ex is IOException or
+            UnauthorizedAccessException or
+            JsonException)
         {
             return false;
         }
+    }
+
+    private static string? FindPackageVersion(JsonElement assets, string packageId)
+    {
+        if (assets.TryGetProperty("libraries", out var libraries) &&
+            libraries.ValueKind == JsonValueKind.Object)
+        {
+            var prefix = packageId + "/";
+            var library = libraries.EnumerateObject().FirstOrDefault(property =>
+                property.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+            if (library.Name is not null)
+            {
+                return library.Name[prefix.Length..];
+            }
+        }
+
+        if (!assets.TryGetProperty("project", out var project) ||
+            !project.TryGetProperty("frameworks", out var frameworks) ||
+            frameworks.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        foreach (var framework in frameworks.EnumerateObject())
+        {
+            if (!framework.Value.TryGetProperty("downloadDependencies", out var dependencies) ||
+                dependencies.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (var dependency in dependencies.EnumerateArray())
+            {
+                if (!dependency.TryGetProperty("name", out var name) ||
+                    !string.Equals(name.GetString(), packageId, StringComparison.OrdinalIgnoreCase) ||
+                    !dependency.TryGetProperty("version", out var versionElement))
+                {
+                    continue;
+                }
+
+                var range = versionElement.GetString()?.Trim();
+                if (!string.IsNullOrWhiteSpace(range) &&
+                    range.StartsWith('[') &&
+                    range.EndsWith(']'))
+                {
+                    return range[1..^1]
+                        .Split(',', StringSplitOptions.TrimEntries)
+                        .FirstOrDefault();
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsCompletePackage(string packageFolder, string packageId, string version)
+    {
+        var packageDirectory = Path.Combine(
+            packageFolder,
+            packageId.ToLowerInvariant(),
+            version.ToLowerInvariant());
+        return Directory.Exists(packageDirectory) &&
+               File.Exists(Path.Combine(packageDirectory, ".nupkg.metadata"));
     }
 
     private static bool TryFindNativeAotDiagnostic(

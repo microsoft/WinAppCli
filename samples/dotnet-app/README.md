@@ -70,3 +70,21 @@ Double-click the `.msix` file to install, then run from anywhere:
 ```powershell
 dotnet-app
 ```
+
+## Native AOT runtime acceptance
+
+The repository includes a real-device acceptance runner that publishes, launches, and verifies
+an isolated packaged WinUI fixture and a long-running unpackaged Native AOT console fixture:
+
+```powershell
+# x64
+.\scripts\test-native-aot-run.ps1 -Architecture x64
+
+# Run this command on Windows ARM64
+.\scripts\test-native-aot-run.ps1 -Architecture arm64 `
+  -WinappPath .\artifacts\cli\win-arm64\winapp.exe
+```
+
+The ARM64 command is a runtime test and must run on an ARM64 device with the ARM64 C++ build tools.
+It validates process survival, published/staged provenance, package registration, and the absence
+of CoreCLR/JIT modules, then cleans up its process and development registration.
