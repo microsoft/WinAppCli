@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using WinApp.Cli.Helpers;
+
 namespace WinApp.Cli.Services;
 
 /// <summary>
@@ -24,6 +26,12 @@ internal static class IncrementalCopyHelper
         HashSet<string>? protectedFileNames = null,
         Func<FileInfo, bool>? includeFile = null)
     {
+        if (DirectoryRelationship.IsSameOrAncestor(destDir, sourceDir))
+        {
+            throw new InvalidOperationException(
+                $"The destination directory '{destDir.FullName}' cannot be the source directory '{sourceDir.FullName}' or one of its ancestors.");
+        }
+
         if (!destDir.Exists)
         {
             destDir.Create();

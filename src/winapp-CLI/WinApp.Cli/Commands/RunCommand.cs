@@ -621,6 +621,12 @@ internal partial class RunCommand : Command, IShortDescription
                     }
 
                     outputAppXDirectory ??= new DirectoryInfo(Path.Combine(inputFolder.FullName, "AppX"));
+                    if (DirectoryRelationship.IsSameOrAncestor(outputAppXDirectory, inputFolder))
+                    {
+                        throw new InvalidOperationException(
+                            $"The AppX output directory '{outputAppXDirectory.FullName}' cannot be the input directory '{inputFolder.FullName}' or one of its ancestors. " +
+                            "Choose a separate directory or a child directory such as 'AppX'.");
+                    }
                     resolvedOutputDir = outputAppXDirectory;
 
                     // Validate that the manifest and output paths are usable (check long path support if needed)

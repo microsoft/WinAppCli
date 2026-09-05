@@ -898,6 +898,49 @@ public class RunCommandProjectModeTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task ProjectMode_PackagedPublishRejectsStagingDirectoryContainingPublishDir()
+    {
+       var csproj = CreateCsproj();
+       var targetDirectory = CreateTargetDir(withManifest: true);
+       var projectDirectory = csproj.Directory!;
+       var publishDirectory = projectDirectory.CreateSubdirectory("publish");
+       var executable = ChildPath(publishDirectory.FullName, "TestApp.exe");
+       File.WriteAllText(executable, "fixture");
+       var generatedManifest = ChildPath(targetDirectory.FullName, "appxmanifest.xml");
+       _fakeProjectRunService.PreparationOutcome = new ProjectPreparationOutcome(
+           new ProjectRunResolution(
+               csproj,
+               targetDirectory.FullName,
+               null,
+               ProjectPackaging.Packaged,
+               SelfContained: true,
+               Architecture: "x64",
+               Operation: ProjectPreparationOperation.Publish,
+               PublishDirectory: publishDirectory.FullName,
+               PublishAot: false,
+               RuntimeIdentifier: "win-x64",
+               SourceExecutable: executable,
+               FinalAppxManifestPath: generatedManifest),
+           0);
+       var command = GetRequiredService<RunCommand>();
+
+       var exitCode = await ParseAndInvokeWithCaptureAsync(
+           command,
+           [
+               csproj.FullName,
+               "--publish",
+               "--output-appx-directory",
+               projectDirectory.FullName,
+               "--detach",
+           ]);
+       Assert.AreEqual(1, exitCode);
+       Assert.AreEqual(1, exitCode);
+       Assert.IsTrue(csproj.Exists, "The project must not be deleted by staging validation.");
+       Assert.IsTrue(File.Exists(executable), "The published executable must remain intact.");
+       Assert.AreEqual(0, _fakeMsixService.AddLooseLayoutCalls.Count);
+    }
+
+    [TestMethod]
     public async Task ProjectMode_DryRun_DoesNotPublishRegisterOrLaunch()
     {
        var csproj = CreateCsproj();
