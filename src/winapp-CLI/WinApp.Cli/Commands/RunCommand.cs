@@ -79,7 +79,7 @@ internal partial class RunCommand : Command, IShortDescription, ITargetAwareComm
 
         OutputAppXDirectoryOption = new Option<DirectoryInfo?>("--output-appx-directory")
         {
-            Description = "Output directory for the loose layout package. If not specified, a directory named AppX inside the input directory will be used. The directory is kept matching the build, so files the app no longer contains are removed from it."
+            Description = "Output directory for the loose layout package. If not specified, a directory named AppX inside the input directory will be used. Files winapp staged there are kept matching the build, so a file your app no longer contains is removed on the next run; files winapp did not put there are left alone."
         };
 
         ArgsOption = new Option<string>("--args")

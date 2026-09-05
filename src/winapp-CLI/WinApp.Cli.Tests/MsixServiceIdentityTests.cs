@@ -28,7 +28,12 @@ public class MsixServiceIdentityTests : BaseCommandTests
     private FakeDotNetService _fakeDotNet = null!;
 
     private static readonly MethodInfo CopyFilesFromRecipeMethod =
-        typeof(MsixService).GetMethod("CopyFilesFromRecipeAsync", BindingFlags.NonPublic | BindingFlags.Static)!;
+        typeof(MsixService).GetMethod("CopyFilesFromRecipeAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+
+    private static readonly Type LayoutReconciliationType =
+        typeof(MsixService).GetNestedType("LayoutReconciliation", BindingFlags.NonPublic)!;
+
+    private static object Reconciliation(string name) => Enum.Parse(LayoutReconciliationType, name);
 
     private static readonly MethodInfo SyncFilesToOutputMethod =
         typeof(MsixService).GetMethod("SyncFilesToOutputDirectory", BindingFlags.NonPublic | BindingFlags.Static)!;
@@ -143,10 +148,33 @@ public class MsixServiceIdentityTests : BaseCommandTests
         return recipePath;
     }
 
-    private Task InvokeCopyFilesFromRecipeAsync(FileInfo recipe, DirectoryInfo outputDir)
+    /// <summary>
+    /// Invokes the layout copy. Defaults to <c>Exact</c> — winapp's own generated layout — because
+    /// that is what a plain <c>winapp run</c> produces; tests covering a user-named directory pass
+    /// <c>Attributed</c> explicitly.
+    /// </summary>
+    private Task InvokeCopyFilesFromRecipeAsync(FileInfo recipe, DirectoryInfo outputDir, string reconciliation = "Exact")
     {
         return (Task)CopyFilesFromRecipeMethod.Invoke(
-            null, [recipe, outputDir, TestTaskContext, CancellationToken.None])!;
+            _msixService, [recipe, outputDir, TestTaskContext, Reconciliation(reconciliation), CancellationToken.None])!;
+    }
+
+    /// <summary>Runs the layout copy and returns the exception it failed with, or null if it succeeded.</summary>
+    private async Task<Exception?> CaptureCopyFailureAsync(FileInfo recipe, DirectoryInfo outputDir, string reconciliation = "Exact")
+    {
+        try
+        {
+            await InvokeCopyFilesFromRecipeAsync(recipe, outputDir, reconciliation);
+            return null;
+        }
+        catch (TargetInvocationException ex) when (ex.InnerException is not null)
+        {
+            return ex.InnerException;
+        }
+        catch (Exception ex)
+        {
+            return ex;
+        }
     }
 
     private void InvokeSyncFilesToOutputDirectory(DirectoryInfo input, DirectoryInfo output, FileInfo manifest)
@@ -217,8 +245,12 @@ public class MsixServiceIdentityTests : BaseCommandTests
             "Unchanged file (same size + timestamp) should be skipped, not overwritten");
     }
 
+    /// <summary>
+    /// A recipe entry whose source the build did not produce means the build is incomplete. Staging
+    /// the rest would produce a layout mixing this build with an older one, so it fails first.
+    /// </summary>
     [TestMethod]
-    public async Task CopyFilesFromRecipeAsync_MissingSourceFile_IsSkipped()
+    public async Task CopyFilesFromRecipeAsync_MissingSourceFile_FailsBeforeTouchingTheLayout()
     {
         var srcDir = _tempDirectory.CreateSubdirectory("recipe-src");
         var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "AppxManifest.xml"));
@@ -228,10 +260,12 @@ public class MsixServiceIdentityTests : BaseCommandTests
         var recipe = new FileInfo(WriteRecipe(srcManifest, (missing, "does-not-exist.dll")));
         var outputDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "layout"));
 
-        await InvokeCopyFilesFromRecipeAsync(recipe, outputDir);
+        var failure = await CaptureCopyFailureAsync(recipe, outputDir);
 
-        Assert.IsTrue(File.Exists(Path.Combine(outputDir.FullName, "appxmanifest.xml")), "Manifest still copied");
-        Assert.IsFalse(File.Exists(Path.Combine(outputDir.FullName, "does-not-exist.dll")), "Missing source must not produce a dest file");
+        Assert.IsInstanceOfType<InvalidOperationException>(failure, "A build that did not produce a listed file must fail materialization");
+        StringAssert.Contains(failure!.Message, "does-not-exist.dll", StringComparison.Ordinal);
+        Assert.IsFalse(File.Exists(Path.Combine(outputDir.FullName, "appxmanifest.xml")),
+            "Validation must fail before anything is written into the layout");
     }
 
     // ---- CopyFilesFromRecipeAsync: reconciliation ---------------------------------
@@ -307,11 +341,11 @@ public class MsixServiceIdentityTests : BaseCommandTests
     }
 
     /// <summary>
-    /// A missing source means the build could not refresh that file, not that the app dropped it.
-    /// Deleting it would turn a partial build into a broken layout.
+    /// A build that stopped producing a file it still lists leaves the previous layout — a state that
+    /// is known to work — exactly as it was, rather than half-updating it.
     /// </summary>
     [TestMethod]
-    public async Task CopyFilesFromRecipeAsync_MissingSourceFile_KeepsThePreviouslyStagedFile()
+    public async Task CopyFilesFromRecipeAsync_MissingSourceOnSecondRun_LeavesThePriorLayoutIntact()
     {
         var srcDir = _tempDirectory.CreateSubdirectory("recipe-src");
         var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "AppxManifest.xml"));
@@ -326,17 +360,20 @@ public class MsixServiceIdentityTests : BaseCommandTests
 
         payload.Delete();
 
-        // Same recipe, source now unreadable.
-        await InvokeCopyFilesFromRecipeAsync(
+        // Same recipe, source now gone.
+        var failure = await CaptureCopyFailureAsync(
             new FileInfo(WriteRecipe(srcManifest, (payload.FullName, "TestApp.dll"))), outputDir);
 
+        Assert.IsInstanceOfType<InvalidOperationException>(failure, "A missing source must fail rather than silently keep stale content");
         Assert.AreEqual("v1", await File.ReadAllTextAsync(Path.Combine(outputDir.FullName, "TestApp.dll"), TestContext.CancellationToken),
-            "A recipe entry whose source is missing must leave the staged file intact");
+            "The previous layout must survive a failed materialization unchanged");
+        Assert.IsTrue(File.Exists(Path.Combine(outputDir.FullName, "appxmanifest.xml")),
+            "The previous layout must survive a failed materialization unchanged");
     }
 
-    /// <summary>A recipe that describes nothing is evidence of a bad read, not of an empty app.</summary>
+    /// <summary>A recipe that describes nothing is evidence of an incomplete build, not of an empty app.</summary>
     [TestMethod]
-    public async Task CopyFilesFromRecipeAsync_RecipeListsNothing_LeavesLayoutUntouched()
+    public async Task CopyFilesFromRecipeAsync_RecipeListsNothing_FailsAndLeavesLayoutUntouched()
     {
         var outputDir = Directory.CreateDirectory(Path.Combine(_tempDirectory.FullName, "layout"));
         var existing = Path.Combine(outputDir.FullName, "TestApp.exe");
@@ -353,9 +390,90 @@ public class MsixServiceIdentityTests : BaseCommandTests
             """,
             TestContext.CancellationToken);
 
-        await InvokeCopyFilesFromRecipeAsync(new FileInfo(recipePath), new DirectoryInfo(outputDir.FullName));
+        var failure = await CaptureCopyFailureAsync(new FileInfo(recipePath), new DirectoryInfo(outputDir.FullName));
 
+        Assert.IsInstanceOfType<InvalidOperationException>(failure, "An empty recipe must fail rather than be treated as an empty app");
         Assert.IsTrue(File.Exists(existing), "An empty recipe must not empty the layout");
+    }
+
+    [TestMethod]
+    public async Task CopyFilesFromRecipeAsync_MalformedRecipe_FailsAndLeavesLayoutUntouched()
+    {
+        var outputDir = Directory.CreateDirectory(Path.Combine(_tempDirectory.FullName, "layout"));
+        var existing = Path.Combine(outputDir.FullName, "TestApp.exe");
+        await File.WriteAllTextAsync(existing, "exe", TestContext.CancellationToken);
+
+        var recipePath = Path.Combine(_tempDirectory.FullName, "Broken.build.appxrecipe");
+        await File.WriteAllTextAsync(recipePath, "<Project><ItemGroup>", TestContext.CancellationToken);
+
+        var failure = await CaptureCopyFailureAsync(new FileInfo(recipePath), new DirectoryInfo(outputDir.FullName));
+
+        Assert.IsInstanceOfType<InvalidOperationException>(failure, "A truncated recipe must fail rather than be read as a small app");
+        Assert.IsTrue(File.Exists(existing), "A malformed recipe must not empty the layout");
+    }
+
+    [TestMethod]
+    public async Task CopyFilesFromRecipeAsync_DuplicatePackagePathsDifferingOnlyByCase_Fails()
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("recipe-src");
+        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        var first = new FileInfo(Path.Combine(srcDir.FullName, "one.dll"));
+        var second = new FileInfo(Path.Combine(srcDir.FullName, "two.dll"));
+        await File.WriteAllTextAsync(first.FullName, "one", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(second.FullName, "two", TestContext.CancellationToken);
+
+        // On Windows these are one destination, so which file wins would be arbitrary.
+        var recipe = new FileInfo(WriteRecipe(srcManifest,
+            (first.FullName, "Shared.dll"),
+            (second.FullName, "shared.dll")));
+
+        var outputDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "layout"));
+        var failure = await CaptureCopyFailureAsync(recipe, outputDir);
+
+        Assert.IsInstanceOfType<InvalidOperationException>(failure, "Two sources mapped to one destination must fail");
+        StringAssert.Contains(failure!.Message, "two different files", StringComparison.Ordinal);
+    }
+
+    [TestMethod]
+    public async Task CopyFilesFromRecipeAsync_IdenticalDuplicateEntry_IsAccepted()
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("recipe-src");
+        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        var payload = new FileInfo(Path.Combine(srcDir.FullName, "TestApp.dll"));
+        await File.WriteAllTextAsync(payload.FullName, "payload", TestContext.CancellationToken);
+
+        // The same file listed twice is redundant, not ambiguous.
+        var recipe = new FileInfo(WriteRecipe(srcManifest,
+            (payload.FullName, "TestApp.dll"),
+            (payload.FullName, "TestApp.dll")));
+
+        var outputDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "layout"));
+        await InvokeCopyFilesFromRecipeAsync(recipe, outputDir);
+
+        Assert.AreEqual("payload", await File.ReadAllTextAsync(Path.Combine(outputDir.FullName, "TestApp.dll"), TestContext.CancellationToken));
+    }
+
+    [TestMethod]
+    [DataRow(@"..\escaped.dll", DisplayName = "parent traversal")]
+    [DataRow(@"Sub\..\..\escaped.dll", DisplayName = "traversal after a subdirectory")]
+    [DataRow(@"C:\Windows\System32\escaped.dll", DisplayName = "absolute path")]
+    public async Task CopyFilesFromRecipeAsync_PackagePathEscapingTheLayout_Fails(string packagePath)
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("recipe-src");
+        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        var payload = new FileInfo(Path.Combine(srcDir.FullName, "payload.dll"));
+        await File.WriteAllTextAsync(payload.FullName, "payload", TestContext.CancellationToken);
+
+        var recipe = new FileInfo(WriteRecipe(srcManifest, (payload.FullName, packagePath)));
+        var outputDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "layout"));
+
+        var failure = await CaptureCopyFailureAsync(recipe, outputDir);
+
+        Assert.IsInstanceOfType<InvalidOperationException>(failure, $"'{packagePath}' does not name a location inside the package");
+        Assert.IsFalse(File.Exists(Path.Combine(_tempDirectory.FullName, "escaped.dll")), "Nothing may be written outside the layout");
     }
 
     [TestMethod]
@@ -476,6 +594,312 @@ public class MsixServiceIdentityTests : BaseCommandTests
                 // Best-effort cleanup; the temp root is removed anyway.
             }
         }
+    }
+
+    // ---- CopyFilesFromRecipeAsync: ownership, links, locking ----------------------
+
+    /// <summary>
+    /// A user-named layout can already hold files winapp never staged. Those are not winapp's to
+    /// delete, however confidently the recipe says they are not part of the app.
+    /// </summary>
+    [TestMethod]
+    public async Task CopyFilesFromRecipeAsync_UserSuppliedLayout_KeepsFilesWinappNeverStaged()
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("recipe-src");
+        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        var payload = new FileInfo(Path.Combine(srcDir.FullName, "TestApp.dll"));
+        await File.WriteAllTextAsync(payload.FullName, "payload", TestContext.CancellationToken);
+
+        var outputDir = Directory.CreateDirectory(Path.Combine(_tempDirectory.FullName, "user-layout"));
+        var userFile = Path.Combine(outputDir.FullName, "my-notes.txt");
+        await File.WriteAllTextAsync(userFile, "mine", TestContext.CancellationToken);
+        var userDir = Directory.CreateDirectory(Path.Combine(outputDir.FullName, "MyStuff"));
+        var nestedUserFile = Path.Combine(userDir.FullName, "nested.bin");
+        await File.WriteAllTextAsync(nestedUserFile, "also mine", TestContext.CancellationToken);
+
+        await InvokeCopyFilesFromRecipeAsync(
+            new FileInfo(WriteRecipe(srcManifest, (payload.FullName, "TestApp.dll"))),
+            new DirectoryInfo(outputDir.FullName),
+            "Attributed");
+
+        Assert.IsTrue(File.Exists(userFile), "A file winapp never staged must survive in a user-named layout");
+        Assert.IsTrue(File.Exists(nestedUserFile), "A nested file winapp never staged must survive");
+        Assert.IsTrue(Directory.Exists(userDir.FullName), "A directory winapp never created must survive");
+        Assert.IsTrue(File.Exists(Path.Combine(outputDir.FullName, "TestApp.dll")), "The app's own files are still staged");
+    }
+
+    /// <summary>
+    /// The other half of attribution: a file winapp did stage and the app no longer contains is
+    /// removed even from a user-named layout, so the guest never receives dropped content.
+    /// </summary>
+    [TestMethod]
+    public async Task CopyFilesFromRecipeAsync_UserSuppliedLayout_RemovesOnlyWhatWinappStaged()
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("recipe-src");
+        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        var keep = new FileInfo(Path.Combine(srcDir.FullName, "keep.dll"));
+        var dropped = new FileInfo(Path.Combine(srcDir.FullName, "dropped.dll"));
+        await File.WriteAllTextAsync(keep.FullName, "keep", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(dropped.FullName, "dropped", TestContext.CancellationToken);
+
+        var outputDir = Directory.CreateDirectory(Path.Combine(_tempDirectory.FullName, "user-layout"));
+        var userFile = Path.Combine(outputDir.FullName, "my-notes.txt");
+        await File.WriteAllTextAsync(userFile, "mine", TestContext.CancellationToken);
+
+        await InvokeCopyFilesFromRecipeAsync(
+            new FileInfo(WriteRecipe(srcManifest, (keep.FullName, "keep.dll"), (dropped.FullName, "dropped.dll"))),
+            new DirectoryInfo(outputDir.FullName),
+            "Attributed");
+
+        dropped.Delete();
+
+        await InvokeCopyFilesFromRecipeAsync(
+            new FileInfo(WriteRecipe(srcManifest, (keep.FullName, "keep.dll"))),
+            new DirectoryInfo(outputDir.FullName),
+            "Attributed");
+
+        Assert.IsFalse(File.Exists(Path.Combine(outputDir.FullName, "dropped.dll")),
+            "A file winapp staged and the app dropped must be removed");
+        Assert.IsTrue(File.Exists(Path.Combine(outputDir.FullName, "keep.dll")), "A file still in the app must be kept");
+        Assert.IsTrue(File.Exists(userFile), "The user's own file must still survive");
+    }
+
+    /// <summary>
+    /// Without an attribution record there is no evidence any file is winapp's, so a user-named
+    /// layout gives up nothing on the first run. This is the fail-safe direction: leaking a stale
+    /// file is recoverable, deleting a user's file is not.
+    /// </summary>
+    [TestMethod]
+    public async Task CopyFilesFromRecipeAsync_UserSuppliedLayoutWithNoAttribution_PrunesNothing()
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("recipe-src");
+        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        var payload = new FileInfo(Path.Combine(srcDir.FullName, "TestApp.dll"));
+        await File.WriteAllTextAsync(payload.FullName, "payload", TestContext.CancellationToken);
+
+        var outputDir = Directory.CreateDirectory(Path.Combine(_tempDirectory.FullName, "user-layout"));
+        var unknown = Path.Combine(outputDir.FullName, "left-by-someone-else.dll");
+        await File.WriteAllTextAsync(unknown, "unknown", TestContext.CancellationToken);
+
+        await InvokeCopyFilesFromRecipeAsync(
+            new FileInfo(WriteRecipe(srcManifest, (payload.FullName, "TestApp.dll"))),
+            new DirectoryInfo(outputDir.FullName),
+            "Attributed");
+
+        Assert.IsTrue(File.Exists(unknown), "An unattributed file must survive the first run against a user-named layout");
+    }
+
+    /// <summary>
+    /// The attribution record is winapp's bookkeeping, not app payload. Keeping it outside the layout
+    /// is what makes it impossible to package or register by accident.
+    /// </summary>
+    [TestMethod]
+    public async Task CopyFilesFromRecipeAsync_AttributionRecord_IsNeverWrittenIntoTheLayout()
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("recipe-src");
+        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        var payload = new FileInfo(Path.Combine(srcDir.FullName, "TestApp.dll"));
+        await File.WriteAllTextAsync(payload.FullName, "payload", TestContext.CancellationToken);
+
+        var outputDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "layout"));
+
+        await InvokeCopyFilesFromRecipeAsync(
+            new FileInfo(WriteRecipe(srcManifest, (payload.FullName, "TestApp.dll"))), outputDir);
+
+        var staged = outputDir.GetFiles("*", SearchOption.AllDirectories).Select(f => f.Name).ToList();
+        CollectionAssert.AreEquivalent(
+            new[] { "appxmanifest.xml", "TestApp.dll" },
+            staged,
+            "The layout must contain only app payload; attribution state lives in the winapp state directory");
+
+        var store = new LayoutAttributionStore(_testCacheDirectory);
+        Assert.IsTrue(store.StateFileFor(outputDir.FullName).Exists, "The attribution record must be written outside the layout");
+    }
+
+    /// <summary>
+    /// Every safety rule here is phrased as "inside the layout". A link in the layout's own path makes
+    /// that phrase name a different tree, so such a path is refused rather than reasoned about.
+    /// </summary>
+    [TestMethod]
+    public async Task CopyFilesFromRecipeAsync_LayoutRootIsAJunction_IsRefused()
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("recipe-src");
+        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+
+        var real = _tempDirectory.CreateSubdirectory("real-target");
+        var precious = Path.Combine(real.FullName, "precious.txt");
+        await File.WriteAllTextAsync(precious, "precious", TestContext.CancellationToken);
+
+        var layoutPath = Path.Combine(_tempDirectory.FullName, "layout-link");
+        if (!TryCreateJunction(layoutPath, real.FullName))
+        {
+            Assert.Inconclusive("Could not create a directory junction on this machine.");
+            return;
+        }
+
+        try
+        {
+            var failure = await CaptureCopyFailureAsync(
+                new FileInfo(WriteRecipe(srcManifest)), new DirectoryInfo(layoutPath));
+
+            Assert.IsInstanceOfType<InvalidOperationException>(failure, "A layout root that is a junction must be refused");
+            StringAssert.Contains(failure!.Message, "junction", StringComparison.OrdinalIgnoreCase);
+            Assert.IsTrue(File.Exists(precious), "Nothing in the junction's target may be touched");
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(layoutPath, recursive: false);
+            }
+            catch
+            {
+                // Best-effort cleanup; the temp root is removed anyway.
+            }
+        }
+    }
+
+    [TestMethod]
+    public async Task CopyFilesFromRecipeAsync_LayoutParentIsAJunction_IsRefused()
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("recipe-src");
+        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+
+        var real = _tempDirectory.CreateSubdirectory("real-parent");
+        var layoutInsideReal = Directory.CreateDirectory(Path.Combine(real.FullName, "AppX"));
+        var precious = Path.Combine(layoutInsideReal.FullName, "precious.txt");
+        await File.WriteAllTextAsync(precious, "precious", TestContext.CancellationToken);
+
+        var parentLink = Path.Combine(_tempDirectory.FullName, "parent-link");
+        if (!TryCreateJunction(parentLink, real.FullName))
+        {
+            Assert.Inconclusive("Could not create a directory junction on this machine.");
+            return;
+        }
+
+        try
+        {
+            var failure = await CaptureCopyFailureAsync(
+                new FileInfo(WriteRecipe(srcManifest)), new DirectoryInfo(Path.Combine(parentLink, "AppX")));
+
+            Assert.IsInstanceOfType<InvalidOperationException>(failure, "A layout reached through a junctioned parent must be refused");
+            Assert.IsTrue(File.Exists(precious), "Nothing behind the junction may be touched");
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(parentLink, recursive: false);
+            }
+            catch
+            {
+                // Best-effort cleanup; the temp root is removed anyway.
+            }
+        }
+    }
+
+    /// <summary>
+    /// A layout that still holds content the app dropped must not go on to be registered or deployed,
+    /// so a stale file winapp cannot delete fails the whole materialization rather than warning.
+    /// </summary>
+    [TestMethod]
+    public async Task CopyFilesFromRecipeAsync_StaleFileLocked_FailsMaterialization()
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("recipe-src");
+        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        var keep = new FileInfo(Path.Combine(srcDir.FullName, "keep.dll"));
+        var dropped = new FileInfo(Path.Combine(srcDir.FullName, "dropped.dll"));
+        await File.WriteAllTextAsync(keep.FullName, "keep", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(dropped.FullName, "dropped", TestContext.CancellationToken);
+
+        var outputDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "layout"));
+
+        await InvokeCopyFilesFromRecipeAsync(
+            new FileInfo(WriteRecipe(srcManifest, (keep.FullName, "keep.dll"), (dropped.FullName, "dropped.dll"))),
+            outputDir);
+
+        dropped.Delete();
+
+        var stagedStale = Path.Combine(outputDir.FullName, "dropped.dll");
+
+        // Held open with no sharing, the way a running instance of the app holds its own binaries.
+        using (var _ = new FileStream(stagedStale, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            var failure = await CaptureCopyFailureAsync(
+                new FileInfo(WriteRecipe(srcManifest, (keep.FullName, "keep.dll"))), outputDir);
+
+            Assert.IsInstanceOfType<InvalidOperationException>(failure,
+                "A stale file that cannot be removed must fail materialization, not warn and succeed");
+            StringAssert.Contains(failure!.Message, "dropped.dll", StringComparison.Ordinal);
+        }
+
+        // Still attributed, so the next run retries it rather than adopting it as an unknown file.
+        var attributed = new LayoutAttributionStore(_testCacheDirectory).Read(outputDir.FullName);
+        Assert.IsTrue(attributed.Contains("dropped.dll"), "A file winapp could not remove must stay attributed for the retry");
+
+        await InvokeCopyFilesFromRecipeAsync(
+            new FileInfo(WriteRecipe(srcManifest, (keep.FullName, "keep.dll"))), outputDir);
+
+        Assert.IsFalse(File.Exists(stagedStale), "Once the lock is released the retry must remove the stale file");
+    }
+
+    /// <summary>
+    /// Two runs against one layout must not interleave their read-copy-prune-write cycles, or the
+    /// record left behind would describe neither run's result.
+    /// </summary>
+    [TestMethod]
+    public async Task CopyFilesFromRecipeAsync_ConcurrentRunsOnOneLayout_ProduceAConsistentResult()
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("recipe-src");
+        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+
+        var payloads = new List<FileInfo>();
+        for (var i = 0; i < 12; i++)
+        {
+            var file = new FileInfo(Path.Combine(srcDir.FullName, $"payload{i}.dll"));
+            await File.WriteAllTextAsync(file.FullName, $"payload{i}", TestContext.CancellationToken);
+            payloads.Add(file);
+        }
+
+        var outputDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "layout"));
+        var entries = payloads.Select(p => (p.FullName, p.Name)).ToArray();
+
+        // Distinct recipe files: concurrency is being tested in the layout, not in the recipe reader.
+        var recipes = Enumerable.Range(0, 4)
+            .Select(i =>
+            {
+                var path = Path.Combine(_tempDirectory.FullName, $"Concurrent{i}.build.appxrecipe");
+                File.Copy(WriteRecipe(srcManifest, entries), path, overwrite: true);
+                return new FileInfo(path);
+            })
+            .ToList();
+
+        await Task.WhenAll(recipes.Select(recipe => Task.Run(
+            () => InvokeCopyFilesFromRecipeAsync(recipe, new DirectoryInfo(outputDir.FullName)),
+            TestContext.CancellationToken)));
+
+        foreach (var payload in payloads)
+        {
+            Assert.IsTrue(File.Exists(Path.Combine(outputDir.FullName, payload.Name)),
+                $"{payload.Name} must survive concurrent materializations of the same layout");
+        }
+
+        var attributed = new LayoutAttributionStore(_testCacheDirectory).Read(outputDir.FullName);
+        foreach (var payload in payloads)
+        {
+            Assert.IsTrue(attributed.Contains(payload.Name),
+                $"The attribution record must describe {payload.Name} after concurrent runs");
+        }
+
+        Assert.IsTrue(attributed.Contains("appxmanifest.xml"), "The attribution record must not be left truncated");
     }
 
     /// <summary>Junction creation needs no elevation, unlike a symbolic link.</summary>
