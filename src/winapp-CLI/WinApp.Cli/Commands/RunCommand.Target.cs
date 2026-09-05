@@ -139,6 +139,7 @@ internal partial class RunCommand
                         identity.ApplicationId,
                         deployment.LayoutPath,
                         deployment.PayloadPath,
+                        executionTargetOrchestrator.Target.Selector,
                         options),
 
                     // The payload folder, so a guest app that resolves files relative to its working
@@ -275,11 +276,6 @@ internal partial class RunCommand
                     PrepareTargetOptions.Mutating with { RequireInteractiveDesktop = requiresRealInput },
                     cancellationToken);
 
-                // The orchestrator has already reported how the target was obtained. What remains
-                // are the two phases that dominate a first run — provisioning shared runtimes and
-                // transferring the build — and each is announced before it starts rather than after.
-                WriteProgress(isJson, "Checking runtimes in the Windows Sandbox...");
-
                 var provisioning = await ProvisionRuntimesAsync(target, sourceRoot, cancellationToken);
 
                 WriteProgress(isJson, "Deploying the application into the Windows Sandbox...");
@@ -321,7 +317,7 @@ internal partial class RunCommand
                             // only one the caller gets.
                             if (isJson && registration.CapturedOutput is not null)
                             {
-                                PublishGuestJson(registration.CapturedOutput, target, registration.ProcessId);
+                                PublishGuestJson(registration.CapturedOutput, target);
                             }
 
                             return registration.ExitCode;
@@ -336,7 +332,7 @@ internal partial class RunCommand
 
                             if (isJson && registration.CapturedOutput is not null)
                             {
-                                PublishGuestJson(registration.CapturedOutput, target, registration.ProcessId);
+                                PublishGuestJson(registration.CapturedOutput, target);
                             }
 
                             return registration.ExitCode;
@@ -370,8 +366,6 @@ internal partial class RunCommand
                     ownerEnvironment[name] = value;
                 }
 
-                var startedProcessId = 0;
-
                 // Under --json the guest's payload is captured rather than relayed, so the additive
                 // execution-target members can be merged into the document the caller parses. It is
                 // never reformatted blind: anything that does not parse is written through exactly
@@ -392,10 +386,6 @@ internal partial class RunCommand
                         OnOperationId: forwardStandardInput
                             ? GuestStandardInputPump.Attach(target.Operations, cancellationToken)
                             : null,
-                        OnStarted: process =>
-                        {
-                            startedProcessId = process.ProcessId;
-                        },
                         OnStandardOutput: data =>
                         {
                             if (isJson && !guestProducesRunResult)
@@ -431,7 +421,7 @@ internal partial class RunCommand
 
                 if (isJson && guestProducesRunResult && capturedOutput is not null)
                 {
-                    PublishGuestJson(capturedOutput, target, startedProcessId);
+                    PublishGuestJson(capturedOutput, target);
                 }
                 else if (isJson)
                 {
@@ -669,7 +659,7 @@ internal partial class RunCommand
             RuntimeProvisionResult? provisioned = null;
 
             await statusService.ExecuteWithStatusAsync(
-                "Preparing shared runtimes...",
+                "Checking runtimes in the Windows Sandbox...",
                 async (taskContext, ct) =>
                 {
                     try
@@ -828,7 +818,7 @@ internal partial class RunCommand
         /// <summary>
         /// Emits the guest's machine-readable result with the execution-target members merged in.
         /// </summary>
-        internal void PublishGuestJson(MemoryStream captured, PreparedTarget target, int processId)
+        internal void PublishGuestJson(MemoryStream captured, PreparedTarget target)
         {
             ArgumentNullException.ThrowIfNull(captured);
             ArgumentNullException.ThrowIfNull(target);
@@ -847,8 +837,7 @@ internal partial class RunCommand
                     Id = target.Reference.Id,
                     Architecture = target.Capabilities.Architecture,
                     Epoch = target.Epoch.Value,
-                },
-                processId);
+                });
 
             if (augmented is null)
             {
@@ -909,8 +898,7 @@ internal partial class RunCommand
         /// </remarks>
         internal static string? TryAugmentGuestJson(
             byte[] payload,
-            ExecutionTargetInfo executionTarget,
-            int agentProcessId)
+            ExecutionTargetInfo executionTarget)
         {
             ArgumentNullException.ThrowIfNull(payload);
 
@@ -944,12 +932,9 @@ internal partial class RunCommand
 
             result.ProcessScope = selector;
 
-            // The guest's own process ID when it reported one — that is the application. The agent's
-            // child is only the winapp that launched it, and pointing a UI command at that would
-            // target the wrong process.
-            var appProcessId = result.ProcessId ?? (agentProcessId > 0 ? (uint)agentProcessId : null);
-
-            if (appProcessId is { } pid)
+            // Only the guest's own reported application process is a valid UI target. The host-side
+            // exec process is the short-lived winapp launcher, especially for --no-launch.
+            if (result.ProcessId is { } pid)
             {
                 // Emitted as the two arguments together, never as a bare PID and never as a value
                 // that hides the target inside it. A number on its own would resolve against this

@@ -35,6 +35,8 @@ internal sealed class RecordingProcessRunner : IProcessRunner
 [DoNotParallelize]
 public class WindowsSandboxCliTests
 {
+    private static readonly string[] ConnectArguments = ["connect", "--id", "sandbox-1", "--raw"];
+
     private RecordingProcessRunner _runner = null!;
     private WindowsSandboxCli _cli = null!;
 
@@ -261,12 +263,33 @@ public class WindowsSandboxCliTests
         await _cli.ConnectAsync("sandbox-1", TestContext.CancellationTokenSource.Token);
 
         Assert.IsNotNull(captured);
-        Assert.IsTrue(
-            captured.UseShellExecute,
-            "ShellExecute is what stops this long-lived child inheriting the caller's captured stdout.");
-        Assert.IsFalse(captured.CreateNoWindow);
-        CollectionAssert.Contains(captured.ArgumentList.ToList(), "connect");
-        CollectionAssert.Contains(captured.ArgumentList.ToList(), "sandbox-1");
+        Assert.IsFalse(captured.UseShellExecute);
+        Assert.IsTrue(captured.CreateNoWindow);
+        Assert.AreEqual(System.Diagnostics.ProcessWindowStyle.Hidden, captured.WindowStyle);
+        Assert.IsFalse(captured.RedirectStandardInput);
+        Assert.IsFalse(captured.RedirectStandardOutput);
+        Assert.IsFalse(captured.RedirectStandardError);
+        CollectionAssert.AreEqual(
+            ConnectArguments,
+            captured.ArgumentList.ToArray());
+    }
+
+    [TestMethod]
+    public async Task ConnectAsync_StillDetectsAnImmediateNonzeroExit()
+    {
+        _cli.UseExecutable(Path.Join(Environment.SystemDirectory, "wsb.exe"));
+        _cli.ConnectLauncher = _ => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = Environment.GetEnvironmentVariable("ComSpec")!,
+            Arguments = "/d /c exit 17",
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        });
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
+            () => _cli.ConnectAsync("sandbox-1", TestContext.CancellationTokenSource.Token));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.NoInteractiveSession, failure.Error.Code);
     }
 
     [TestMethod]

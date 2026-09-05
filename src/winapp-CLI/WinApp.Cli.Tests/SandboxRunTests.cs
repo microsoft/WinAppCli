@@ -882,7 +882,7 @@ public class SandboxRunTests
         var guestPayload = """{"AUMID":"Contoso.MyApp_abc!App","ProcessId":4212}"""u8.ToArray();
 
         var augmented = RunCommand.Handler.TryAugmentGuestJson(
-            guestPayload, TargetInfo(), agentProcessId: 900);
+            guestPayload, TargetInfo());
 
         using var document = JsonDocument.Parse(augmented!);
         var root = document.RootElement;
@@ -904,12 +904,23 @@ public class SandboxRunTests
     }
 
     [TestMethod]
-    public void AugmentGuestJson_WithoutAProcess_OmitsTheCopyableCommand()
+    public void AugmentGuestJson_WithoutAnApplicationProcess_OmitsTheCopyableCommand()
     {
         var guestPayload = """{"AUMID":"Contoso.MyApp_abc!App"}"""u8.ToArray();
 
         var augmented = RunCommand.Handler.TryAugmentGuestJson(
-            guestPayload, TargetInfo(), agentProcessId: 0);
+            guestPayload, TargetInfo());
+
+        using var document = JsonDocument.Parse(augmented!);
+        Assert.IsFalse(document.RootElement.TryGetProperty("UiTargetArgs", out _));
+    }
+
+    [TestMethod]
+    public void AugmentGuestJson_NoLaunchNeverUsesTheRegistrationProcessAsAUiTarget()
+    {
+        var guestPayload = """{"AUMID":"Contoso.MyApp_abc!App","ProcessId":null}"""u8.ToArray();
+
+        var augmented = RunCommand.Handler.TryAugmentGuestJson(guestPayload, TargetInfo());
 
         using var document = JsonDocument.Parse(augmented!);
         Assert.IsFalse(document.RootElement.TryGetProperty("UiTargetArgs", out _));
@@ -923,7 +934,7 @@ public class SandboxRunTests
     public void AugmentGuestJson_UnparseablePayload_IsRelayedUnchanged()
     {
         Assert.IsNull(RunCommand.Handler.TryAugmentGuestJson(
-            "not json at all"u8.ToArray(), TargetInfo(), agentProcessId: 4212));
+            "not json at all"u8.ToArray(), TargetInfo()));
     }
 
     [TestMethod]
@@ -931,7 +942,7 @@ public class SandboxRunTests
     {
         var oversized = new byte[RunCommand.Handler.MaxCapturedJsonBytes];
 
-        Assert.IsNull(RunCommand.Handler.TryAugmentGuestJson(oversized, TargetInfo(), agentProcessId: 0));
+        Assert.IsNull(RunCommand.Handler.TryAugmentGuestJson(oversized, TargetInfo()));
     }
 
     [TestMethod]

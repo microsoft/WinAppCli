@@ -35,6 +35,7 @@ internal partial class RunCommand
             var applicationId = parseResult.GetValue(GuestLaunchCommand.ApplicationIdOption)!;
             var expectedLayout = parseResult.GetValue(GuestLaunchCommand.ExpectedLayoutOption)!;
             var payload = parseResult.GetValue(GuestLaunchCommand.PayloadOption)!;
+            var targetSelector = parseResult.GetValue(GuestLaunchCommand.TargetSelectorOption)!;
             var appArgs = parseResult.GetValue(GuestLaunchCommand.ArgsOption);
             var withAlias = parseResult.GetValue(GuestLaunchCommand.WithAliasOption);
             var debugOutput = parseResult.GetValue(GuestLaunchCommand.DebugOutputOption);
@@ -114,7 +115,8 @@ internal partial class RunCommand
 
             return await LaunchRegisteredApplicationAsync(
                 aumid, packageName, packageFullName, expectedLayout, payload, appArgs, processId,
-                withAlias, debugOutput, unregisterOnExit: false, detach, useSymbols, isJson, cancellationToken);
+                withAlias, debugOutput, unregisterOnExit: false, detach, useSymbols, isJson,
+                targetSelector, cancellationToken);
         }
 
         /// <summary>

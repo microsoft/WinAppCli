@@ -95,6 +95,17 @@ produce it. Nothing is registered on your machine and no runtime is installed on
 transferred into the Sandbox, and guest `winapp` registers, launches, and — with `--debug-output` —
 debugs it there.
 
+After a packaged app starts, the command prints the guest PID and a scoped UI target you can copy:
+
+```text
+Started the application in Windows Sandbox (PID: 4212).
+UI target: --on sandbox -a 4212
+Waiting for the application to exit...
+```
+
+With `--detach`, the first two lines are printed and the command returns instead of waiting. Use the
+whole `--on sandbox -a 4212` target with `winapp ui`; a Sandbox PID is not meaningful on the host.
+
 Every existing run option keeps its meaning, because the guest runs the same `winapp run` you would
 have run locally:
 

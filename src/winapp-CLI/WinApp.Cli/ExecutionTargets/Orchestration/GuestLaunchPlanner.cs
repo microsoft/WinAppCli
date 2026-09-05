@@ -33,6 +33,7 @@ internal static class GuestLaunchPlanner
     /// launch rather than registering or unregistering anything to reconcile a mismatch.
     /// </param>
     /// <param name="payloadPath">Guest folder holding the deployed application files.</param>
+    /// <param name="targetSelector">Copyable host-side selector for the execution target.</param>
     /// <param name="options">
     /// Run options to forward. <see cref="GuestRunOptions.NoLaunch"/>, <see cref="GuestRunOptions.Clean"/>,
     /// and <see cref="GuestRunOptions.UnregisterOnExit"/> do not apply to this verb and are ignored:
@@ -47,6 +48,7 @@ internal static class GuestLaunchPlanner
         string applicationId,
         string expectedLayoutPath,
         string payloadPath,
+        string targetSelector,
         GuestRunOptions options)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(packageName);
@@ -54,6 +56,7 @@ internal static class GuestLaunchPlanner
         ArgumentException.ThrowIfNullOrWhiteSpace(applicationId);
         ArgumentException.ThrowIfNullOrWhiteSpace(expectedLayoutPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(payloadPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetSelector);
         ArgumentNullException.ThrowIfNull(options);
 
         var arguments = new List<string>
@@ -64,6 +67,7 @@ internal static class GuestLaunchPlanner
             "--application-id", applicationId,
             "--expected-layout", expectedLayoutPath,
             "--payload", payloadPath,
+            "--target-selector", targetSelector,
         };
 
         if (options.WithAlias)

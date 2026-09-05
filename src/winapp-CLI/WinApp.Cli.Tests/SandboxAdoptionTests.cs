@@ -523,8 +523,7 @@ public class SandboxAdoptionTests
                 new StaticBinaryProvider(binary),
                 new NoOpWindowController(),
                 setup: null,
-                stateStore,
-                NullTargetProgress.Instance)
+                stateStore)
             {
                 UtcNow = () => _now,
             };

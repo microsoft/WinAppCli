@@ -57,6 +57,8 @@ internal class GuestLaunchCommand : Command, IShortDescription
     /// <summary>Deployed application folder, used only for alias/debug symbol search, never mutated.</summary>
     public static Option<DirectoryInfo> PayloadOption { get; } = new("--payload") { Required = true };
 
+    public static Option<string> TargetSelectorOption { get; } = new("--target-selector") { Required = true };
+
     public static Option<string> ArgsOption { get; } = new("--args");
 
     public static Option<bool> WithAliasOption { get; } = new("--with-alias");
@@ -80,6 +82,7 @@ internal class GuestLaunchCommand : Command, IShortDescription
         Options.Add(ApplicationIdOption);
         Options.Add(ExpectedLayoutOption);
         Options.Add(PayloadOption);
+        Options.Add(TargetSelectorOption);
         Options.Add(ArgsOption);
         Options.Add(WithAliasOption);
         Options.Add(DebugOutputOption);

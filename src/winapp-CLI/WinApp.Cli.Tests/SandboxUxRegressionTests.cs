@@ -623,8 +623,7 @@ public class SandboxUxRegressionTests
                 // No setup runner: this harness models a host where wsb.exe is already usable, so
                 // the support probe short-circuits on IsAvailable before setup would be consulted.
                 setup: null,
-                _stateStore,
-                NullTargetProgress.Instance);
+                _stateStore);
 
         public void Dispose()
         {

@@ -144,6 +144,8 @@ internal sealed class ExecutionTargetOrchestrator(
     ITargetConnectionLock connectionLock,
     ITargetProgress? progress = null)
 {
+    internal const string PrepareProgressMessage = "Preparing Windows Sandbox...";
+
     private readonly ITargetProgress _progress = progress ?? NullTargetProgress.Instance;
 
     /// <summary>How long to wait for another winapp process to finish mutating this target.</summary>
@@ -195,9 +197,10 @@ internal sealed class ExecutionTargetOrchestrator(
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        // Reported before the probe rather than after it, because everything from here on can block
-        // for seconds and the user is looking at a terminal that has just gone quiet.
-        _progress.Report("Checking Windows Sandbox availability...");
+        // One setup line covers support probing, instance preparation, and agent connection. The
+        // provider reports exceptional setup work separately, while routine internal transitions
+        // stay quiet so a successful run is readable.
+        _progress.Report(PrepareProgressMessage);
 
         await EnsureSupportedAsync(cancellationToken).ConfigureAwait(false);
 
@@ -263,20 +266,6 @@ internal sealed class ExecutionTargetOrchestrator(
             mutationLease?.Dispose();
         }
     }
-
-    /// <summary>Progress line for a prepared target, matching the spec's exact wording.</summary>
-    /// <remarks>
-    /// No Sandbox ID or lifecycle guidance is printed during successful normal use: it is noise the
-    /// user cannot act on, and printing it would train them to expect it in failures too.
-    /// <para>
-    /// Retained for callers that render their own status. The orchestrator itself does not print
-    /// this, because the backend already reports the specific phase it is in — announcing
-    /// "Preparing Windows Sandbox..." after preparation has finished describes the past as if it
-    /// were the present.
-    /// </para>
-    /// </remarks>
-    public static string DescribeProgress(bool reused) =>
-        reused ? "Reusing Windows Sandbox..." : "Preparing Windows Sandbox...";
 
     /// <summary>Provider diagnostics for a failure envelope.</summary>
     public IReadOnlyDictionary<string, string> DescribeForDiagnostics() => backend.DescribeForDiagnostics();

@@ -65,6 +65,7 @@ public class GuestLaunchCommandTests : BaseCommandTests
             "--application-id", applicationId,
             "--expected-layout", expectedLayout,
             "--payload", payload,
+            "--target-selector", "sandbox",
         ];
 
         if (withAlias)
@@ -127,6 +128,48 @@ public class GuestLaunchCommandTests : BaseCommandTests
         Assert.AreEqual(0, exitCode, "An exact-match registration must launch successfully.");
         Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "Must launch via AUMID.");
         StringAssert.EndsWith(_fakeAppLauncherService.LaunchCalls[0].Aumid, "!App");
+        StringAssert.Contains(
+            TestAnsiConsole.Output,
+            "Started the application in Windows Sandbox (PID: 12345).");
+        StringAssert.Contains(TestAnsiConsole.Output, "UI target: --on sandbox -a 12345");
+        Assert.IsFalse(
+            TestAnsiConsole.Output
+                .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+                .Any(line => string.Equals(line.Trim(), "12345", StringComparison.Ordinal)),
+            "A detached target run must not print a contextless bare PID.");
+        AssertNoMutationCalls();
+    }
+
+    [TestMethod]
+    public async Task ForegroundLaunch_ReportsThatItIsWaitingAfterTheScopedUiTarget()
+    {
+        var layout = Path.Join(_tempDirectory.FullName, "layout");
+        var payload = Path.Join(_tempDirectory.FullName, "payload");
+
+        _fakePackageRegistrationService.FakeDevPackages =
+        [
+            new DevPackageInfo("Pkg_1.0.0.0_x64__wait", "Pkg", "1.0.0.0", layout, IsDevelopmentMode: true),
+        ];
+        _fakeAppLauncherService.FakeProcessId = uint.MaxValue;
+
+        var handler = GetRequiredService<RunCommand.Handler>();
+        var parsed = Parse("Pkg", "CN=Test", "App", layout, payload, detach: false);
+
+        var exitCode = await handler.InvokeAsync(parsed.Value, TestContext.CancellationToken);
+
+        Assert.AreEqual(0, exitCode);
+        var output = TestAnsiConsole.Output;
+        var started = output.IndexOf(
+            "Started the application in Windows Sandbox (PID: 4294967295).",
+            StringComparison.Ordinal);
+        var uiTarget = output.IndexOf(
+            "UI target: --on sandbox -a 4294967295",
+            StringComparison.Ordinal);
+        var waiting = output.IndexOf("Waiting for the application to exit...", StringComparison.Ordinal);
+
+        Assert.IsGreaterThanOrEqualTo(0, started);
+        Assert.IsGreaterThan(started, uiTarget);
+        Assert.IsGreaterThan(uiTarget, waiting);
         AssertNoMutationCalls();
     }
 

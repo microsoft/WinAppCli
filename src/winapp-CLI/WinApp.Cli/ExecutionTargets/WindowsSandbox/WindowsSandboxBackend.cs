@@ -36,11 +36,8 @@ internal sealed class WindowsSandboxBackend(
     IHostWinappBinaryProvider hostBinaryProvider,
     IWindowsSandboxWindowController windowController,
     IWindowsSandboxSetup? setup = null,
-    ITargetStateStore? stateStore = null,
-    ITargetProgress? progress = null) : IExecutionTargetBackend
+    ITargetStateStore? stateStore = null) : IExecutionTargetBackend
 {
-    private readonly ITargetProgress _progress = progress ?? NullTargetProgress.Instance;
-
     /// <summary>Guest path prefix the read-only bootstrap folder is mapped under.</summary>
     /// <remarks>
     /// A per-epoch suffix is appended. Reusing one fixed path would mean an adopted guest — which
@@ -236,17 +233,8 @@ internal sealed class WindowsSandboxBackend(
         if (lease.IsWarm &&
             await TryReconnectAsync(lease, cancellationToken).ConfigureAwait(false) is { } reused)
         {
-            _progress.Report("Reusing the running Windows Sandbox agent...");
             return reused;
         }
-
-        _progress.Report(lease.Origin switch
-        {
-            SandboxInstanceOrigin.Reused => "Repairing the Windows Sandbox agent...",
-            SandboxInstanceOrigin.Adopted => "Preparing the running Windows Sandbox...",
-            SandboxInstanceOrigin.RecoveredStart => "Preparing the recovered Windows Sandbox...",
-            _ => "Starting Windows Sandbox...",
-        });
 
         var bootstrap = PrepareBootstrapDirectories(lease.Epoch);
         var agentHash = await StageBootstrapBinaryAsync(bootstrap.HostBootstrap, cancellationToken)
@@ -304,7 +292,7 @@ internal sealed class WindowsSandboxBackend(
 
         if (connectedClient)
         {
-            await ConnectClientAsync(lease.InstanceId, reconnecting: false, cancellationToken)
+            await ConnectClientAsync(lease.InstanceId, cancellationToken)
                 .ConfigureAwait(false);
         }
 
@@ -327,8 +315,6 @@ internal sealed class WindowsSandboxBackend(
             bootstrap.GuestBootstrap,
             agentPort,
             cancellationToken).ConfigureAwait(false);
-
-        _progress.Report("Preparing the Windows Sandbox agent...");
 
         var heartbeat = await LaunchReadyAgentAsync(
             lease.InstanceId,
@@ -364,8 +350,6 @@ internal sealed class WindowsSandboxBackend(
         }
 
         _guestAddress = await cli.GetIpAddressAsync(lease.InstanceId, cancellationToken).ConfigureAwait(false);
-
-        _progress.Report("Connecting to the Windows Sandbox agent...");
 
         var transport = await GuestTcpTransport.ConnectAsync(
             _guestAddress,
@@ -1013,13 +997,8 @@ internal sealed class WindowsSandboxBackend(
     /// </remarks>
     private async Task ConnectClientAsync(
         string instanceId,
-        bool reconnecting,
         CancellationToken cancellationToken)
     {
-        _progress.Report(reconnecting
-            ? "Reconnecting the Windows Sandbox window..."
-            : "Connecting the Windows Sandbox window...");
-
         var windowSnapshot = windowController.Capture();
         await cli.ConnectAsync(instanceId, cancellationToken).ConfigureAwait(false);
         await windowController
@@ -1102,7 +1081,7 @@ internal sealed class WindowsSandboxBackend(
                 {
                     mayReconnect = false;
 
-                    await ConnectClientAsync(instanceId, reconnecting: true, cancellationToken)
+                    await ConnectClientAsync(instanceId, cancellationToken)
                         .ConfigureAwait(false);
 
                     clientAvailable = true;

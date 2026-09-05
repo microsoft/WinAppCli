@@ -206,19 +206,24 @@ public class ExecutionTargetOrchestratorTests
     }
 
     [TestMethod]
-    public async Task Prepare_ReusedInstance_ReportsItInProgress()
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task Prepare_ReportsOneConsolidatedSetupPhase(bool reused)
     {
+        var progress = new RecordingProgress();
         var orchestrator = new ExecutionTargetOrchestrator(
-            new FakeBackend { Reused = true },
+            new FakeBackend { Reused = reused },
             new FakeMutationLock(),
-            new FakeConnectionLock());
+            new FakeConnectionLock(),
+            progress);
 
         await using var prepared = await orchestrator.PrepareAsync(
             PrepareTargetOptions.ReadOnly, TestContext.CancellationToken);
 
-        Assert.IsTrue(prepared.Reused);
-        Assert.AreEqual("Reusing Windows Sandbox...", ExecutionTargetOrchestrator.DescribeProgress(reused: true));
-        Assert.AreEqual("Preparing Windows Sandbox...", ExecutionTargetOrchestrator.DescribeProgress(reused: false));
+        Assert.AreEqual(reused, prepared.Reused);
+        CollectionAssert.AreEqual(
+            new[] { ExecutionTargetOrchestrator.PrepareProgressMessage },
+            progress.Messages);
     }
 
     [TestMethod]
@@ -548,6 +553,13 @@ public class ExecutionTargetOrchestratorTests
 
         public IReadOnlyDictionary<string, string> DescribeForDiagnostics() =>
             new Dictionary<string, string> { ["sandboxId"] = "sandbox-1" };
+    }
+
+    private sealed class RecordingProgress : ITargetProgress
+    {
+        public List<string> Messages { get; } = [];
+
+        public void Report(string message) => Messages.Add(message);
     }
 
     /// <summary>A lock that records use and can pretend another process holds it.</summary>

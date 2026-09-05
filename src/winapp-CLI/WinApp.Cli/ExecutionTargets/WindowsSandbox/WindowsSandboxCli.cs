@@ -188,13 +188,14 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
         {
             // Load-bearing, not incidental. This child can outlive winapp, so it must not inherit
             // the caller's standard handles: a caller capturing winapp's output would otherwise not
-            // reach end of stream until the whole Sandbox went away. ShellExecute does not inherit
-            // handles, and the suppression scope below keeps the guarantee even if this flag is ever
-            // changed. Redirecting the child's own streams instead is NOT sufficient and must not be
-            // substituted -- doing so reproduces the pipe deadlock this avoids.
-            UseShellExecute = true,
+            // reach end of stream until the whole Sandbox went away. The suppression scope below
+            // provides that guarantee while CreateProcess-style startup keeps the transient app
+            // execution alias console hidden. Redirecting the child's own streams instead is NOT
+            // sufficient and must not be substituted -- doing so reproduces the pipe deadlock.
+            UseShellExecute = false,
             FileName = executable,
-            CreateNoWindow = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden,
         };
         foreach (var argument in (string[])["connect", "--id", id, "--raw"])
         {

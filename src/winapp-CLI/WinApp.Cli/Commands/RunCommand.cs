@@ -109,7 +109,7 @@ internal partial class RunCommand : Command, IShortDescription, ITargetAwareComm
 
         DetachOption = new Option<bool>("--detach")
         {
-            Description = "Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json)."
+            Description = "Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Local runs print the PID; target runs print the scoped UI target. JSON includes the PID and target scope."
         };
         
         CleanOption = new Option<bool>("--clean")
@@ -176,7 +176,6 @@ internal partial class RunCommand : Command, IShortDescription, ITargetAwareComm
         {
             Description = "Project mode: when the input is a solution (.sln/.slnx) or a directory with multiple runnable app projects, selects which project to launch (by name or path). Ignored in folder mode."
         };
-
     }
 
     public RunCommand() : base("run", "Builds and runs a Windows app from a .csproj/.sln or a build-output folder. In project mode, invokes dotnet build then launches the app (packaged or unpackaged); in folder mode, creates a debug-signed layout, registers the package, and launches it.")
@@ -685,7 +684,8 @@ internal partial class RunCommand : Command, IShortDescription, ITargetAwareComm
 
             return await LaunchRegisteredApplicationAsync(
                 aumid, packageName, packageFullName, resolvedOutputDir!, inputFolder, appArgs, processId,
-                withAlias, debugOutput, unregisterOnExit, detach, useSymbols, isJson, cancellationToken);
+                withAlias, debugOutput, unregisterOnExit, detach, useSymbols, isJson,
+                targetSelector: null, cancellationToken);
         }
 
         /// <summary>
@@ -714,8 +714,14 @@ internal partial class RunCommand : Command, IShortDescription, ITargetAwareComm
             bool detach,
             bool useSymbols,
             bool isJson,
+            string? targetSelector,
             CancellationToken cancellationToken)
         {
+            if (!isJson && targetSelector is not null && !withAlias && processId > 0)
+            {
+                WriteTargetLaunchConfirmation(targetSelector, processId, waitForExit: !detach);
+            }
+
             // --detach: return immediately after launch without waiting for exit
             if (detach)
             {
@@ -723,7 +729,7 @@ internal partial class RunCommand : Command, IShortDescription, ITargetAwareComm
                 {
                     PrintJson(aumid, processId, errorMessage: null);
                 }
-                else
+                else if (targetSelector is null)
                 {
                     // Surface the launched PID for automation, consistent with the unpackaged
                     // project-mode detach path (Change 3 / L6).
@@ -735,7 +741,9 @@ internal partial class RunCommand : Command, IShortDescription, ITargetAwareComm
             // --with-alias: launch via execution alias with inherited stdio
             if (withAlias)
             {
-                var aliasExitCode = await LaunchViaExecutionAliasAsync(resolvedOutputDir, inputFolder, appArgs, debugOutput, useSymbols, packageFullName, cancellationToken);
+                var aliasExitCode = await LaunchViaExecutionAliasAsync(
+                    resolvedOutputDir, inputFolder, appArgs, debugOutput, useSymbols,
+                    packageFullName, targetSelector, cancellationToken);
                 if (unregisterOnExit && packageName != null)
                 {
                     await UnregisterDevPackageAsync(packageName, cancellationToken);
@@ -963,6 +971,7 @@ internal partial class RunCommand : Command, IShortDescription, ITargetAwareComm
             bool debugOutput,
             bool useSymbols,
             string? packageFullName,
+            string? targetSelector,
             CancellationToken cancellationToken)
         {
             // Read the processed manifest from the AppX output directory (placeholders already resolved)
@@ -1026,6 +1035,14 @@ internal partial class RunCommand : Command, IShortDescription, ITargetAwareComm
                     return 1;
                 }
 
+                if (targetSelector is not null)
+                {
+                    WriteTargetLaunchConfirmation(
+                        targetSelector,
+                        unchecked((uint)process.Id),
+                        waitForExit: true);
+                }
+
                 if (debugOutput)
                 {
                     var exitCode = await debugOutputService.RunDebugLoopAsync(unchecked((uint)process.Id), cancellationToken,
@@ -1053,6 +1070,19 @@ internal partial class RunCommand : Command, IShortDescription, ITargetAwareComm
             {
                 logger.LogError("{UISymbol} Failed to launch via execution alias '{Alias}' ({Path}): {Error}", UiSymbols.Error, alias, aliasFile.FullName, ex.Message);
                 return 1;
+            }
+        }
+
+        private void WriteTargetLaunchConfirmation(string targetSelector, uint processId, bool waitForExit)
+        {
+            ansiConsole.MarkupLineInterpolated(
+                $"Started the application in Windows Sandbox (PID: {processId}).");
+            ansiConsole.MarkupLineInterpolated(
+                $"UI target: --on {targetSelector} -a {processId}");
+
+            if (waitForExit)
+            {
+                ansiConsole.MarkupLine("Waiting for the application to exit...");
             }
         }
     }

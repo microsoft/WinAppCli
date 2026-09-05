@@ -1969,7 +1969,7 @@
           "recursive": false
         },
         "--detach": {
-          "description": "Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json).",
+          "description": "Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Local runs print the PID; target runs print the scoped UI target. JSON includes the PID and target scope.",
           "hidden": false,
           "valueType": "System.Boolean",
           "hasDefaultValue": true,
