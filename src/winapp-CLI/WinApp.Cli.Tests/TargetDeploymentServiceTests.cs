@@ -272,6 +272,47 @@ public class TargetDeploymentServiceTests
     }
 
     [TestMethod]
+    public async Task ReconcileAndUnregister_LiteralLegacyPackageRetainsPackagedHistory()
+    {
+        await WriteHostFileAsync("app.exe", "binary-v1");
+        var snapshot = await Harness.SnapshotAsync(_hostSource, TestContext.CancellationToken);
+        var stateDirectory = TestPaths.Under(
+            _stateRoot,
+            Target.StateKey,
+            DeploymentStateStore.DeploymentsFolder);
+        Directory.CreateDirectory(stateDirectory);
+        await File.WriteAllTextAsync(
+            TestPaths.Under(stateDirectory, $"{snapshot.DeploymentId}.json"),
+            $$"""
+            {
+              "schemaVersion": 1,
+              "revision": 4,
+              "deploymentId": "{{snapshot.DeploymentId}}",
+              "targetEpoch": "{{Epoch.Value}}",
+              "dirty": false,
+              "desired": [],
+              "package": {
+                "packageName": "Contoso.MyApp",
+                "publisher": "CN=Contoso",
+                "packageFullName": "Contoso.MyApp_1.0.0.0_arm64__abc",
+                "packageFamilyName": "Contoso.MyApp_abc",
+                "registeredLocation": "C:\\WinApp\\deployments\\legacy"
+              }
+            }
+            """,
+            TestContext.CancellationToken);
+
+        await using var harness = new Harness(_guestManaged, _stateRoot);
+        var reconciled = await harness.ReconcileAsync(
+            _hostSource, clean: false, TestContext.CancellationToken);
+        var unregistered = harness.Deployments.ClearRegistration(Target, reconciled.State);
+
+        Assert.IsTrue(reconciled.State.WasPackaged, "A legacy package claim establishes packaged history.");
+        Assert.IsNull(unregistered.Package);
+        Assert.IsTrue(unregistered.WasPackaged, "Unregister preserves packaged history after clearing ownership.");
+    }
+
+    [TestMethod]
     public void PackageOwnership_MatchesOnlyTheExactManagedPackage()
     {
         var owned = new PackageOwnership

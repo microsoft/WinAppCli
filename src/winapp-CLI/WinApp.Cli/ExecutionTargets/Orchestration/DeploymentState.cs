@@ -114,9 +114,11 @@ internal sealed record DeploymentState
     /// For an unpackaged direct launch this is the application. For a packaged launch this is the
     /// guest winapp launcher that owns the operation, not necessarily the application's UI process.
     /// </remarks>
+    [JsonPropertyName("processId")]
     public int? TrackedOperationProcessId { get; init; }
 
     /// <summary>UTC ticks when the tracked operation started, so a reused PID is detected.</summary>
+    [JsonPropertyName("processStartTicksUtc")]
     public long? TrackedOperationProcessStartTicksUtc { get; init; }
 
     /// <summary>UTC timestamp of the last commit, for diagnostics only.</summary>

@@ -313,6 +313,66 @@ public class TargetCaptureCommandTests
     }
 
     [TestMethod]
+    public async Task Snapshot_LiteralV1ProcessFieldsAreValidated()
+    {
+        await using var harness = new Harness(GuestWindows());
+        using var process = Process.GetCurrentProcess();
+        var stateRoot = TestPaths.Under(_root, "legacy-state");
+        var stateDirectory = TestPaths.Under(
+            stateRoot,
+            WindowsSandboxTarget.Default.StateKey,
+            DeploymentStateStore.DeploymentsFolder);
+        Directory.CreateDirectory(stateDirectory);
+        await File.WriteAllTextAsync(
+            TestPaths.Under(stateDirectory, "legacy-process.json"),
+            $$"""
+            {
+              "schemaVersion": 1,
+              "revision": 2,
+              "deploymentId": "legacy-process",
+              "targetEpoch": "{{Epoch.Value}}",
+              "dirty": false,
+              "desired": [],
+              "processId": {{process.Id}},
+              "processStartTicksUtc": {{process.StartTime.ToUniversalTime().Ticks}}
+            }
+            """,
+            TestContext.CancellationToken);
+        var store = new DeploymentStateStore(new FixedStateDirectoryProvider(stateRoot));
+        var console = new TestConsole();
+
+        Assert.AreEqual(0, await RunSnapshotAsync(harness, console, store, "sandbox", "--json"));
+
+        var deployment = Deserialize(console.Output).Deployments.Single();
+        Assert.AreEqual("running", deployment.TrackedOperationStatus);
+        Assert.AreEqual(process.Id, deployment.TrackedOperationProcessId);
+    }
+
+    [TestMethod]
+    public async Task Snapshot_UnregisteredPackagedHistoryRemainsPackaged()
+    {
+        await using var harness = new Harness(GuestWindows());
+        var state = State("packaged-history", null, null, packaged: false) with
+        {
+            WasPackaged = true,
+        };
+        var console = new TestConsole();
+
+        Assert.AreEqual(
+            0,
+            await RunSnapshotAsync(
+                harness,
+                console,
+                new MutableDeploymentStateStore(state),
+                "sandbox",
+                "--json"));
+
+        var deployment = Deserialize(console.Output).Deployments.Single();
+        Assert.AreEqual("packaged", deployment.Kind);
+        Assert.IsTrue(deployment.RetainedLayout);
+    }
+
+    [TestMethod]
     public async Task Snapshot_UnavailableGuestDoesNotCallUnknownStateRetainedLayout()
     {
         await using var harness = new Harness(GuestWindows());
@@ -1221,6 +1281,20 @@ public class TargetCaptureCommandTests
             throw new NotSupportedException("A snapshot never clears deployment state.");
 
         public IReadOnlyList<DeploymentState> List(ExecutionTargetRef target) => [];
+    }
+
+    private sealed class FixedStateDirectoryProvider(string root) : ITargetStateDirectoryProvider
+    {
+        public DirectoryInfo GetTargetRoot(ExecutionTargetRef target, bool create)
+        {
+            var directory = new DirectoryInfo(TestPaths.Under(root, target.StateKey));
+            if (create)
+            {
+                directory.Create();
+            }
+
+            return directory;
+        }
     }
 
     private sealed class MutableDeploymentStateStore(DeploymentState state) : IDeploymentStateStore

@@ -797,6 +797,47 @@ public class SandboxRunTests
     }
 
     [TestMethod]
+    public async Task Deploy_LiteralV1ProcessFieldsStillStopThePreviousInstance()
+    {
+        await WriteHostFileAsync("app.exe", "v1");
+        await using var harness = new Harness(_guestManaged, _stateRoot);
+        await harness.Runner.DeployAsync(
+            harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
+
+        const int processId = 4312;
+        const long startTicksUtc = 638_900_000_000_000_000;
+        await WriteLegacyStateAsync(
+            "dep-1",
+            $$"""
+            {
+              "schemaVersion": 1,
+              "revision": 7,
+              "deploymentId": "dep-1",
+              "targetEpoch": "{{Epoch.Value}}",
+              "dirty": false,
+              "desired": [],
+              "processId": {{processId}},
+              "processStartTicksUtc": {{startTicksUtc}}
+            }
+            """);
+
+        var stopCalls = new List<(int ProcessId, long StartTicksUtc)>();
+        harness.Server.StopTrackedProcessImpl = (pid, ticks) =>
+        {
+            stopCalls.Add((pid, ticks));
+            return GuestCommandServer.ProcessStopOutcome.Stopped;
+        };
+        await WriteHostFileAsync("app.exe", "v2");
+
+        await harness.Runner.DeployAsync(
+            harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
+
+        CollectionAssert.AreEqual(
+            new[] { (processId, startTicksUtc) },
+            stopCalls);
+    }
+
+    [TestMethod]
     public async Task Deploy_WhenTheTrackedProcessCannotBeProvenStopped_RefusesBeforeMutatingAnything()
     {
         await WriteHostFileAsync("app.exe", "v1");
@@ -1218,6 +1259,19 @@ public class SandboxRunTests
         var path = TestPaths.Under(_hostSource, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         await File.WriteAllTextAsync(path, contents, TestContext.CancellationToken);
+    }
+
+    private async Task WriteLegacyStateAsync(string deploymentId, string json)
+    {
+        var directory = TestPaths.Under(
+            _stateRoot,
+            WindowsSandboxTarget.Default.StateKey,
+            DeploymentStateStore.DeploymentsFolder);
+        Directory.CreateDirectory(directory);
+        await File.WriteAllTextAsync(
+            TestPaths.Under(directory, $"{deploymentId}.json"),
+            json,
+            TestContext.CancellationToken);
     }
 
     /// <summary>Host runner and guest server sharing one in-memory transport and a real file service.</summary>

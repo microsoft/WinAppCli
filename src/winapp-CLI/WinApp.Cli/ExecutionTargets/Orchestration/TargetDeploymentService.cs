@@ -96,7 +96,7 @@ internal sealed class TargetDeploymentService(IDeploymentStateStore stateStore)
                 Dirty = true,
                 Desired = desired.Files,
                 Package = carried?.Package,
-                WasPackaged = carried?.WasPackaged ?? carried?.Package is not null,
+                WasPackaged = carried is not null && (carried.WasPackaged || carried.Package is not null),
 
                 // Whatever was running belonged to the previous layout. Keeping its ID would let a
                 // later command report a process that is no longer this deployment's.
