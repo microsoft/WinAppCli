@@ -505,7 +505,7 @@ internal partial class MsixService
             var packagePath = entry.Element(msbuildNs + "PackagePath")?.Value;
             if (sourcePath != null && packagePath != null && File.Exists(sourcePath))
             {
-                var destPath = Path.Combine(outputDir.FullName, packagePath);
+                var destPath = ResolveRecipeDestination(outputDir, packagePath);
                 Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
                 File.Copy(sourcePath, destPath, overwrite: true);
                 copied++;
@@ -523,7 +523,7 @@ internal partial class MsixService
                 continue;
             }
 
-            var destPath = Path.Combine(outputDir.FullName, packagePath);
+            var destPath = ResolveRecipeDestination(outputDir, packagePath);
             if (string.Equals(Path.GetExtension(packagePath), ".pdb", StringComparison.OrdinalIgnoreCase))
             {
                 File.Delete(destPath);
@@ -550,6 +550,29 @@ internal partial class MsixService
         }
 
         taskContext.AddDebugMessage($"{UiSymbols.Check} AppX layout from recipe: {copied} copied, {skipped} unchanged");
+    }
+
+    private static string ResolveRecipeDestination(DirectoryInfo outputDir, string packagePath)
+    {
+        string destination;
+        try
+        {
+            destination = Path.GetFullPath(packagePath, outputDir.FullName);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            throw new InvalidDataException(
+                $"The appx recipe PackagePath '{packagePath}' is invalid.",
+                ex);
+        }
+
+        if (!IsPathInsideDirectory(destination, outputDir.FullName))
+        {
+            throw new InvalidDataException(
+                $"The appx recipe PackagePath '{packagePath}' resolves outside the output directory '{outputDir.FullName}'.");
+        }
+
+        return destination;
     }
 
     /// <summary>

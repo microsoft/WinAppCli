@@ -256,6 +256,54 @@ public class MsixServiceIdentityTests : BaseCommandTests
             "PDBs stay in the publish directory and should not be duplicated into the runtime layout.");
     }
 
+    [TestMethod]
+    public async Task CopyFilesFromRecipeAsync_RejectsPdbPathOutsideRuntimeLayoutWithoutDeletingIt()
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("recipe-src");
+        var srcManifest = new FileInfo(Path.Join(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        var pdb = new FileInfo(Path.Join(srcDir.FullName, "TestApp.pdb"));
+        await File.WriteAllTextAsync(pdb.FullName, "source symbols", TestContext.CancellationToken);
+        var outputDir = _tempDirectory.CreateSubdirectory("layout");
+        var victim = Path.Join(_tempDirectory.FullName, "victim.pdb");
+        await File.WriteAllTextAsync(victim, "unrelated symbols", TestContext.CancellationToken);
+        var recipe = new FileInfo(WriteRecipe(srcManifest, (pdb.FullName, @"..\victim.pdb")));
+
+        var error = await Assert.ThrowsExactlyAsync<InvalidDataException>(() =>
+            InvokeCopyFilesFromRecipeAsync(recipe, outputDir));
+
+        StringAssert.Contains(error.Message, "resolves outside the output directory");
+        Assert.AreEqual(
+            "unrelated symbols",
+            await File.ReadAllTextAsync(victim, TestContext.CancellationToken),
+            "A malformed recipe must not delete a file outside the layout.");
+    }
+
+    [TestMethod]
+    public async Task CopyFilesFromRecipeAsync_RejectsManifestPathOutsideRuntimeLayout()
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("recipe-src");
+        var srcManifest = new FileInfo(Path.Join(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        var outputDir = _tempDirectory.CreateSubdirectory("layout");
+        var victim = Path.Join(_tempDirectory.FullName, "victim.xml");
+        await File.WriteAllTextAsync(victim, "unrelated content", TestContext.CancellationToken);
+        var recipe = new FileInfo(WriteRecipe(srcManifest));
+        var content = await File.ReadAllTextAsync(recipe.FullName, TestContext.CancellationToken);
+        content = content.Replace(
+            "<PackagePath>appxmanifest.xml</PackagePath>",
+            "<PackagePath>..\\victim.xml</PackagePath>",
+            StringComparison.Ordinal);
+        await File.WriteAllTextAsync(recipe.FullName, content, TestContext.CancellationToken);
+
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(() =>
+            InvokeCopyFilesFromRecipeAsync(recipe, outputDir));
+
+        Assert.AreEqual(
+            "unrelated content",
+            await File.ReadAllTextAsync(victim, TestContext.CancellationToken));
+    }
+
     // ---- SyncFilesToOutputDirectory -----------------------------------------------
 
     [TestMethod]
