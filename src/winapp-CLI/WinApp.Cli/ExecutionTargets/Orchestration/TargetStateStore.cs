@@ -159,6 +159,7 @@ internal sealed class TargetStateStore(ITargetStateDirectoryProvider directoryPr
             ClientWindowHandle = state.ClientWindowHandle,
             ClientProcessId = state.ClientProcessId,
             ClientProcessStartTicksUtc = state.ClientProcessStartTicksUtc,
+            ClientOwnedByWinapp = state.ClientOwnedByWinapp,
             UpdatedUtc = DateTimeOffset.UtcNow,
         };
 

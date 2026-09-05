@@ -124,6 +124,56 @@ public class WindowsSandboxInspectionTests
         Assert.IsFalse(after.ClientOwnedByWinapp);
     }
 
+    /// <summary>
+    /// A stale owned identity remains only a lookup hint; the sole live fallback stays adopted across
+    /// repeated resolutions and therefore cannot acquire permission to move when later minimized.
+    /// </summary>
+    [TestMethod]
+    public async Task Resolve_WithStaleRememberedClient_NeverCachesOrMovesTheAdoptedFallback()
+    {
+        var staleClient = new SandboxClientWindow(0x700, 7000, 700_000);
+        var state = _stateStore.Read(WindowsSandboxTarget.Default)!;
+        _stateStore.Commit(
+            WindowsSandboxTarget.Default,
+            state with
+            {
+                ClientWindowHandle = staleClient.Handle,
+                ClientProcessId = staleClient.ProcessId,
+                ClientProcessStartTicksUtc = staleClient.StartTicksUtc,
+                ClientOwnedByWinapp = true,
+            },
+            state.Revision);
+
+        var controller = new TrackingAdoptedClientController(LiveClient);
+        var backend = CreateBackend(controller);
+        await backend.TryAttachAsync(TestContext.CancellationToken);
+        var before = _stateStore.Read(WindowsSandboxTarget.Default)!;
+
+        var first = backend.ResolveDesktopSurface(TargetDesktopUse.PixelCapture);
+        var second = backend.ResolveDesktopSurface(TargetDesktopUse.PixelCapture);
+
+        Assert.IsTrue(first.Adopted);
+        Assert.IsTrue(second.Adopted);
+        CollectionAssert.AreEqual(
+            new[] { staleClient, staleClient },
+            controller.RememberedClients);
+
+        controller.IsMinimized = true;
+        Assert.ThrowsExactly<ExecutionTargetException>(
+            () => backend.ResolveDesktopSurface(TargetDesktopUse.PixelCapture));
+
+        Assert.AreEqual(0, controller.ParkCount);
+        CollectionAssert.AreEqual(
+            new[] { staleClient, staleClient, staleClient },
+            controller.RememberedClients);
+        var after = _stateStore.Read(WindowsSandboxTarget.Default)!;
+        Assert.AreEqual(before.Revision, after.Revision);
+        Assert.AreEqual(staleClient.Handle, after.ClientWindowHandle);
+        Assert.AreEqual(staleClient.ProcessId, after.ClientProcessId);
+        Assert.AreEqual(staleClient.StartTicksUtc, after.ClientProcessStartTicksUtc);
+        Assert.IsTrue(after.ClientOwnedByWinapp);
+    }
+
     /// <summary>Everything about the persisted record that a read must not disturb.</summary>
     private string Fingerprint()
     {
@@ -139,7 +189,7 @@ public class WindowsSandboxInspectionTests
         return string.Join('\n', [$"revision={state?.Revision}", .. files]);
     }
 
-    private WindowsSandboxBackend CreateBackend()
+    private WindowsSandboxBackend CreateBackend(IWindowsSandboxWindowController? windowController = null)
     {
         var directories = new TargetStateDirectoryProvider(_root.FullName);
         var binary = new FileInfo(Path.Join(_root.FullName, "winapp.exe"));
@@ -150,7 +200,7 @@ public class WindowsSandboxInspectionTests
             new WindowsSandboxLifecycle(_cli, _stateStore),
             directories,
             new InspectionBinaryProvider(binary),
-            new FixedClientWindowController(LiveClient),
+            windowController ?? new FixedClientWindowController(LiveClient),
             setup: null,
             stateStore: _stateStore);
     }
@@ -172,5 +222,46 @@ public class WindowsSandboxInspectionTests
             CancellationToken cancellationToken) => Task.FromResult<SandboxClientWindow?>(client);
 
         public SandboxClientWindow ResolveClient(SandboxClientWindow? remembered) => client;
+    }
+
+    private sealed class TrackingAdoptedClientController(SandboxClientWindow client)
+        : IWindowsSandboxWindowController
+    {
+        public List<SandboxClientWindow?> RememberedClients { get; } = [];
+
+        public bool IsMinimized { get; set; }
+
+        public int ParkCount { get; private set; }
+
+        public WindowsSandboxWindowSnapshot Capture() => new(default);
+
+        public Task<SandboxClientWindow?> PlaceConnectedClientAsync(
+            WindowsSandboxWindowSnapshot snapshot,
+            SandboxConnectAttempt attempt,
+            CancellationToken cancellationToken) => Task.FromResult<SandboxClientWindow?>(client);
+
+        public SandboxClientWindow ResolveClient(SandboxClientWindow? remembered) => client;
+
+        public SandboxClientStatus EnsureClientReady(
+            SandboxClientWindow? remembered,
+            TargetDesktopUse use)
+        {
+            RememberedClients.Add(remembered);
+            if (!IsMinimized)
+            {
+                return new SandboxClientStatus(client, IsMinimized: false);
+            }
+
+            if (remembered == client)
+            {
+                ParkCount++;
+                return new SandboxClientStatus(client, IsMinimized: false);
+            }
+
+            throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.ArtifactFailed,
+                "The adopted client is minimized.",
+                userAction: "Restore or reconnect the existing Windows Sandbox window, then retry.");
+        }
     }
 }

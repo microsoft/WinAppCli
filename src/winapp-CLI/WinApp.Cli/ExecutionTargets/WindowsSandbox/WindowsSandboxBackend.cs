@@ -621,7 +621,7 @@ internal sealed class WindowsSandboxBackend(
         var status = windowController.EnsureClientReady(remembered, use);
         var client = status.Window;
 
-        if (remembered is not null && client != _client)
+        if (remembered is not null && client == remembered && client != _client)
         {
             _client = client;
         }
