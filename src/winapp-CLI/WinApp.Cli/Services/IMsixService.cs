@@ -89,6 +89,7 @@ internal interface IMsixService
         string? executable = null,
         string? runtimeArch = null,
         FileInfo? projectFile = null,
+        FileInfo? projectAssetsFile = null,
         string? framework = null,
         bool noRestore = false,
         bool windowsAppSdkSelfContained = false,

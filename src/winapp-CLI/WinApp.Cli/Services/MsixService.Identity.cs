@@ -3,6 +3,7 @@
 
 using System.Security;
 using System.Text;
+using System.Text.Json;
 using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
 using WinApp.Cli.ConsoleTasks;
@@ -119,6 +120,7 @@ internal partial class MsixService
         string? executable = null,
         string? runtimeArch = null,
         FileInfo? projectFile = null,
+        FileInfo? projectAssetsFile = null,
         string? framework = null,
         bool noRestore = false,
         bool windowsAppSdkSelfContained = false,
@@ -179,7 +181,9 @@ internal partial class MsixService
             // divergent Windows App SDK version (M2). This loose-layout pipeline is shared with folder mode
             // (which always restores) and packaged project mode (which honors the run's --no-restore), so
             // thread the caller's setting through instead of forcing a restore during discovery.
-            var msbuildPackageList = await ResolveDotNetPackageListAsync(projectFile, framework, noRestore, cancellationToken);
+            var msbuildPackageList = requireExactRuntimeDependency && projectAssetsFile is not null
+                ? ReadPackageListFromAssetsFile(projectAssetsFile, framework, runtimeArch)
+                : await ResolveDotNetPackageListAsync(projectFile, framework, noRestore, cancellationToken);
 
             // Resolve the manifest that would be registered (issue #537 / TrySkipRegistration).
             // ManifestHelper.FindManifest already probes both canonical filenames; if it
@@ -680,6 +684,96 @@ internal partial class MsixService
             : await FetchDotNetPackageListAsync(cancellationToken);
 
         return FilterPackageListToFramework(packageList, framework);
+    }
+
+    internal static DotNetPackageListJson? ReadPackageListFromAssetsFile(
+        FileInfo projectAssetsFile,
+        string? framework,
+        string? runtimeArch)
+    {
+        if (!projectAssetsFile.Exists)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(projectAssetsFile.FullName));
+            if (!document.RootElement.TryGetProperty("targets", out var targets) ||
+                targets.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            var runtimeIdentifier = string.IsNullOrWhiteSpace(runtimeArch)
+                ? null
+                : RunArchHelper.ToRuntimeIdentifier(runtimeArch);
+            var candidates = targets.EnumerateObject().ToArray();
+            JsonProperty? selected = null;
+
+            if (!string.IsNullOrWhiteSpace(framework) && runtimeIdentifier is not null)
+            {
+                selected = candidates
+                    .Where(target =>
+                        target.Name.Equals($"{framework}/{runtimeIdentifier}", StringComparison.OrdinalIgnoreCase))
+                    .Select(static target => (JsonProperty?)target)
+                    .FirstOrDefault();
+            }
+            if (selected is null && !string.IsNullOrWhiteSpace(framework))
+            {
+                selected = candidates
+                    .Where(target => target.Name.Equals(framework, StringComparison.OrdinalIgnoreCase))
+                    .Select(static target => (JsonProperty?)target)
+                    .FirstOrDefault();
+            }
+            if (selected is null && runtimeIdentifier is not null)
+            {
+                var ridSuffix = $"/{runtimeIdentifier}";
+                var ridMatches = candidates
+                    .Where(target => target.Name.EndsWith(ridSuffix, StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
+                if (ridMatches.Length == 1)
+                {
+                    selected = ridMatches[0];
+                }
+            }
+            if (selected is null && candidates.Length == 1)
+            {
+                selected = candidates[0];
+            }
+            if (selected is null || selected.Value.Value.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            var packages = new List<DotNetPackage>();
+            foreach (var dependency in selected.Value.Value.EnumerateObject())
+            {
+                if (!dependency.Value.TryGetProperty("type", out var type) ||
+                    !string.Equals(type.GetString(), "package", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var separator = dependency.Name.LastIndexOf('/');
+                if (separator <= 0 || separator == dependency.Name.Length - 1)
+                {
+                    continue;
+                }
+
+                var id = dependency.Name[..separator];
+                var version = dependency.Name[(separator + 1)..];
+                packages.Add(new DotNetPackage(id, version, version));
+            }
+
+            var selectedFramework = selected.Value.Name.Split('/')[0];
+            return new DotNetPackageListJson(
+                [new DotNetProject([new DotNetFramework(selectedFramework, [], packages)])]);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>

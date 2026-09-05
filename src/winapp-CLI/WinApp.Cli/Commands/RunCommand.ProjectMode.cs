@@ -31,7 +31,6 @@ internal partial class RunCommand
             {
                 if (projectReport is not null)
                 {
-                    projectReport.Executed = false;
                     projectReport.Ready = false;
                     projectReport.ErrorCode = errorCode ?? "ProjectValidationFailed";
                     projectReport.Error = message;

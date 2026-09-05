@@ -117,6 +117,7 @@ public sealed class NativeAotVerifierTests
     {
         var verifier = new NativeAotVerifier(new FakePackageRegistrationService());
         using var process = StartLongRunningCommand(CmdPath);
+        var stopwatch = Stopwatch.StartNew();
         try
         {
            var expected = CmdPath;
@@ -134,6 +135,9 @@ public sealed class NativeAotVerifierTests
             Assert.IsTrue(result.ProcessProvenance);
             Assert.IsFalse(result.LoadedModules.Any(module =>
                 module.Equals("coreclr.dll", StringComparison.OrdinalIgnoreCase)));
+            Assert.IsTrue(
+                stopwatch.Elapsed >= TimeSpan.FromSeconds(3),
+                "Verification must observe process liveness for the full startup window.");
         }
         finally
         {

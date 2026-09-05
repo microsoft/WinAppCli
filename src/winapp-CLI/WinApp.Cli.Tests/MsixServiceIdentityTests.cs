@@ -1018,6 +1018,45 @@ public class MsixServiceIdentityTests : BaseCommandTests
             ])
         ]);
 
+    [TestMethod]
+    public async Task ReadPackageListFromAssetsFile_SelectsExactFrameworkAndRuntimeGraph()
+    {
+        var assetsPath = Path.Join(_tempDirectory.FullName, "project.assets.json");
+        await File.WriteAllTextAsync(
+            assetsPath,
+            """
+            {
+              "targets": {
+                "net9.0-windows10.0.26100.0/win-x64": {
+                  "Microsoft.WindowsAppSDK/1.7.250101": { "type": "package" }
+                },
+                "net9.0-windows10.0.26100.0/win-arm64": {
+                  "Microsoft.WindowsAppSDK/1.8.260317003": { "type": "package" },
+                  "Microsoft.WindowsAppRuntime.1.8/8000.702.311.0": { "type": "package" },
+                  "Referenced.Project/1.0.0": { "type": "project" }
+                }
+              }
+            }
+            """,
+            TestContext.CancellationToken);
+
+        var result = MsixService.ReadPackageListFromAssetsFile(
+            new FileInfo(assetsPath),
+            "net9.0-windows10.0.26100.0",
+            "arm64");
+
+        Assert.IsNotNull(result);
+        var packages = result.Projects.Single().Frameworks.Single().TransitivePackages;
+        Assert.IsTrue(packages.Any(package =>
+            package.Id == "Microsoft.WindowsAppSDK" &&
+            package.ResolvedVersion == "1.8.260317003"));
+        Assert.IsTrue(packages.Any(package =>
+            package.Id == "Microsoft.WindowsAppRuntime.1.8" &&
+            package.ResolvedVersion == "8000.702.311.0"));
+        Assert.IsFalse(packages.Any(package => package.Id == "Referenced.Project"));
+        Assert.IsFalse(packages.Any(package => package.ResolvedVersion == "1.7.250101"));
+    }
+
     private Task InvokeEnsureWindowsAppRuntimeInstalledAsync(DotNetPackageListJson? list) =>
         (Task)EnsureWindowsAppRuntimeInstalledMethod.Invoke(
             _msixService, [list, null, TestTaskContext, TestContext.CancellationToken, false])!;

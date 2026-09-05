@@ -638,6 +638,9 @@ internal partial class RunCommand : Command, IShortDescription
                         executable,
                         runtimeArch,
                         projectFile,
+                        string.IsNullOrWhiteSpace(projectResolution?.ProjectAssetsFile)
+                            ? null
+                            : new FileInfo(projectResolution.ProjectAssetsFile),
                         framework,
                         noRestore,
                         windowsAppSdkSelfContained: projectResolution?.SelfContained == true,

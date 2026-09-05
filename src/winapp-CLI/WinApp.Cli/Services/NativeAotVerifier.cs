@@ -114,9 +114,9 @@ internal sealed class NativeAotVerifier(IPackageRegistrationService packageRegis
         using (process)
         {
            var deadline = DateTime.UtcNow + StartupReadinessWindow;
-           while (true)
+           nint mainWindowHandle = 0;
+           while (DateTime.UtcNow < deadline)
             {
-               nint mainWindowHandle;
                 try
                 {
                    process.Refresh();
@@ -124,22 +124,34 @@ internal sealed class NativeAotVerifier(IPackageRegistrationService packageRegis
                    {
                        return ExitFailure(request, process);
                    }
-                   mainWindowHandle = process.MainWindowHandle;
+                   if (mainWindowHandle == 0)
+                   {
+                       mainWindowHandle = process.MainWindowHandle;
+                   }
                 }
                catch (InvalidOperationException)
                {
                    return ExitFailure(request, process);
                }
 
-               // A GUI app may create its top-level window after the process itself is ready. Poll for
-               // that observable signal during the verification-only readiness window, but do not require
-               // it: console and background apps are valid Native AOT processes too.
-               if (mainWindowHandle != 0 || DateTime.UtcNow >= deadline)
-               {
-                   break;
-               }
-
                await Task.Delay(StartupPollInterval, cancellationToken);
+            }
+
+            try
+            {
+                process.Refresh();
+                if (process.HasExited)
+                {
+                    return ExitFailure(request, process);
+                }
+                if (mainWindowHandle == 0)
+                {
+                    mainWindowHandle = process.MainWindowHandle;
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                return ExitFailure(request, process);
             }
 
             string? processPath;

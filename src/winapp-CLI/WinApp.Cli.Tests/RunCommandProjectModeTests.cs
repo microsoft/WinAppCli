@@ -499,6 +499,32 @@ public class RunCommandProjectModeTests : BaseCommandTests
         Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count);
     }
 
+    [TestMethod]
+    public async Task ProjectMode_Packaged_NoManifestInOutput_JsonPreservesExecuted()
+    {
+        var csproj = CreateCsproj();
+        var targetDir = CreateTargetDir(withManifest: false);
+        SetPackagedOutcome(csproj, targetDir);
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command,
+            [csproj.FullName, "--detach", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        var jsonStart = TestAnsiConsole.Output.IndexOf('{');
+        var jsonEnd = TestAnsiConsole.Output.LastIndexOf('}');
+        using var json = System.Text.Json.JsonDocument.Parse(
+            TestAnsiConsole.Output[jsonStart..(jsonEnd + 1)]);
+        Assert.IsTrue(
+            json.RootElement.GetProperty("Executed").GetBoolean(),
+            "A failure after successful project preparation must preserve Executed=true.");
+        Assert.IsFalse(json.RootElement.GetProperty("Ready").GetBoolean());
+        Assert.AreEqual(
+            "GeneratedManifestMissing",
+            json.RootElement.GetProperty("ErrorCode").GetString());
+    }
+
     #endregion
 
     #region Guardrails / errors
@@ -839,6 +865,8 @@ public class RunCommandProjectModeTests : BaseCommandTests
        var executable = ChildPath(publishDirectory.FullName, "TestApp.exe");
        File.WriteAllText(executable, "fixture");
        var generatedManifest = ChildPath(targetDirectory.FullName, "appxmanifest.xml");
+       var projectAssetsFile = ChildPath(targetDirectory.FullName, "project.assets.json");
+       File.WriteAllText(projectAssetsFile, "{}");
        _fakeProjectRunService.PreparationOutcome = new ProjectPreparationOutcome(
            new ProjectRunResolution(
                csproj,
@@ -852,7 +880,8 @@ public class RunCommandProjectModeTests : BaseCommandTests
                PublishAot: false,
                RuntimeIdentifier: "win-x64",
                SourceExecutable: executable,
-               FinalAppxManifestPath: generatedManifest),
+               FinalAppxManifestPath: generatedManifest,
+               ProjectAssetsFile: projectAssetsFile),
            0);
        var command = GetRequiredService<RunCommand>();
 
@@ -863,6 +892,7 @@ public class RunCommandProjectModeTests : BaseCommandTests
        Assert.AreEqual(0, exitCode);
        Assert.AreEqual(publishDirectory.FullName, _fakeMsixService.AddLooseLayoutInputDirectories.Single());
        Assert.AreEqual(generatedManifest, _fakeMsixService.AddLooseLayoutCalls.Single().ManifestPath);
+       Assert.AreEqual(projectAssetsFile, _fakeMsixService.AddLooseLayoutRuntimeCalls.Single().ProjectAssetsFile);
        Assert.IsTrue(_fakeMsixService.AddLooseLayoutDeploymentCalls.Single().RequireExactRuntimeDependency);
        Assert.IsFalse(_fakeMsixService.AddLooseLayoutDeploymentCalls.Single().SelfContained);
     }
