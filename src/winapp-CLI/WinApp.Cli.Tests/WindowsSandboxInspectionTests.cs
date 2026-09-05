@@ -153,8 +153,7 @@ public class WindowsSandboxInspectionTests
             new InspectionBinaryProvider(binary),
             new FixedClientWindowController(LiveClient),
             setup: null,
-            _stateStore,
-            NullTargetProgress.Instance);
+            stateStore: _stateStore);
     }
 
     private sealed class InspectionBinaryProvider(FileInfo binary) : IHostWinappBinaryProvider
