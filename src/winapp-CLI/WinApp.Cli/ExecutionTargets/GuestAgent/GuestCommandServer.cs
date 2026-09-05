@@ -35,6 +35,7 @@ internal sealed class GuestCommandServer : IAsyncDisposable
     private readonly GuestFileService? _files;
     private readonly string? _guestWinapp;
     private readonly IAppLauncherService? _appLauncher;
+    private readonly IPackageRegistrationService? _packageRegistration;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly ConcurrentDictionary<Guid, RunningOperation> _operations = new();
     private readonly ConcurrentDictionary<Guid, GuestFileWrite> _writes = new();
@@ -49,7 +50,8 @@ internal sealed class GuestCommandServer : IAsyncDisposable
         GuestAgentIdentity identity,
         GuestFileService? files = null,
         string? guestWinapp = null,
-        IAppLauncherService? appLauncher = null)
+        IAppLauncherService? appLauncher = null,
+        IPackageRegistrationService? packageRegistration = null)
     {
         _transport = transport;
         _targetEpoch = targetEpoch.Value;
@@ -59,6 +61,7 @@ internal sealed class GuestCommandServer : IAsyncDisposable
         _files = files;
         _guestWinapp = guestWinapp;
         _appLauncher = appLauncher;
+        _packageRegistration = packageRegistration;
     }
 
     /// <summary>How long a cancelled child gets to exit before its job is terminated.</summary>
@@ -249,6 +252,25 @@ internal sealed class GuestCommandServer : IAsyncDisposable
                 && message.ExpectedRegisteredLocation is { } expectedRegisteredLocation:
                 await HandleStopPackageAsync(
                     operationId, packageFamilyName, expectedRegisteredLocation, cancellationToken).ConfigureAwait(false);
+                break;
+
+            case GuestMessageTypes.QueryPackageRequest when message.PackageName is { } packageName
+                && message.PackagePublisher is { } publisher
+                && message.PackageFamilyName is { } queryFamilyName:
+                await HandleQueryPackageAsync(
+                    operationId, packageName, publisher, queryFamilyName, cancellationToken).ConfigureAwait(false);
+                break;
+
+            case GuestMessageTypes.UnregisterPackageRequest
+                when message.PackageFamilyName is { } unregisterFamilyName
+                && message.PackageFullName is { } packageFullName
+                && message.ExpectedRegisteredLocation is { } unregisterLocation:
+                await HandleUnregisterPackageAsync(
+                    operationId,
+                    unregisterFamilyName,
+                    packageFullName,
+                    unregisterLocation,
+                    cancellationToken).ConfigureAwait(false);
                 break;
 
             case GuestMessageTypes.StopProcessRequest when message.ProcessId is { } stopProcessId:
@@ -613,6 +635,124 @@ internal sealed class GuestCommandServer : IAsyncDisposable
         }
     }
 
+    /// <summary>Returns the guest OS's authoritative registration without changing it.</summary>
+    private async Task HandleQueryPackageAsync(
+        Guid operationId,
+        string packageName,
+        string publisher,
+        string packageFamilyName,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var registered = RequireAppLauncher().GetRegisteredPackageOrThrow(packageFamilyName);
+
+            if (registered is not null &&
+                (!string.Equals(registered.Name, packageName, StringComparison.OrdinalIgnoreCase) ||
+                 !string.Equals(registered.Publisher, publisher, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw ExecutionTargetException.Create(
+                    ExecutionTargetErrorCodes.TargetAmbiguous,
+                    $"Windows returned a package whose identity does not match '{packageName}'.",
+                    userAction: "Inspect the package registration in the target, then retry.");
+            }
+
+            await SendAsync(
+                new GuestMessage
+                {
+                    Type = GuestMessageTypes.QueryPackageResponse,
+                    OperationId = operationId.ToString(),
+                    TargetEpoch = _targetEpoch,
+                    PackageRegistered = registered is not null,
+                    RegisteredPackage = registered is null
+                        ? null
+                        : new GuestPackageRegistration(
+                            registered.FullName,
+                            registered.IsDevelopmentMode,
+                            registered.InstallLocation),
+                },
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (ExecutionTargetException ex)
+        {
+            await SendFailureAsync(operationId, ex.Error).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await SendFailureAsync(
+                operationId,
+                new ExecutionTargetErrorInfo
+                {
+                    Code = ExecutionTargetErrorCodes.StaleHandle,
+                    Message = $"Could not query the package registered as '{packageName}' in the target.",
+                    UserAction = "Retry the command.",
+                    Context = new Dictionary<string, string>
+                    {
+                        ["packageName"] = packageName,
+                        ["packageFamilyName"] = packageFamilyName,
+                        ["reason"] = ex.Message,
+                    },
+                }).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Unregisters only the package whose full name the host already proved it owns.</summary>
+    private async Task HandleUnregisterPackageAsync(
+        Guid operationId,
+        string packageFamilyName,
+        string packageFullName,
+        string expectedRegisteredLocation,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var registered = RequireAppLauncher().GetRegisteredPackageOrThrow(packageFamilyName);
+            if (registered is null)
+            {
+                await SendFileCompletedAsync(operationId, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (!registered.IsDevelopmentMode ||
+                !string.Equals(registered.FullName, packageFullName, StringComparison.OrdinalIgnoreCase) ||
+                registered.InstallLocation is null ||
+                !TargetPathSafety.PathsEqual(registered.InstallLocation, expectedRegisteredLocation))
+            {
+                throw ExecutionTargetException.Create(
+                    registered.IsDevelopmentMode
+                        ? ExecutionTargetErrorCodes.PackageConflict
+                        : ExecutionTargetErrorCodes.ProvisionedPackageConflict,
+                    $"The registration for '{packageFamilyName}' changed before it could be removed.",
+                    userAction: "Inspect the package registration in Windows Sandbox, then retry.");
+            }
+
+            await RequirePackageRegistration()
+                .UnregisterByFullNameAsync(packageFullName, preserveAppData: false, cancellationToken)
+                .ConfigureAwait(false);
+            await SendFileCompletedAsync(operationId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (ExecutionTargetException ex)
+        {
+            await SendFailureAsync(operationId, ex.Error).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await SendFailureAsync(
+                operationId,
+                new ExecutionTargetErrorInfo
+                {
+                    Code = ExecutionTargetErrorCodes.PackageConflict,
+                    Message = $"Could not unregister package '{packageFullName}' in the target.",
+                    UserAction = "Close the application in Windows Sandbox, then retry.",
+                    Context = new Dictionary<string, string>
+                    {
+                        ["packageFullName"] = packageFullName,
+                        ["reason"] = ex.Message,
+                    },
+                }).ConfigureAwait(false);
+        }
+    }
+
     /// <summary>
     /// Stops one specific tracked process, verified by PID and start time, before a redeploy
     /// mutates files it may still have open.
@@ -752,6 +892,13 @@ internal sealed class GuestCommandServer : IAsyncDisposable
         _appLauncher ?? throw ExecutionTargetException.Create(
             ExecutionTargetErrorCodes.TransportFailed,
             "This guest agent was not configured with application launch/termination support.",
+            userAction: "Retry the command.");
+
+    /// <summary>The package service, or a clear failure when this agent was built without one.</summary>
+    private IPackageRegistrationService RequirePackageRegistration() =>
+        _packageRegistration ?? throw ExecutionTargetException.Create(
+            ExecutionTargetErrorCodes.TransportFailed,
+            "This guest agent was not configured with package registration support.",
             userAction: "Retry the command.");
 
     private Task SendFileCompletedAsync(Guid operationId, CancellationToken cancellationToken) =>        SendAsync(

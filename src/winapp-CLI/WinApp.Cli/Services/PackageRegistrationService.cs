@@ -386,7 +386,8 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
                 Name: pkg.Name,
                 Version: $"{pkg.VersionMajor}.{pkg.VersionMinor}.{pkg.VersionBuild}.{pkg.VersionRevision}",
                 InstallLocation: installLocation,
-                IsDevelopmentMode: pkg.IsDevelopmentMode));
+                IsDevelopmentMode: pkg.IsDevelopmentMode,
+                Publisher: pkg.Publisher));
         }
 
         return results;

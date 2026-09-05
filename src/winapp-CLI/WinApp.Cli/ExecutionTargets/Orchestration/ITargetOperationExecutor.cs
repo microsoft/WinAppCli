@@ -74,6 +74,23 @@ internal interface ITargetOperationExecutor
         string expectedRegisteredLocation,
         CancellationToken cancellationToken);
 
+    /// <summary>Queries the target OS for the package actually registered under an identity.</summary>
+    Task<GuestPackageRegistration?> GetRegisteredPackageAsync(
+        string packageName,
+        string publisher,
+        string packageFamilyName,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Unregisters one exact package full name only while its development registration remains at
+    /// the expected location.
+    /// </summary>
+    Task UnregisterPackageAsync(
+        string packageFamilyName,
+        string packageFullName,
+        string expectedRegisteredLocation,
+        CancellationToken cancellationToken);
+
     /// <summary>Stops one process this host started, identified by ID and start time.</summary>
     Task StopTrackedProcessAsync(int processId, long startTicksUtc, CancellationToken cancellationToken);
 }

@@ -276,6 +276,19 @@ internal partial class RunCommand
                     PrepareTargetOptions.Mutating with { RequireInteractiveDesktop = requiresRealInput },
                     cancellationToken);
 
+                if (identity is not null)
+                {
+                    var familyName = appLauncherService.ComputePackageFamilyName(
+                        identity.PackageName,
+                        identity.Publisher);
+                    await guestApplicationRunner.ReconcilePackageBeforeRegistrationAsync(
+                        target,
+                        identity.PackageName,
+                        identity.Publisher,
+                        familyName,
+                        cancellationToken);
+                }
+
                 var provisioning = await ProvisionRuntimesAsync(target, sourceRoot, cancellationToken);
 
                 WriteProgress(isJson, "Deploying the application into the Windows Sandbox...");
@@ -310,6 +323,24 @@ internal partial class RunCommand
 
                     try
                     {
+                        var reconciled = await guestApplicationRunner.ReconcileRegistrationAttemptAsync(
+                            target,
+                            deployment.State.DeploymentId,
+                            identity.PackageName,
+                            identity.Publisher,
+                            familyName,
+                            registration.ExitCode == 0,
+                            cancellationToken);
+
+                        if (reconciled is not null &&
+                            string.Equals(
+                                reconciled.DeploymentId,
+                                deployment.State.DeploymentId,
+                                StringComparison.Ordinal))
+                        {
+                            state = reconciled;
+                        }
+
                         if (registration.ExitCode != 0)
                         {
                             // Registration itself failed, so there is no launch phase to follow --
@@ -416,7 +447,7 @@ internal partial class RunCommand
                 // never covering any part of the application's own lifetime.
                 if (identity is not null && unregisterOnExit)
                 {
-                    await UnregisterDeploymentAfterExitAsync(target, deployment.LayoutPath, run.State, cancellationToken);
+                    await UnregisterDeploymentAfterExitAsync(target, identity, run.State, cancellationToken);
                 }
 
                 if (isJson && guestProducesRunResult && capturedOutput is not null)
@@ -542,11 +573,8 @@ internal partial class RunCommand
         /// the launch phase. This phase reacquires only a fresh mutation lease, over that same live
         /// connection.
         /// </param>
-        /// <param name="layoutPath">
-        /// This deployment's own registration layout -- the exact location the guest's install
-        /// location must still match for anything to be unregistered.
-        /// </param>
-        /// <param name="state">This deployment's current host-side record, cleared on success.</param>
+        /// <param name="identity">The package identity whose current ownership must be re-proven.</param>
+        /// <param name="state">This deployment's current host-side record.</param>
         /// <param name="cancellationToken">Cancellation.</param>
         /// <remarks>
         /// The hidden guest-launch verb (the unlocked launch phase) has no unregister capability at
@@ -555,12 +583,9 @@ internal partial class RunCommand
         /// while this run's application was still executing, unregistering by name alone -- the
         /// guest's original, pre-existing <c>UnregisterDevPackageAsync</c> behavior that the local
         /// (non-sandbox) run still uses -- would remove that OTHER deployment's registration instead.
-        /// This phase closes that gap by reusing the exact same production guest
-        /// <c>winapp unregister --manifest &lt;layout&gt;/appxmanifest.xml</c> verb the standalone
-        /// <c>winapp unregister --on sandbox</c> command already sends (see
-        /// <c>UnregisterCommand.Sandbox.cs</c>): its own install-location check unregisters only when
-        /// the currently registered package's location is still exactly this deployment's layout, and
-        /// safely skips -- without failing -- when it is not.
+        /// This phase closes that gap by querying Windows again under the fresh lease, requiring that
+        /// the actual registration still belongs to this deployment, removing only its exact package
+        /// full name, and clearing ownership only after a final query proves absence.
         /// <para>
         /// A fresh mutation lease is acquired here rather than reusing the one this run already
         /// released: by the time the application exits, an unbounded amount of time may have passed,
@@ -579,45 +604,35 @@ internal partial class RunCommand
         /// keeps both the channel and the epoch identical.
         /// </para>
         /// <para>
-        /// Best-effort and silent on the primary output: its outcome is never published to stdout
-        /// (the guest's reply is discarded entirely, matching how a mismatch is meant to be silently
-        /// skipped rather than surfaced) and never affects this run's own exit code, matching the
-        /// pre-existing local <c>UnregisterDevPackageAsync</c>'s behavior exactly -- the application
-        /// already ran to completion, and a failed best-effort cleanup afterward is not a reason to
-        /// report the run itself as failed.
+        /// Best-effort and silent on the primary output: its outcome is never published to stdout and
+        /// never affects this run's own exit code, matching the pre-existing local
+        /// <c>UnregisterDevPackageAsync</c>'s behavior exactly. The application already ran to
+        /// completion, and a failed best-effort cleanup afterward is not a reason to report the run
+        /// itself as failed.
         /// </para>
         /// </remarks>
         private async Task UnregisterDeploymentAfterExitAsync(
             PreparedTarget target,
-            string layoutPath,
+            MsixIdentityResult identity,
             DeploymentState state,
             CancellationToken cancellationToken)
         {
             try
             {
                 using var mutationLease = executionTargetOrchestrator.AcquireMutationLease(cancellationToken);
+                var cleanupTarget = target with { MutationLease = mutationLease };
 
-                var result = await target.Operations.ExecuteAsync(
-                    new GuestExecRequest
-                    {
-                        UseGuestWinapp = true,
-                        Arguments = GuestRunPlanner.BuildUnregisterArguments(layoutPath, json: false),
-
-                        // The guest's own install-location check compares against its working
-                        // directory, which is what makes it refuse -- rather than blindly obey -- a
-                        // request to unregister a package that is no longer this exact deployment.
-                        WorkingDirectory = layoutPath,
-                    },
-                    callbacks: null,
+                var familyName = appLauncherService.ComputePackageFamilyName(
+                    identity.PackageName,
+                    identity.Publisher);
+                await guestApplicationRunner.UnregisterOwnedPackageAsync(
+                    cleanupTarget,
+                    identity.PackageName,
+                    identity.Publisher,
+                    familyName,
+                    state.DeploymentId,
+                    state.Revision,
                     cancellationToken).ConfigureAwait(false);
-
-                if (result.ExitCode == 0)
-                {
-                    // Cleared only after the guest reported success, so a failed or skipped
-                    // unregister leaves the record that a later command needs to find the package
-                    // again.
-                    guestApplicationRunner.ClearPackage(target.Reference, state);
-                }
             }
             catch (Exception ex)
             {

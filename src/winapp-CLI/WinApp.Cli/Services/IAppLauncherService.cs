@@ -145,8 +145,16 @@ internal interface IAppLauncherService
 
 /// <summary>The package currently registered under a family name, as reported by the OS inventory.</summary>
 /// <param name="FullName">The package's full name (name, version, architecture, and publisher hash).</param>
+/// <param name="Name">The package identity name.</param>
+/// <param name="Publisher">The package identity publisher.</param>
 /// <param name="InstallLocation">
 /// The path the package was installed from, as the package manager itself recorded it — present
 /// even when nothing exists at that path any more. Null when the inventory could not report one.
 /// </param>
-internal sealed record RegisteredPackage(string FullName, string? InstallLocation);
+/// <param name="IsDevelopmentMode">Whether Windows reports a development-mode registration.</param>
+internal sealed record RegisteredPackage(
+    string FullName,
+    string Name,
+    string Publisher,
+    string? InstallLocation,
+    bool IsDevelopmentMode);

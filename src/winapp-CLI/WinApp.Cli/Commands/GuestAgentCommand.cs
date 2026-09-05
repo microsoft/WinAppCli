@@ -99,7 +99,11 @@ internal class GuestAgentCommand : Command, IShortDescription
     }
 
     /// <summary>Runs the agent, or its self-test.</summary>
-    public class Handler(IGuestSessionProbe sessionProbe, IGuestProcessHostFactory processes, IAppLauncherService appLauncher)
+    public class Handler(
+        IGuestSessionProbe sessionProbe,
+        IGuestProcessHostFactory processes,
+        IAppLauncherService appLauncher,
+        IPackageRegistrationService packageRegistration)
         : AsynchronousCommandLineAction
     {
         /// <inheritdoc/>
@@ -143,7 +147,7 @@ internal class GuestAgentCommand : Command, IShortDescription
                 return 1;
             }
 
-            return await new GuestAgentRunner(sessionProbe, processes, appLauncher).RunAsync(
+            return await new GuestAgentRunner(sessionProbe, processes, appLauncher, packageRegistration).RunAsync(
                 bootstrapDirectory,
                 resultDirectory,
                 GuestAgentRunner.DefaultManagedRoot,

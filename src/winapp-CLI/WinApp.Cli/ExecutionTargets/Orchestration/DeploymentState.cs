@@ -56,10 +56,7 @@ internal sealed record PackageOwnership
     /// registered from a path this deployment happens to have used.
     /// </remarks>
     public bool Owns(string packageFullName, string registeredLocation) =>
-        string.Equals(
-            Path.TrimEndingDirectorySeparator(RegisteredLocation),
-            Path.TrimEndingDirectorySeparator(registeredLocation),
-            StringComparison.OrdinalIgnoreCase) &&
+        TargetPathSafety.PathsEqual(RegisteredLocation, registeredLocation) &&
         (PackageFullName is null ||
             string.Equals(PackageFullName, packageFullName, StringComparison.OrdinalIgnoreCase));
 }

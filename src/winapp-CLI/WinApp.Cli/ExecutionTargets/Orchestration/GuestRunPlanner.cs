@@ -100,34 +100,6 @@ internal static class GuestRunPlanner
         return arguments;
     }
 
-    /// <summary>The guest command that removes exactly one managed package registration.</summary>
-    /// <param name="layoutPath">Guest folder the package was registered from.</param>
-    /// <param name="json">Whether the guest should emit its machine-readable result.</param>
-    /// <remarks>
-    /// The manifest inside the registered layout selects the package, and the guest's own
-    /// install-location check then confirms the registration really is the one rooted there. That is
-    /// what keeps this from unregistering by name: a package of the same name registered from
-    /// anywhere else fails that check and is left alone.
-    /// </remarks>
-    public static List<string> BuildUnregisterArguments(string layoutPath, bool json)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(layoutPath);
-
-        var arguments = new List<string>
-        {
-            "unregister",
-            "--manifest",
-            TargetPathSafety.CombineInsideRoot(layoutPath, "appxmanifest.xml"),
-        };
-
-        if (json)
-        {
-            arguments.Add("--json");
-        }
-
-        return arguments;
-    }
-
     /// <summary>
     /// Refuses a combination the guest cannot honour, before anything is built or deployed.
     /// </summary>

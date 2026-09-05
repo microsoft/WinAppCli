@@ -85,6 +85,15 @@ internal static class GuestMessageTypes
     /// </summary>
     public const string StopPackageRequest = "stop-package-request";
 
+    /// <summary>Host asks the guest which package is actually registered for an identity.</summary>
+    public const string QueryPackageRequest = "query-package-request";
+
+    /// <summary>Guest reports the package actually registered for an identity, or confirmed absence.</summary>
+    public const string QueryPackageResponse = "query-package-response";
+
+    /// <summary>Host asks the guest to unregister one exact package full name.</summary>
+    public const string UnregisterPackageRequest = "unregister-package-request";
+
     /// <summary>
     /// Host asks the guest to stop one specific tracked process, identified by PID and start time,
     /// before a redeploy mutates the files it may still have open.
@@ -152,6 +161,15 @@ internal sealed record GuestFileInfo(
     long Size,
     long LastWriteUtcTicks,
     string Sha256);
+
+/// <summary>The package registration the guest OS currently reports for an identity.</summary>
+/// <param name="FullName">The effective package full name.</param>
+/// <param name="IsDevelopmentMode">Whether Windows reports a development-mode registration.</param>
+/// <param name="RegisteredLocation">The location Windows recorded for the registration.</param>
+internal sealed record GuestPackageRegistration(
+    string FullName,
+    bool IsDevelopmentMode,
+    string? RegisteredLocation);
 
 /// <summary>A request to start one guest process.</summary>
 /// <remarks>
@@ -271,6 +289,24 @@ internal sealed class GuestMessage
     /// terminated.
     /// </summary>
     public string? PackageFamilyName { get; init; }
+
+    /// <summary>Package identity name for a registration query.</summary>
+    public string? PackageName { get; init; }
+
+    /// <summary>Package publisher for a registration query.</summary>
+    public string? PackagePublisher { get; init; }
+
+    /// <summary>
+    /// Whether a registration query found a package. Present on
+    /// <see cref="GuestMessageTypes.QueryPackageResponse"/>.
+    /// </summary>
+    public bool? PackageRegistered { get; init; }
+
+    /// <summary>Actual package returned by <see cref="GuestMessageTypes.QueryPackageResponse"/>.</summary>
+    public GuestPackageRegistration? RegisteredPackage { get; init; }
+
+    /// <summary>Exact package full name for <see cref="GuestMessageTypes.UnregisterPackageRequest"/>.</summary>
+    public string? PackageFullName { get; init; }
 
     /// <summary>
     /// Present on <see cref="GuestMessageTypes.StopPackageRequest"/>. The guest location the

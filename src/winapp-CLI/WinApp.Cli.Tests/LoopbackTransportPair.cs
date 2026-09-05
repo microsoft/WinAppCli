@@ -96,15 +96,18 @@ internal sealed class FakeGuestProcessHost : IGuestProcessHost
 {
     private readonly TaskCompletionSource<int> _exit = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Action<GuestStreamId, ReadOnlyMemory<byte>> _onOutput;
+    private readonly Action<GuestExecRequest, int>? _onExit;
 
     /// <summary>Creates a host that reports <paramref name="processId"/>.</summary>
     public FakeGuestProcessHost(
         GuestExecRequest request,
         Action<GuestStreamId, ReadOnlyMemory<byte>> onOutput,
-        int processId)
+        int processId,
+        Action<GuestExecRequest, int>? onExit = null)
     {
         Request = request;
         _onOutput = onOutput;
+        _onExit = onExit;
         ProcessId = processId;
     }
 
@@ -134,7 +137,13 @@ internal sealed class FakeGuestProcessHost : IGuestProcessHost
         _onOutput(stream, Encoding.UTF8.GetBytes(text));
 
     /// <summary>Completes the child with <paramref name="exitCode"/>.</summary>
-    public void Exit(int exitCode) => _exit.TrySetResult(exitCode);
+    public void Exit(int exitCode)
+    {
+        if (_exit.TrySetResult(exitCode))
+        {
+            _onExit?.Invoke(Request, exitCode);
+        }
+    }
 
     /// <inheritdoc/>
     public Task WriteStandardInputAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
@@ -193,6 +202,9 @@ internal sealed class FakeGuestProcessHostFactory : IGuestProcessHostFactory
     /// </remarks>
     public Action<GuestExecRequest>? OnStart { get; set; }
 
+    /// <summary>Optional side effect to run when a scripted guest process exits.</summary>
+    public Action<GuestExecRequest, int>? OnExit { get; set; }
+
     /// <inheritdoc/>
     public IGuestProcessHost Start(
         GuestExecRequest request,
@@ -205,7 +217,11 @@ internal sealed class FakeGuestProcessHostFactory : IGuestProcessHostFactory
 
         OnStart?.Invoke(request);
 
-        var host = new FakeGuestProcessHost(request, onOutput, Interlocked.Increment(ref _nextProcessId));
+        var host = new FakeGuestProcessHost(
+            request,
+            onOutput,
+            Interlocked.Increment(ref _nextProcessId),
+            OnExit);
         Started.Enqueue(host);
         StartSignal.Release();
         return host;

@@ -249,11 +249,19 @@ winapp unregister --on sandbox
 winapp unregister --on sandbox --manifest .\Package.appxmanifest
 ```
 
-This removes only the package the matching deployment registered. Ownership has to hold twice
-before anything is removed: winapp's own record must say that deployment registered this identity in
-the current Sandbox generation, and the guest must then confirm the registration is a development
-package rooted in that deployment's managed folder. A package you installed in the Sandbox yourself
-satisfies neither and is never touched.
+This removes only the package a matching deployment registered. Windows' current development
+registration and its registered location select the owning deployment, so rerunning the same package
+identity from another output path or architecture does not leave `unregister` ambiguous. After a
+successful removal of that exact package full name, winapp queries Windows again and clears stale
+ownership claims only after confirming the registration is gone. If removal or verification fails,
+the claims remain for a safe retry. If Windows initially reports no registration, winapp clears stale
+claims and reports that nothing is registered. Removal does not depend on the old layout files still
+being present.
+
+The guest must still confirm that the current registration is a development package rooted in a
+current-generation winapp-managed folder. A package you installed in the Sandbox yourself is never
+touched, even when its identity matches; unregister fails and tells you to remove that package in the
+Sandbox instead. `--force` is rejected with `--on`; target ownership checks cannot be bypassed.
 
 ## Automating the UI
 
@@ -602,9 +610,9 @@ reported with its exact identity rather than removed.
 A hidden mode of the architecture-matched `winapp.exe` runs as a persistent agent inside the
 Sandbox. It is not a public command.
 
-The agent runs ordinary guest `winapp` child commands for run, unregister, debugging, and UI
-automation — it does not reimplement them. That is what keeps a command's behaviour identical
-whether you typed it locally or routed it through Sandbox.
+The agent runs ordinary guest `winapp` child commands for run, debugging, and UI automation.
+Package inventory and exact-full-name removal use structured Windows package operations so target
+ownership checks cannot widen into name-based removal.
 
 At startup it verifies it is not in session 0 and that its window station and input desktop are
 interactive. It publishes its status **whether or not it is ready**, so a disconnected Sandbox

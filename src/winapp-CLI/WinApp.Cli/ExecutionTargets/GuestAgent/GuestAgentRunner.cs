@@ -30,7 +30,8 @@ namespace WinApp.Cli.ExecutionTargets.GuestAgent;
 internal sealed class GuestAgentRunner(
     IGuestSessionProbe sessionProbe,
     IGuestProcessHostFactory processes,
-    IAppLauncherService? appLauncher = null)
+    IAppLauncherService? appLauncher = null,
+    IPackageRegistrationService? packageRegistration = null)
 {
     /// <summary>Guest-local root the agent installs itself and managed storage under.</summary>
     internal const string DefaultManagedRoot = @"C:\WinApp";
@@ -116,7 +117,8 @@ internal sealed class GuestAgentRunner(
                 // The agent is the only party that can assert which binary is guest winapp:
                 // it is the one running it.
                 Environment.ProcessPath,
-                appLauncher)
+                appLauncher,
+                packageRegistration)
             {
                 AdmissionRefusal = refusal,
             },

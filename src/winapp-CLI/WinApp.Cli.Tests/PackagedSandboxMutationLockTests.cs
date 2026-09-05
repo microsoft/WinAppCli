@@ -315,13 +315,11 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
     }
 
     /// <summary>
-    /// H2: the third, host-orchestrated <c>--unregister-on-exit</c> phase targets exactly this
-    /// deployment's own layout -- the same <see cref="GuestRunPlanner.BuildUnregisterArguments"/>
-    /// call the standalone <c>winapp unregister --on sandbox</c> command already sends -- rather than
-    /// a name-only unregister. It never runs before the application exits.
+    /// H2: the third, host-orchestrated <c>--unregister-on-exit</c> phase removes exactly the full
+    /// package name Windows reported for this deployment. It never runs before the application exits.
     /// </summary>
     [TestMethod]
-    public async Task UnregisterOnExit_AfterAppExits_SendsExactLayoutUnregisterRequest()
+    public async Task UnregisterOnExit_AfterAppExits_RemovesExactRegisteredFullName()
     {
         var ct = TestContext.CancellationToken;
 
@@ -343,28 +341,13 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
 
         launch.Exit(0);
 
-        var unregister = await harness.Processes.WaitForNextAsync(ct);
-
-        // The guest-side layout path is whatever this run's own register-only call used
-        // (--output-appx-directory) -- the guest's own materialized location, not the host's input
-        // layout -- so the expected arguments are derived from that call rather than assumed.
-        var guestLayoutPath = register.Request.Arguments[3];
-        var expectedArguments = GuestRunPlanner.BuildUnregisterArguments(guestLayoutPath, json: false);
-        CollectionAssert.AreEqual(
-            expectedArguments,
-            unregister.Request.Arguments,
-            "Unregister-on-exit must send the exact same manifest-scoped unregister request the " +
-            "standalone `winapp unregister --on sandbox` command already sends -- never a name-only " +
-            "unregister that could match a different deployment's registration.");
-        Assert.AreEqual(
-            guestLayoutPath,
-            unregister.Request.WorkingDirectory,
-            "The guest's own install-location check compares against its working directory, so the " +
-            "unregister request must run from this deployment's own layout.");
-
-        unregister.Exit(0);
-
         Assert.AreEqual(0, await task);
+        Assert.AreEqual(
+            ("SbxMutationLockTestPackage_1.0.0.0_x64__fakefamily", false),
+            harness.PackageRegistration.UnregisterByFullNameCalls.Single());
+        Assert.IsFalse(
+            await TryWaitForNextAsync(harness, TimeSpan.FromMilliseconds(300), ct),
+            "Exact package removal is a structured guest operation, not another guest winapp process.");
     }
 
     /// <summary>
@@ -405,9 +388,6 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
         // Only now does A's application exit, triggering its own unregister-on-exit phase.
         aLaunch.Exit(0);
 
-        var aUnregister = await harnessA.Processes.WaitForNextAsync(ct);
-        aUnregister.Exit(0);
-
         Assert.AreEqual(0, await taskA);
     }
 
@@ -430,9 +410,16 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
         aRegister.Exit(0);
 
         var aLaunch = await harnessA.Processes.WaitForNextAsync(ct);
+        var unregisterStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseUnregister = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        harnessA.PackageRegistration.WaitDuringUnregisterByFullNameAsync = async cancellationToken =>
+        {
+            unregisterStarted.TrySetResult();
+            await releaseUnregister.Task.WaitAsync(cancellationToken);
+        };
         aLaunch.Exit(0);
 
-        var aUnregister = await harnessA.Processes.WaitForNextAsync(ct);
+        await unregisterStarted.Task.WaitAsync(ct);
 
         var taskB = RunAsync(harnessB, noLaunch: false, clean: false, ct);
 
@@ -440,7 +427,7 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
             await TryWaitForNextAsync(harnessB, TimeSpan.FromMilliseconds(300), ct),
             "B must not start any guest process while A's unregister-on-exit lease is held.");
 
-        aUnregister.Exit(0);
+        releaseUnregister.TrySetResult();
         Assert.AreEqual(0, await taskA);
 
         var bRegister = await harnessB.Processes.WaitForNextAsync(ct);
@@ -472,10 +459,9 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
         aRegister.Exit(0);
 
         var aLaunch = await harnessA.Processes.WaitForNextAsync(ct);
+        harnessA.PackageRegistration.UnregisterByFullNameThrows =
+            new InvalidOperationException("simulated removal failure");
         aLaunch.Exit(0);
-
-        var aUnregister = await harnessA.Processes.WaitForNextAsync(ct);
-        aUnregister.Exit(1);
 
         // The launch itself succeeded, so the run's own exit code must still reflect that --
         // exactly like the pre-existing local unregister-on-exit's best-effort semantics.
@@ -630,6 +616,17 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
             Manifest = manifest;
             Layout = layout;
 
+            var packageInventory = new FakeAppLauncherService
+            {
+                FakePackageName = "SbxMutationLockTestPackage",
+                FakePublisher = "CN=SbxMutationLockTests",
+                FakePackageFullName = null,
+            };
+            PackageRegistration = new FakePackageRegistrationService
+            {
+                OnUnregisterByFullName = (_, _) => packageInventory.FakePackageFullName = null,
+            };
+
             Processes = new FakeGuestProcessHostFactory
             {
                 // The real guest winapp creates the registration layout while it registers, and
@@ -646,6 +643,21 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
                     if (layout is not null)
                     {
                         Directory.CreateDirectory(layout);
+                    }
+                },
+                OnExit = (request, exitCode) =>
+                {
+                    if (exitCode != 0)
+                    {
+                        return;
+                    }
+
+                    var layout = LayoutDirectoryOf(request);
+                    if (layout is not null)
+                    {
+                        packageInventory.FakePackageFullName =
+                            "SbxMutationLockTestPackage_1.0.0.0_x64__fakefamily";
+                        packageInventory.FakeRegisteredLocation = layout;
                     }
                 },
             };
@@ -669,7 +681,8 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
                 // mutation lease is held. What the stop does when a package *is* registered --
                 // including refusing one registered from a different layout -- is
                 // GuestCommandServerTests' subject, against a launcher scripted for it.
-                new FakeAppLauncherService { FakePackageFullName = null });
+                packageInventory,
+                PackageRegistration);
 
             _serverTask = server.RunAsync(_cancellation.Token);
 
@@ -717,6 +730,8 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
         public DirectoryInfo Layout { get; }
 
         public FakeGuestProcessHostFactory Processes { get; }
+
+        public FakePackageRegistrationService PackageRegistration { get; }
 
         public RunCommand.Handler Handler { get; }
 

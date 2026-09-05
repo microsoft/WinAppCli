@@ -101,7 +101,11 @@ internal partial class MsixService
             var externalLocation = new DirectoryInfo(string.IsNullOrEmpty(entryPointDir) ? currentDirectoryProvider.GetCurrentDirectory() : entryPointDir);
 
             // Unregister any existing package first (preserving app data by default)
-            await UnregisterExistingPackageAsync(debugIdentity.PackageName, taskContext, cancellationToken: cancellationToken);
+            await UnregisterExistingPackageAsync(
+                debugIdentity.PackageName,
+                taskContext,
+                debugIdentity.Publisher,
+                cancellationToken: cancellationToken);
 
             // Register the new debug manifest with external location
             await RegisterSparsePackageAsync(debugManifestPath, externalLocation, taskContext, cancellationToken);
@@ -226,7 +230,12 @@ internal partial class MsixService
             }
 
             // Unregister any existing package first (preserving app data by default)
-            await UnregisterExistingPackageAsync(identity.PackageName, taskContext, preserveAppData: !clean, cancellationToken);
+            await UnregisterExistingPackageAsync(
+                identity.PackageName,
+                taskContext,
+                identity.Publisher,
+                preserveAppData: !clean,
+                cancellationToken);
 
             // Register from the AppX layout directory
             await RegisterLooseLayoutPackageAsync(registrationManifest, taskContext, cancellationToken);
@@ -362,7 +371,12 @@ internal partial class MsixService
             }
 
             // Unregister any existing package first (preserving app data by default)
-            await UnregisterExistingPackageAsync(identity.PackageName, taskContext, preserveAppData: !clean, cancellationToken);
+            await UnregisterExistingPackageAsync(
+                identity.PackageName,
+                taskContext,
+                identity.Publisher,
+                preserveAppData: !clean,
+                cancellationToken);
 
             // Register the new debug manifest with external location
             await RegisterLooseLayoutPackageAsync(copiedAppxManifestPath, taskContext, cancellationToken);
@@ -1100,7 +1114,12 @@ internal partial class MsixService
     /// <param name="preserveAppData">When true, preserves the package's application data during removal</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>True if package was found and unregistered, false if no package was found</returns>
-    public async Task<bool> UnregisterExistingPackageAsync(string packageName, TaskContext taskContext, bool preserveAppData = true, CancellationToken cancellationToken = default)
+    public async Task<bool> UnregisterExistingPackageAsync(
+        string packageName,
+        TaskContext taskContext,
+        string? publisher = null,
+        bool preserveAppData = true,
+        CancellationToken cancellationToken = default)
     {
         taskContext.AddDebugMessage($"{UiSymbols.Trash} Checking for existing package...");
 
@@ -1112,7 +1131,11 @@ internal partial class MsixService
             // NOTE: despite its name, IPackageRegistrationService.FindDevPackages returns
             // *all* same-name packages (dev-mode AND non-dev-mode); the IsDevelopmentMode
             // flag on each entry is what we classify on below.
-            var installed = packageRegistrationService.FindDevPackages(packageName);
+            var installed = packageRegistrationService.FindDevPackages(packageName)
+                .Where(package =>
+                    publisher is null ||
+                    string.Equals(package.Publisher, publisher, StringComparison.OrdinalIgnoreCase))
+                .ToList();
 
             if (installed.Count == 0)
             {

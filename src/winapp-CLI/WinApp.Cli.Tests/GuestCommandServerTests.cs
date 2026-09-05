@@ -74,6 +74,86 @@ public class GuestCommandServerTests
     }
 
     [TestMethod]
+    public async Task QueryPackage_RegisteredResponseWithoutPackage_IsAProtocolFailure()
+    {
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var pair = new LoopbackTransportPair();
+        await using var guest = pair.Guest;
+        await using var channel = new GuestCommandChannel(pair.Host, Epoch);
+        channel.Start();
+
+        var query = channel.GetRegisteredPackageAsync(
+            "Contoso.MyApp",
+            "CN=Contoso",
+            "Contoso.MyApp_abc",
+            cancellation.Token);
+        var requestFrame = await guest.ReceiveFrameAsync(cancellation.Token);
+        var request = GuestPayloadCodec.TryDecodeJson(requestFrame!.Value.Span);
+
+        await guest.SendFrameAsync(
+            GuestPayloadCodec.EncodeJson(
+                new GuestMessage
+                {
+                    Type = GuestMessageTypes.QueryPackageResponse,
+                    OperationId = request!.OperationId,
+                    TargetEpoch = Epoch.Value,
+                    PackageRegistered = true,
+                }),
+            cancellation.Token);
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() => query);
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.TransportFailed, failure.Error.Code);
+        StringAssert.Contains(failure.Error.Message, "incomplete package registration response");
+    }
+
+    [TestMethod]
+    public async Task UnregisterPackage_RemovesOnlyTheExactFullName()
+    {
+        var packages = new FakePackageRegistrationService();
+        var launcher = new FakeAppLauncherService
+        {
+            FakePackageFullName = "Contoso.MyApp_2.0.0.0_arm64__abc",
+            FakeRegisteredLocation = FakeLayout,
+        };
+        using var harness = new Harness(Interactive, appLauncher: launcher, packageRegistration: packages);
+
+        await harness.Channel.UnregisterPackageAsync(
+            "Contoso.MyApp_abc",
+            "Contoso.MyApp_2.0.0.0_arm64__abc",
+            FakeLayout,
+            harness.Token);
+
+        Assert.HasCount(1, packages.UnregisterByFullNameCalls);
+        Assert.AreEqual(
+            ("Contoso.MyApp_2.0.0.0_arm64__abc", false),
+            packages.UnregisterByFullNameCalls[0]);
+        Assert.HasCount(0, packages.UnregisterCalls);
+    }
+
+    [TestMethod]
+    public async Task UnregisterPackage_WhenRegistrationLocationChanged_RefusesWithoutRemoval()
+    {
+        var packages = new FakePackageRegistrationService();
+        var launcher = new FakeAppLauncherService
+        {
+            FakePackageFullName = "Contoso.MyApp_2.0.0.0_arm64__abc",
+            FakeRegisteredLocation = @"C:\External\App",
+        };
+        using var harness = new Harness(Interactive, appLauncher: launcher, packageRegistration: packages);
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() =>
+            harness.Channel.UnregisterPackageAsync(
+                "Contoso.MyApp_abc",
+                "Contoso.MyApp_2.0.0.0_arm64__abc",
+                FakeLayout,
+                harness.Token));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.PackageConflict, failure.Error.Code);
+        Assert.HasCount(0, packages.UnregisterByFullNameCalls);
+    }
+
+    [TestMethod]
     public async Task Execute_StreamsOutputInOrderAndReturnsExitCode()
     {
         using var harness = new Harness(Interactive);
@@ -319,6 +399,79 @@ public class GuestCommandServerTests
         await harness.Channel.StopPackageProcessesAsync("Contoso.MyApp_abc", FakeLayout, harness.Token);
 
         Assert.AreEqual(0, launcher.StopPackageCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task QueryPackage_ReturnsAuthoritativeRegistrationDetails()
+    {
+        var launcher = new FakeAppLauncherService
+        {
+            FakePackageFullName = "Contoso.MyApp_2.0.0.0_arm64__fakefamily",
+            FakeRegisteredLocation = FakeLayout,
+            FakeIsDevelopmentMode = true,
+        };
+        using var harness = new Harness(Interactive, appLauncher: launcher);
+
+        var package = await harness.Channel.GetRegisteredPackageAsync(
+            "Contoso.MyApp",
+            "CN=Contoso",
+            "Contoso.MyApp_fakefamily",
+            harness.Token);
+
+        Assert.IsNotNull(package);
+        Assert.AreEqual(launcher.FakePackageFullName, package.FullName);
+        Assert.AreEqual(FakeLayout, package.RegisteredLocation);
+        Assert.IsTrue(package.IsDevelopmentMode);
+    }
+
+    [TestMethod]
+    public async Task QueryPackage_WhenNothingIsRegistered_ReturnsNull()
+    {
+        var launcher = new FakeAppLauncherService { FakePackageFullName = null };
+        using var harness = new Harness(Interactive, appLauncher: launcher);
+
+        var package = await harness.Channel.GetRegisteredPackageAsync(
+            "Contoso.MyApp",
+            "CN=Contoso",
+            "Contoso.MyApp_fakefamily",
+            harness.Token);
+
+        Assert.IsNull(package);
+    }
+
+    [TestMethod]
+    public async Task QueryPackage_PreservesNonDevelopmentStatus()
+    {
+        var launcher = new FakeAppLauncherService { FakeIsDevelopmentMode = false };
+        using var harness = new Harness(Interactive, appLauncher: launcher);
+
+        var package = await harness.Channel.GetRegisteredPackageAsync(
+            "Contoso.MyApp",
+            "CN=Contoso",
+            "Contoso.MyApp_fakefamily",
+            harness.Token);
+
+        Assert.IsNotNull(package);
+        Assert.IsFalse(package.IsDevelopmentMode);
+    }
+
+    [TestMethod]
+    public async Task QueryPackage_WhenInventoryFails_ReportsStructuredFailure()
+    {
+        var launcher = new FakeAppLauncherService
+        {
+            GetRegisteredPackageFailure = new InvalidOperationException("inventory unavailable"),
+        };
+        using var harness = new Harness(Interactive, appLauncher: launcher);
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() =>
+            harness.Channel.GetRegisteredPackageAsync(
+                "Contoso.MyApp",
+                "CN=Contoso",
+                "Contoso.MyApp_fakefamily",
+                harness.Token));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.StaleHandle, failure.Error.Code);
     }
 
     [TestMethod]
@@ -624,7 +777,11 @@ public class GuestCommandServerTests
         private readonly GuestCommandServer _server;
         private readonly Task _serverTask;
 
-        public Harness(GuestSessionInfo session, ExecutionTargetEpoch? hostEpoch = null, IAppLauncherService? appLauncher = null)
+        public Harness(
+            GuestSessionInfo session,
+            ExecutionTargetEpoch? hostEpoch = null,
+            IAppLauncherService? appLauncher = null,
+            IPackageRegistrationService? packageRegistration = null)
         {
             var pair = new LoopbackTransportPair();
             Processes = new FakeGuestProcessHostFactory();
@@ -637,7 +794,8 @@ public class GuestCommandServerTests
                 Identity,
                 files: null,
                 guestWinapp: null,
-                appLauncher);
+                appLauncher,
+                packageRegistration);
 
             _serverTask = _server.RunAsync(_cancellation.Token);
 

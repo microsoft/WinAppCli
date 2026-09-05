@@ -91,14 +91,22 @@ internal class FakePackageRegistrationService : IPackageRegistrationService
     /// </summary>
     public Exception? UnregisterByFullNameThrows { get; set; }
 
-    public Task UnregisterByFullNameAsync(string packageFullName, bool preserveAppData = true, CancellationToken cancellationToken = default)
+    public Action<string, bool>? OnUnregisterByFullName { get; set; }
+
+    public Func<CancellationToken, Task>? WaitDuringUnregisterByFullNameAsync { get; set; }
+
+    public async Task UnregisterByFullNameAsync(string packageFullName, bool preserveAppData = true, CancellationToken cancellationToken = default)
     {
         if (UnregisterByFullNameThrows is not null)
         {
             throw UnregisterByFullNameThrows;
         }
         UnregisterByFullNameCalls.Add((packageFullName, preserveAppData));
-        return Task.CompletedTask;
+        if (WaitDuringUnregisterByFullNameAsync is not null)
+        {
+            await WaitDuringUnregisterByFullNameAsync(cancellationToken);
+        }
+        OnUnregisterByFullName?.Invoke(packageFullName, preserveAppData);
     }
 
     /// <summary>

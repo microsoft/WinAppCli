@@ -229,7 +229,10 @@ internal class AppLauncherService(ILogger<AppLauncherService> logger) : IAppLaun
 
         return new RegisteredPackage(
             package.Id.FullName,
-            string.IsNullOrWhiteSpace(installedPath) ? null : installedPath);
+            package.Id.Name,
+            package.Id.Publisher,
+            string.IsNullOrWhiteSpace(installedPath) ? null : installedPath,
+            package.IsDevelopmentMode);
     }
 
     /// <summary>

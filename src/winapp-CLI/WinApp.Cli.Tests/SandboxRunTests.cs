@@ -40,11 +40,6 @@ public class SandboxRunTests
         "run", @"C:\WinApp\deployments\abc", "--output-appx-directory", @"C:\WinApp\deployments\abc-layout",
     ];
 
-    private static readonly string[] UnregisterArguments =
-    [
-        "unregister", "--manifest", @"C:\WinApp\deployments\abc-layout\appxmanifest.xml",
-    ];
-
     private string _root = null!;
     private string _hostSource = null!;
     private string _guestManaged = null!;
@@ -108,16 +103,6 @@ public class SandboxRunTests
             @"C:\WinApp\deployments\abc", @"C:\WinApp\deployments\abc-layout", new GuestRunOptions());
 
         CollectionAssert.AreEqual(MinimalRunArguments, arguments);
-    }
-
-    [TestMethod]
-    public void BuildUnregisterArguments_SelectsThePackageByItsRegisteredManifest()
-    {
-        var arguments = GuestRunPlanner.BuildUnregisterArguments(@"C:\WinApp\deployments\abc-layout", json: false);
-
-        // Never by package name: the manifest inside the registered layout is what identifies it,
-        // and the guest's own install-location check then proves the registration is rooted there.
-        CollectionAssert.AreEqual(UnregisterArguments, arguments);
     }
 
     [TestMethod]
@@ -330,79 +315,306 @@ public class SandboxRunTests
     // ---- Ownership -----------------------------------------------------------------
 
     [TestMethod]
-    public async Task FindOwningDeployment_MatchesOnWhatWasActuallyRegistered()
+    public async Task ReconcilePackage_TwoClaims_SelectsTheActualRegisteredLocation()
     {
         await WriteHostFileAsync("app.exe", "binary");
 
         await using var harness = new Harness(_guestManaged, _stateRoot);
 
-        var deployment = await harness.Runner.DeployAsync(
-            harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
+        var first = await CreateOwnedDeploymentAsync(harness, "dep-x64");
+        var latest = await CreateOwnedDeploymentAsync(harness, "dep-arm64");
+        harness.AppLauncher.FakePackageFullName = "Contoso.MyApp_2.0.0.0_arm64__abc";
+        harness.AppLauncher.FakeRegisteredLocation = latest.LayoutPath;
 
-        harness.Runner.CommitPackage(WindowsSandboxTarget.Default, deployment.State, Ownership(deployment.LayoutPath));
+        var result = await ReconcileForUnregisterAsync(harness);
 
-        var found = harness.Runner.FindOwningDeployment(WindowsSandboxTarget.Default, Epoch, "Contoso.MyApp", "CN=Contoso");
-        Assert.AreEqual("dep-1", found!.DeploymentId);
-
-        // A package winapp never deployed is not found, which is what keeps unregister from
-        // removing something a user installed in the guest themselves.
-        Assert.IsNull(harness.Runner.FindOwningDeployment(WindowsSandboxTarget.Default, Epoch, "Other.App", "CN=Contoso"));
+        Assert.AreEqual(latest.State.DeploymentId, result.Owner!.DeploymentId);
+        Assert.AreEqual(2, result.Claims.Count);
+        Assert.IsTrue(result.Claims.Any(claim => claim.DeploymentId == first.State.DeploymentId));
     }
 
     [TestMethod]
-    public async Task FindOwningDeployment_IgnoresRecordsFromAPreviousGeneration()
+    public async Task ReconcilePackage_DuplicateClaimsForSameRegistration_AreNotAmbiguous()
     {
         await WriteHostFileAsync("app.exe", "binary");
 
         await using var harness = new Harness(_guestManaged, _stateRoot);
 
-        var deployment = await harness.Runner.DeployAsync(
-            harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
+        var first = await CreateOwnedDeploymentAsync(harness, "dep-1");
+        var duplicate = await harness.Runner.DeployAsync(
+            harness.Target, "dep-2", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
+        harness.Runner.CommitPackage(
+            WindowsSandboxTarget.Default,
+            duplicate.State,
+            Ownership(first.LayoutPath));
+        harness.AppLauncher.FakeRegisteredLocation = first.LayoutPath;
 
-        harness.Runner.CommitPackage(WindowsSandboxTarget.Default, deployment.State, Ownership(deployment.LayoutPath));
+        var result = await ReconcileForUnregisterAsync(harness);
 
-        // State from a previous generation describes a guest that no longer exists; acting on it
-        // would unregister inside a Sandbox that was never asked about.
-        var other = ExecutionTargetEpoch.Create("sandbox-1", "nonce-b");
-        Assert.IsNull(harness.Runner.FindOwningDeployment(WindowsSandboxTarget.Default, other, "Contoso.MyApp", "CN=Contoso"));
+        Assert.AreEqual(
+            first.State.DeploymentId,
+            result.Owner!.DeploymentId,
+            "The deployment whose own managed layout is registered must be selected.");
+        Assert.AreEqual(2, result.Claims.Count);
     }
 
     [TestMethod]
-    public async Task FindOwningDeployment_WhenTwoLiveDeploymentsShareAnIdentity_Refuses()
+    public async Task ReconcilePackage_NoActualRegistration_ClearsCurrentClaimsButIgnoresOldGeneration()
     {
         await WriteHostFileAsync("app.exe", "binary");
 
         await using var harness = new Harness(_guestManaged, _stateRoot);
 
-        foreach (var id in new[] { "dep-1", "dep-2" })
+        await CreateOwnedDeploymentAsync(harness, "dep-1");
+        await CreateOwnedDeploymentAsync(harness, "dep-2");
+        var old = new DeploymentState
         {
-            var deployment = await harness.Runner.DeployAsync(
-                harness.Target, id, new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
+            SchemaVersion = DeploymentStateStore.CurrentSchemaVersion,
+            Revision = 0,
+            DeploymentId = "dep-old",
+            TargetEpoch = ExecutionTargetEpoch.Create("sandbox-1", "old").Value,
+            Dirty = false,
+            Package = Ownership(@"C:\WinAppGuest\deployments\dep-old-layout"),
+        };
+        harness.States.Commit(WindowsSandboxTarget.Default, old, expectedRevision: 0);
+        harness.AppLauncher.FakePackageFullName = null;
 
-            harness.Runner.CommitPackage(WindowsSandboxTarget.Default, deployment.State, Ownership(deployment.LayoutPath));
-        }
+        var result = await ReconcileForUnregisterAsync(harness);
 
-        // Picking one would unregister an application the user did not name.
-        var failure = Assert.ThrowsExactly<ExecutionTargetException>(() =>
-            harness.Runner.FindOwningDeployment(WindowsSandboxTarget.Default, Epoch, "Contoso.MyApp", "CN=Contoso"));
-
-        Assert.AreEqual(ExecutionTargetErrorCodes.TargetAmbiguous, failure.Error.Code);
+        Assert.IsNull(result.Actual);
+        Assert.IsNull(harness.States.Read(WindowsSandboxTarget.Default, "dep-1")!.Package);
+        Assert.IsNull(harness.States.Read(WindowsSandboxTarget.Default, "dep-2")!.Package);
+        Assert.IsNotNull(harness.States.Read(WindowsSandboxTarget.Default, "dep-old")!.Package);
     }
 
     [TestMethod]
-    public async Task ClearPackage_ForgetsTheRegistrationAfterItIsRemoved()
+    [DataRow(true)]
+    [DataRow(false)]
+    public async Task ReconcilePackage_UnownedOrNonDevelopmentRegistration_RefusesAndPreservesClaims(
+        bool isDevelopmentMode)
     {
         await WriteHostFileAsync("app.exe", "binary");
 
         await using var harness = new Harness(_guestManaged, _stateRoot);
 
-        var deployment = await harness.Runner.DeployAsync(
-            harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
+        await CreateOwnedDeploymentAsync(harness, "dep-1");
+        harness.AppLauncher.FakeRegisteredLocation = isDevelopmentMode
+            ? @"C:\Users\WDAGUtilityAccount\External"
+            : @"C:\WinAppGuest\deployments\dep-1-layout";
+        harness.AppLauncher.FakeIsDevelopmentMode = isDevelopmentMode;
 
-        var owned = harness.Runner.CommitPackage(WindowsSandboxTarget.Default, deployment.State, Ownership(deployment.LayoutPath));
-        harness.Runner.ClearPackage(WindowsSandboxTarget.Default, owned);
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
+            () => ReconcileForUnregisterAsync(harness));
 
-        Assert.IsNull(harness.Runner.FindOwningDeployment(WindowsSandboxTarget.Default, Epoch, "Contoso.MyApp", "CN=Contoso"));
+        Assert.AreEqual(
+            isDevelopmentMode
+                ? ExecutionTargetErrorCodes.PackageConflict
+                : ExecutionTargetErrorCodes.ProvisionedPackageConflict,
+            failure.Error.Code);
+        Assert.IsNotNull(harness.States.Read(WindowsSandboxTarget.Default, "dep-1")!.Package);
+    }
+
+    [TestMethod]
+    public async Task ReconcilePackage_QueryFailure_PreservesClaims()
+    {
+        await WriteHostFileAsync("app.exe", "binary");
+        await using var harness = new Harness(_guestManaged, _stateRoot);
+        await CreateOwnedDeploymentAsync(harness, "dep-1");
+        harness.AppLauncher.GetRegisteredPackageFailure = new InvalidOperationException("inventory unavailable");
+
+        await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() => ReconcileForUnregisterAsync(harness));
+
+        Assert.IsNotNull(harness.States.Read(WindowsSandboxTarget.Default, "dep-1")!.Package);
+    }
+
+    [TestMethod]
+    public async Task ReconcileBeforeRegistration_FirstDeploymentRefusesExternalPackage()
+    {
+        await WriteHostFileAsync("app.exe", "binary");
+        await using var harness = new Harness(_guestManaged, _stateRoot);
+        harness.AppLauncher.FakeRegisteredLocation = @"C:\External\App";
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() =>
+            harness.Runner.ReconcilePackageBeforeRegistrationAsync(
+                harness.Target,
+                "Contoso.MyApp",
+                "CN=Contoso",
+                "Contoso.MyApp_abc",
+                TestContext.CancellationToken));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.PackageConflict, failure.Error.Code);
+        Assert.HasCount(0, harness.PackageRegistration.UnregisterByFullNameCalls);
+    }
+
+    [TestMethod]
+    public async Task ReconcileRegistration_SuccessTransfersOwnershipAndClearsStaleClaims()
+    {
+        await WriteHostFileAsync("app.exe", "binary");
+        await using var harness = new Harness(_guestManaged, _stateRoot);
+        await CreateOwnedDeploymentAsync(harness, "dep-old");
+        var latest = await CreateOwnedDeploymentAsync(harness, "dep-new");
+        harness.AppLauncher.FakePackageFullName = "Contoso.MyApp_2.0.0.0_arm64__abc";
+        harness.AppLauncher.FakeRegisteredLocation = latest.LayoutPath;
+
+        var owner = await harness.Runner.ReconcileRegistrationAttemptAsync(
+            harness.Target,
+            latest.State.DeploymentId,
+            "Contoso.MyApp",
+            "CN=Contoso",
+            "Contoso.MyApp_abc",
+            registrationSucceeded: true,
+            TestContext.CancellationToken);
+
+        Assert.AreEqual(latest.State.DeploymentId, owner!.DeploymentId);
+        Assert.AreEqual(harness.AppLauncher.FakePackageFullName, owner.Package!.PackageFullName);
+        Assert.IsNull(harness.States.Read(WindowsSandboxTarget.Default, "dep-old")!.Package);
+    }
+
+    [TestMethod]
+    public async Task ReconcileRegistration_FailedAttemptRestoresSurvivingOwnerAndClearsFalseClaim()
+    {
+        await WriteHostFileAsync("app.exe", "binary");
+        await using var harness = new Harness(_guestManaged, _stateRoot);
+        var prior = await CreateOwnedDeploymentAsync(harness, "dep-prior");
+        await CreateOwnedDeploymentAsync(harness, "dep-attempt");
+        harness.AppLauncher.FakeRegisteredLocation = prior.LayoutPath;
+
+        var owner = await harness.Runner.ReconcileRegistrationAttemptAsync(
+            harness.Target,
+            "dep-attempt",
+            "Contoso.MyApp",
+            "CN=Contoso",
+            "Contoso.MyApp_abc",
+            registrationSucceeded: false,
+            TestContext.CancellationToken);
+
+        Assert.AreEqual("dep-prior", owner!.DeploymentId);
+        Assert.IsNotNull(harness.States.Read(WindowsSandboxTarget.Default, "dep-prior")!.Package);
+        Assert.IsNull(harness.States.Read(WindowsSandboxTarget.Default, "dep-attempt")!.Package);
+    }
+
+    [TestMethod]
+    public async Task ReconcileRegistration_FailedAttemptWithNoActualRegistration_ClearsFalseClaims()
+    {
+        await WriteHostFileAsync("app.exe", "binary");
+        await using var harness = new Harness(_guestManaged, _stateRoot);
+        await CreateOwnedDeploymentAsync(harness, "dep-attempt");
+        harness.AppLauncher.FakePackageFullName = null;
+
+        var owner = await harness.Runner.ReconcileRegistrationAttemptAsync(
+            harness.Target,
+            "dep-attempt",
+            "Contoso.MyApp",
+            "CN=Contoso",
+            "Contoso.MyApp_abc",
+            registrationSucceeded: false,
+            TestContext.CancellationToken);
+
+        Assert.IsNull(owner);
+        Assert.IsNull(harness.States.Read(WindowsSandboxTarget.Default, "dep-attempt")!.Package);
+    }
+
+    [TestMethod]
+    public async Task ReconcileRegistration_SuccessWithoutActualRegistration_FailsAndPreservesRecoveryClaim()
+    {
+        await WriteHostFileAsync("app.exe", "binary");
+        await using var harness = new Harness(_guestManaged, _stateRoot);
+        await CreateOwnedDeploymentAsync(harness, "dep-attempt");
+        harness.AppLauncher.FakePackageFullName = null;
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() =>
+            harness.Runner.ReconcileRegistrationAttemptAsync(
+                harness.Target,
+                "dep-attempt",
+                "Contoso.MyApp",
+                "CN=Contoso",
+                "Contoso.MyApp_abc",
+                registrationSucceeded: true,
+                TestContext.CancellationToken));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.PackageConflict, failure.Error.Code);
+        Assert.IsNotNull(harness.States.Read(WindowsSandboxTarget.Default, "dep-attempt")!.Package);
+    }
+
+    [TestMethod]
+    public async Task UnregisterOwnedPackage_ExactRemovalAndConfirmedAbsenceClearAllClaims()
+    {
+        await WriteHostFileAsync("app.exe", "binary");
+        await using var harness = new Harness(_guestManaged, _stateRoot);
+        var owner = await CreateOwnedDeploymentAsync(harness, "dep-owner");
+        await CreateOwnedDeploymentAsync(harness, "dep-stale");
+        harness.AppLauncher.FakeRegisteredLocation = owner.LayoutPath;
+        var fullName = harness.AppLauncher.FakePackageFullName!;
+        harness.PackageRegistration.OnUnregisterByFullName = (_, _) =>
+            harness.AppLauncher.FakePackageFullName = null;
+
+        var removed = await harness.Runner.UnregisterOwnedPackageAsync(
+            harness.Target,
+            "Contoso.MyApp",
+            "CN=Contoso",
+            "Contoso.MyApp_abc",
+            requiredDeploymentId: null,
+            requiredRevision: null,
+            TestContext.CancellationToken);
+
+        Assert.AreEqual(fullName, removed!.FullName);
+        Assert.AreEqual(
+            (fullName, false),
+            harness.PackageRegistration.UnregisterByFullNameCalls.Single());
+        Assert.IsNull(harness.States.Read(WindowsSandboxTarget.Default, "dep-owner")!.Package);
+        Assert.IsNull(harness.States.Read(WindowsSandboxTarget.Default, "dep-stale")!.Package);
+    }
+
+    [TestMethod]
+    public async Task UnregisterOwnedPackage_WhenWindowsStillReportsRegistration_PreservesAllClaims()
+    {
+        await WriteHostFileAsync("app.exe", "binary");
+        await using var harness = new Harness(_guestManaged, _stateRoot);
+        var owner = await CreateOwnedDeploymentAsync(harness, "dep-owner");
+        await CreateOwnedDeploymentAsync(harness, "dep-stale");
+        harness.AppLauncher.FakeRegisteredLocation = owner.LayoutPath;
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() =>
+            harness.Runner.UnregisterOwnedPackageAsync(
+                harness.Target,
+                "Contoso.MyApp",
+                "CN=Contoso",
+                "Contoso.MyApp_abc",
+                requiredDeploymentId: null,
+                requiredRevision: null,
+                TestContext.CancellationToken));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.PackageConflict, failure.Error.Code);
+        Assert.IsNotNull(harness.States.Read(WindowsSandboxTarget.Default, "dep-owner")!.Package);
+        Assert.IsNotNull(harness.States.Read(WindowsSandboxTarget.Default, "dep-stale")!.Package);
+    }
+
+    [TestMethod]
+    public async Task UnregisterOwnedPackage_OlderRevisionCannotRemoveNewerRegistration()
+    {
+        await WriteHostFileAsync("app.exe", "binary");
+        await using var harness = new Harness(_guestManaged, _stateRoot);
+        var deployment = await CreateOwnedDeploymentAsync(harness, "dep-owner");
+        var older = harness.States.Read(WindowsSandboxTarget.Default, "dep-owner")!;
+        harness.Runner.CommitPackage(
+            WindowsSandboxTarget.Default,
+            older,
+            Ownership(deployment.LayoutPath));
+        harness.AppLauncher.FakeRegisteredLocation = deployment.LayoutPath;
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() =>
+            harness.Runner.UnregisterOwnedPackageAsync(
+                harness.Target,
+                "Contoso.MyApp",
+                "CN=Contoso",
+                "Contoso.MyApp_abc",
+                older.DeploymentId,
+                older.Revision,
+                TestContext.CancellationToken));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.PackageConflict, failure.Error.Code);
+        Assert.HasCount(0, harness.PackageRegistration.UnregisterByFullNameCalls);
+        Assert.IsNotNull(harness.States.Read(WindowsSandboxTarget.Default, "dep-owner")!.Package);
     }
 
     // ---- Stop before redeploy -------------------------------------------------------
@@ -463,7 +675,7 @@ public class SandboxRunTests
     /// unrelated application.
     /// </summary>
     [TestMethod]
-    public async Task Deploy_NeverStopsAnUnrelatedDeploymentsPackage()
+    public async Task Deploy_RepairsAStalePreRegistrationJournalWithoutStoppingTheActualOwner()
     {
         await WriteHostFileAsync("app.exe", "v1");
 
@@ -484,18 +696,22 @@ public class SandboxRunTests
 
         await WriteHostFileAsync("app.exe", "v2");
 
-        // B's retry must refuse -- the family is currently registered from A's layout, not B's --
-        // rather than resolve the collision by terminating whatever currently holds the name.
-        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() =>
-            harness.Runner.DeployAsync(
-                harness.Target, "dep-b", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken));
+        await harness.Runner.ReconcilePackageBeforeRegistrationAsync(
+            harness.Target,
+            "Contoso.MyApp",
+            "CN=Contoso",
+            "Contoso.MyApp_abc",
+            TestContext.CancellationToken);
+        var retried = await harness.Runner.DeployAsync(
+            harness.Target, "dep-b", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
 
-        Assert.AreEqual(ExecutionTargetErrorCodes.StaleHandle, failure.Error.Code);
-
-        // A's legitimate registration was never touched, and B never mutated its own payload either.
+        // A's legitimate registration was never touched. B's false journal was cleared before its
+        // payload was safely updated, so the caller can proceed to retry registration.
         Assert.AreEqual(0, harness.AppLauncher.StopPackageCalls.Count);
-        Assert.AreEqual("v1", await File.ReadAllTextAsync(
+        Assert.AreEqual("v2", await File.ReadAllTextAsync(
             TestPaths.Under(_guestManaged, "deployments", "dep-b", "app.exe"), TestContext.CancellationToken));
+        Assert.IsNotNull(harness.States.Read(WindowsSandboxTarget.Default, "dep-a")!.Package);
+        Assert.IsNull(retried.State.Package);
     }
 
     [TestMethod]
@@ -692,36 +908,6 @@ public class SandboxRunTests
 
         Assert.IsFalse(repaired.State.Dirty);
         Assert.IsFalse(File.Exists(lockedFile));
-    }
-
-    [TestMethod]
-    public async Task EnsureLayoutHasManifest_CatchesADamagedLayoutRegardlessOfWhatDeploymentStateClaims()
-    {
-        await WriteHostFileAsync("app.exe", "v1");
-
-        await using var harness = new Harness(_guestManaged, _stateRoot);
-
-        var deployment = await harness.Runner.DeployAsync(
-            harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
-
-        var owned = harness.Runner.CommitPackage(WindowsSandboxTarget.Default, deployment.State, Ownership(deployment.LayoutPath));
-        Assert.IsFalse(owned.Dirty, "The persisted state in this scenario claims a healthy, clean deployment.");
-
-        // A layout damaged by something other than a normal deploy (a bug elsewhere, manual
-        // tampering, disk corruption) while the persisted state still says clean. Unregister must
-        // never take that state's word for it -- it has to look at what is actually there.
-        var layoutDirectory = TestPaths.Under(_guestManaged, "deployments", "dep-1-layout");
-        Directory.CreateDirectory(layoutDirectory);
-        await File.WriteAllTextAsync(
-            TestPaths.Under(layoutDirectory, "resources.pri"), "pri", TestContext.CancellationToken);
-
-        var layoutFiles = await harness.Target.Operations.ListFilesAsync(
-            GuestPaths.LayoutScope("dep-1"), TestContext.CancellationToken);
-
-        var failure = Assert.ThrowsExactly<ExecutionTargetException>(
-            () => UnregisterCommand.Handler.EnsureLayoutHasManifest(layoutFiles, "dep-1"));
-
-        Assert.AreEqual(ExecutionTargetErrorCodes.DeploymentDirty, failure.Error.Code);
     }
 
     /// <summary>
@@ -976,6 +1162,29 @@ public class SandboxRunTests
         RegisteredLocation = layoutPath,
     };
 
+    private async Task<GuestDeployment> CreateOwnedDeploymentAsync(Harness harness, string deploymentId)
+    {
+        var deployment = await harness.Runner.DeployAsync(
+            harness.Target,
+            deploymentId,
+            new DirectoryInfo(_hostSource),
+            clean: false,
+            TestContext.CancellationToken);
+        harness.Runner.CommitPackage(
+            WindowsSandboxTarget.Default,
+            deployment.State,
+            Ownership(deployment.LayoutPath));
+        return deployment;
+    }
+
+    private Task<PackageOwnershipReconciliation> ReconcileForUnregisterAsync(Harness harness) =>
+        harness.Runner.ReconcilePackageForUnregisterAsync(
+            harness.Target,
+            "Contoso.MyApp",
+            "CN=Contoso",
+            "Contoso.MyApp_abc",
+            TestContext.CancellationToken);
+
     private static ExecutionTargetCapabilities Capabilities(string? managedRoot = ManagedRoot) => new()
     {
         Architecture = "arm64",
@@ -1010,6 +1219,7 @@ public class SandboxRunTests
         {
             var pair = new LoopbackTransportPair();
             AppLauncher = new FakeAppLauncherService();
+            PackageRegistration = new FakePackageRegistrationService();
 
             Server = new GuestCommandServer(
                 pair.Guest,
@@ -1019,7 +1229,8 @@ public class SandboxRunTests
                 new GuestAgentIdentity("1.0.0", "hash", "arm64", 1, 1),
                 new GuestFileService(guestManagedRoot),
                 guestWinapp,
-                AppLauncher);
+                AppLauncher,
+                PackageRegistration);
 
             _serverTask = Server.RunAsync(_cancellation.Token);
 
@@ -1046,6 +1257,8 @@ public class SandboxRunTests
         public FakeGuestProcessHostFactory Processes { get; } = new();
 
         public FakeAppLauncherService AppLauncher { get; }
+
+        public FakePackageRegistrationService PackageRegistration { get; }
 
         public GuestCommandServer Server { get; }
 

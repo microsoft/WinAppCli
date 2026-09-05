@@ -25,6 +25,9 @@ internal class FakeAppLauncherService : IAppLauncherService
     public FakeLaunchedProcess? LastLaunchedProcess { get; private set; }
 
     public string? FakePackageFullName { get; set; } = "FakePackage_1.0.0.0_x64__fakefamily";
+    public string FakePackageName { get; set; } = "Contoso.MyApp";
+    public string FakePublisher { get; set; } = "CN=Contoso";
+    public bool FakeIsDevelopmentMode { get; set; } = true;
 
     /// <summary>
     /// When set, <see cref="LaunchByAumid"/> throws this instead of returning a process ID. Used to
@@ -88,7 +91,14 @@ internal class FakeAppLauncherService : IAppLauncherService
             throw failure;
         }
 
-        return FakePackageFullName is null ? null : new RegisteredPackage(FakePackageFullName, FakeRegisteredLocation);
+        return FakePackageFullName is null
+            ? null
+            : new RegisteredPackage(
+                FakePackageFullName,
+                FakePackageName,
+                FakePublisher,
+                FakeRegisteredLocation,
+                FakeIsDevelopmentMode);
     }
 
     public void TerminatePackageProcesses(string? packageFullName, uint processId)

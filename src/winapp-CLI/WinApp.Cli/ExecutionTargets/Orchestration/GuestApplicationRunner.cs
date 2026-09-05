@@ -11,6 +11,12 @@ namespace WinApp.Cli.ExecutionTargets.Orchestration;
 /// <param name="LayoutPath">Absolute guest path the guest registers the package from.</param>
 internal sealed record GuestDeployment(DeploymentState State, string PayloadPath, string LayoutPath);
 
+/// <summary>The authoritative package registration and the managed deployment that owns it.</summary>
+internal sealed record PackageOwnershipReconciliation(
+    GuestPackageRegistration? Actual,
+    DeploymentState? Owner,
+    IReadOnlyList<DeploymentState> Claims);
+
 /// <summary>
 /// Deploys an application into an execution target and runs it there through guest winapp
 /// (spec §"Deployment model", §"Package ownership").
@@ -213,47 +219,328 @@ internal sealed class GuestApplicationRunner(TargetDeploymentService deployments
         deployments.CommitPackage(target, state, package);
 
     /// <summary>
-    /// Finds the deployment in this generation that owns <paramref name="packageName"/>.
+    /// Reconciles host ownership claims with the package Windows actually has registered.
     /// </summary>
     /// <remarks>
-    /// Matching is on what a deployment actually registered, not on a name a caller supplied, and is
-    /// restricted to the current generation because a record from a previous one describes a guest
-    /// that no longer exists. An identity owned by more than one live deployment is reported rather
-    /// than resolved by picking one — the alternative is unregistering an application the user did
-    /// not name.
+    /// Windows has one current registration for a package family. Multiple current-generation host
+    /// records for that identity are therefore claims about that one registration, not evidence that
+    /// several registrations coexist. A confirmed absence clears all stale claims. A present package
+    /// is returned only when it is a development registration rooted at a location one or more
+    /// current-generation records prove winapp managed; otherwise the operation fails closed without
+    /// changing either the package or the records.
     /// </remarks>
-    public DeploymentState? FindOwningDeployment(
-        ExecutionTargetRef target,
-        ExecutionTargetEpoch epoch,
+    public async Task<PackageOwnershipReconciliation> ReconcilePackageForUnregisterAsync(
+        PreparedTarget target,
         string packageName,
-        string publisher)
+        string publisher,
+        string packageFamilyName,
+        CancellationToken cancellationToken)
     {
-        var owning = deployments
-            .List(target)
-            .Where(state => state.IsForEpoch(epoch)
-                && state.Package is { } package
-                && string.Equals(package.PackageName, packageName, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(package.Publisher, publisher, StringComparison.OrdinalIgnoreCase))
-            .ToList();
+        ArgumentNullException.ThrowIfNull(target);
+        target.RequireMutationLease();
 
-        if (owning.Count <= 1)
+        var claims = FindPackageClaims(target.Reference, target.Epoch, packageName, publisher, packageFamilyName);
+        var actual = await target.Operations.GetRegisteredPackageAsync(
+            packageName,
+            publisher,
+            packageFamilyName,
+            cancellationToken).ConfigureAwait(false);
+
+        if (actual is null)
         {
-            return owning.SingleOrDefault();
+            ClearPackageClaims(target.Reference, claims);
+            return new PackageOwnershipReconciliation(null, null, claims);
         }
 
-        throw ExecutionTargetException.Create(
-            ExecutionTargetErrorCodes.TargetAmbiguous,
-            $"More than one application deployed in Windows Sandbox is registered as '{packageName}'.",
-            userAction: "Unregister them from the directories they were run from, one at a time.",
-            context: new Dictionary<string, string>
+        var matching = FindMatchingClaims(target, claims, actual);
+        if (!actual.IsDevelopmentMode || matching.Count == 0)
+        {
+            throw UnownedRegistration(packageName, packageFamilyName, actual);
+        }
+
+        return new PackageOwnershipReconciliation(
+            actual,
+            matching.OrderBy(state => state.DeploymentId, StringComparer.Ordinal).First(),
+            claims);
+    }
+
+    /// <summary>Repairs a stale pre-registration journal before redeploying its files.</summary>
+    public async Task ReconcilePackageBeforeRegistrationAsync(
+        PreparedTarget target,
+        string packageName,
+        string publisher,
+        string packageFamilyName,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        target.RequireMutationLease();
+
+        var reconciliation = await ReconcilePackageForUnregisterAsync(
+            target,
+            packageName,
+            publisher,
+            packageFamilyName,
+            cancellationToken).ConfigureAwait(false);
+
+        if (reconciliation is { Actual: { } actual, Owner: { } owner })
+        {
+            TransferPackageOwnership(target.Reference, owner, reconciliation.Claims, actual);
+        }
+    }
+
+    /// <summary>
+    /// Unregisters one proven winapp-owned package and clears its claims only after Windows confirms
+    /// that no registration remains.
+    /// </summary>
+    public async Task<GuestPackageRegistration?> UnregisterOwnedPackageAsync(
+        PreparedTarget target,
+        string packageName,
+        string publisher,
+        string packageFamilyName,
+        string? requiredDeploymentId,
+        long? requiredRevision,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        target.RequireMutationLease();
+
+        var reconciliation = await ReconcilePackageForUnregisterAsync(
+            target,
+            packageName,
+            publisher,
+            packageFamilyName,
+            cancellationToken).ConfigureAwait(false);
+
+        if (reconciliation is not { Actual: { } actual, Owner: { } owner })
+        {
+            return null;
+        }
+
+        if (requiredDeploymentId is not null &&
+            !string.Equals(owner.DeploymentId, requiredDeploymentId, StringComparison.Ordinal))
+        {
+            throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.PackageConflict,
+                $"Package ownership moved from deployment '{requiredDeploymentId}' to '{owner.DeploymentId}'.",
+                userAction: "Retry the command.");
+        }
+
+        if (requiredRevision is not null && owner.Revision != requiredRevision)
+        {
+            throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.PackageConflict,
+                "A newer run replaced this deployment's package registration.",
+                userAction: "Leave the newer registration in place, or unregister it explicitly.");
+        }
+
+        await target.Operations
+            .UnregisterPackageAsync(
+                packageFamilyName,
+                actual.FullName,
+                actual.RegisteredLocation!,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        var remaining = await target.Operations.GetRegisteredPackageAsync(
+            packageName,
+            publisher,
+            packageFamilyName,
+            cancellationToken).ConfigureAwait(false);
+        if (remaining is not null)
+        {
+            throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.PackageConflict,
+                $"Windows still reports package '{remaining.FullName}' as registered after the removal attempt.",
+                userAction: "Close the application in Windows Sandbox, then retry.",
+                context: new Dictionary<string, string>
+                {
+                    ["packageFamilyName"] = packageFamilyName,
+                    ["packageFullName"] = remaining.FullName,
+                    ["registeredLocation"] = remaining.RegisteredLocation ?? "(unknown)",
+                });
+        }
+
+        ClearPackageClaims(target.Reference, reconciliation.Claims);
+        return actual;
+    }
+
+    /// <summary>
+    /// Resolves the optimistic registration journal entry after the guest registration attempt.
+    /// </summary>
+    /// <remarks>
+    /// The attempted deployment is journaled before the guest mutation so a host crash can never
+    /// leave a winapp-created package with no ownership evidence. After the call, the guest OS is
+    /// authoritative: success transfers the one live registration to the matching deployment and
+    /// clears every stale same-identity claim; failure clears a disproven attempted claim or restores
+    /// ownership to the deployment whose registration actually survived. A contradictory success
+    /// response followed by confirmed absence preserves the optimistic journal rather than discarding
+    /// the only recovery evidence. Commits are intentionally ordered owner-first, stale-second. A
+    /// crash can therefore leave duplicate evidence, which this same deterministic reconciliation
+    /// repairs, but never leave a live winapp registration with no evidence.
+    /// </remarks>
+    public async Task<DeploymentState?> ReconcileRegistrationAttemptAsync(
+        PreparedTarget target,
+        string attemptedDeploymentId,
+        string packageName,
+        string publisher,
+        string packageFamilyName,
+        bool registrationSucceeded,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        target.RequireMutationLease();
+
+        var claims = FindPackageClaims(target.Reference, target.Epoch, packageName, publisher, packageFamilyName);
+        var actual = await target.Operations.GetRegisteredPackageAsync(
+            packageName,
+            publisher,
+            packageFamilyName,
+            cancellationToken).ConfigureAwait(false);
+
+        if (actual is null)
+        {
+            if (registrationSucceeded)
             {
-                ["deployments"] = string.Join(", ", owning.Select(state => state.DeploymentId)),
-            });
+                throw ExecutionTargetException.Create(
+                    ExecutionTargetErrorCodes.PackageConflict,
+                    $"The guest reported that '{packageName}' registered successfully, but Windows reports no current registration.",
+                    userAction: "Retry the command.");
+            }
+
+            ClearPackageClaims(target.Reference, claims);
+            return null;
+        }
+
+        var matching = actual.IsDevelopmentMode ? FindMatchingClaims(target, claims, actual) : [];
+        var attempted = matching.FirstOrDefault(state =>
+            string.Equals(state.DeploymentId, attemptedDeploymentId, StringComparison.Ordinal));
+
+        if (registrationSucceeded)
+        {
+            if (attempted is null)
+            {
+                throw UnownedRegistration(packageName, packageFamilyName, actual);
+            }
+
+            return TransferPackageOwnership(target.Reference, attempted, claims, actual);
+        }
+
+        if (matching.Count > 0)
+        {
+            var survivingOwner = matching
+                .OrderBy(state => state.DeploymentId, StringComparer.Ordinal)
+                .First();
+            return TransferPackageOwnership(target.Reference, survivingOwner, claims, actual);
+        }
+
+        // The failed attempt demonstrably did not create the registration Windows reports. Remove
+        // only that false claim; unrelated historical evidence remains available for diagnosis.
+        var falseAttempt = claims.FirstOrDefault(state =>
+            string.Equals(state.DeploymentId, attemptedDeploymentId, StringComparison.Ordinal));
+        if (falseAttempt is not null)
+        {
+            deployments.CommitPackage(target.Reference, falseAttempt, package: null);
+        }
+
+        return null;
     }
 
     /// <summary>Forgets the package a deployment owned, after it has been unregistered.</summary>
     public DeploymentState ClearPackage(ExecutionTargetRef target, DeploymentState state) =>
         deployments.CommitPackage(target, state, package: null);
+
+    /// <summary>Clears every current-generation claim for one identity after confirmed removal.</summary>
+    public void ClearPackageClaims(ExecutionTargetRef target, IReadOnlyList<DeploymentState> claims)
+    {
+        foreach (var claim in claims)
+        {
+            deployments.CommitPackage(target, claim, package: null);
+        }
+    }
+
+    private List<DeploymentState> FindPackageClaims(
+        ExecutionTargetRef target,
+        ExecutionTargetEpoch epoch,
+        string packageName,
+        string publisher,
+        string packageFamilyName) =>
+        [
+            .. deployments.List(target)
+                .Where(state => state.IsForEpoch(epoch)
+                    && state.Package is { } package
+                    && string.Equals(package.PackageName, packageName, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(package.Publisher, publisher, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(
+                        package.PackageFamilyName,
+                        packageFamilyName,
+                        StringComparison.OrdinalIgnoreCase)),
+        ];
+
+    private static List<DeploymentState> FindMatchingClaims(
+        PreparedTarget target,
+        IReadOnlyList<DeploymentState> claims,
+        GuestPackageRegistration actual)
+    {
+        if (string.IsNullOrWhiteSpace(actual.RegisteredLocation))
+        {
+            return [];
+        }
+
+        return
+        [
+            .. claims.Where(state =>
+                state.Package!.Owns(actual.FullName, actual.RegisteredLocation) &&
+                TargetPathSafety.PathsEqual(
+                    state.Package.RegisteredLocation,
+                    GuestPaths.Resolve(target.Capabilities, GuestPaths.LayoutScope(state.DeploymentId)))),
+        ];
+    }
+
+    private DeploymentState TransferPackageOwnership(
+        ExecutionTargetRef target,
+        DeploymentState owner,
+        IReadOnlyList<DeploymentState> claims,
+        GuestPackageRegistration actual)
+    {
+        var committedOwner = deployments.CommitPackage(
+            target,
+            owner,
+            owner.Package! with
+            {
+                PackageFullName = actual.FullName,
+                RegisteredLocation = actual.RegisteredLocation!,
+            });
+
+        foreach (var stale in claims)
+        {
+            if (!string.Equals(stale.DeploymentId, owner.DeploymentId, StringComparison.Ordinal))
+            {
+                deployments.CommitPackage(target, stale, package: null);
+            }
+        }
+
+        return committedOwner;
+    }
+
+    private static ExecutionTargetException UnownedRegistration(
+        string packageName,
+        string packageFamilyName,
+        GuestPackageRegistration actual) =>
+        ExecutionTargetException.Create(
+            actual.IsDevelopmentMode
+                ? ExecutionTargetErrorCodes.PackageConflict
+                : ExecutionTargetErrorCodes.ProvisionedPackageConflict,
+            actual.IsDevelopmentMode
+                ? $"The package currently registered as '{packageName}' is not rooted in a deployment winapp owns."
+                : $"The package currently registered as '{packageName}' is not a development package.",
+            userAction: "Remove or unregister that package in Windows Sandbox, then retry.",
+            context: new Dictionary<string, string>
+            {
+                ["packageFamilyName"] = packageFamilyName,
+                ["packageFullName"] = actual.FullName,
+                ["registeredLocation"] = actual.RegisteredLocation ?? "(unknown)",
+                ["isDevelopmentMode"] = actual.IsDevelopmentMode.ToString(),
+            });
 
     /// <summary>
     /// Commits the launched process without letting a state race fail a running application.

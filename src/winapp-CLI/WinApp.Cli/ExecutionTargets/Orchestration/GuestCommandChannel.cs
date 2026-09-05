@@ -446,6 +446,78 @@ internal sealed class GuestCommandChannel : IAsyncDisposable, ITargetOperationEx
         }
     }
 
+    /// <inheritdoc/>
+    public async Task<GuestPackageRegistration?> GetRegisteredPackageAsync(
+        string packageName,
+        string publisher,
+        string packageFamilyName,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(packageName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(publisher);
+        ArgumentException.ThrowIfNullOrWhiteSpace(packageFamilyName);
+
+        var operationId = Guid.NewGuid();
+        var state = Register(operationId);
+
+        try
+        {
+            await SendAsync(
+                new GuestMessage
+                {
+                    Type = GuestMessageTypes.QueryPackageRequest,
+                    OperationId = operationId.ToString(),
+                    TargetEpoch = _targetEpoch,
+                    PackageName = packageName,
+                    PackagePublisher = publisher,
+                    PackageFamilyName = packageFamilyName,
+                },
+                cancellationToken).ConfigureAwait(false);
+
+            return await state.RegisteredPackage.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _operations.TryRemove(operationId, out _);
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task UnregisterPackageAsync(
+        string packageFamilyName,
+        string packageFullName,
+        string expectedRegisteredLocation,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(packageFamilyName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(packageFullName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedRegisteredLocation);
+
+        var operationId = Guid.NewGuid();
+        var state = Register(operationId);
+
+        try
+        {
+            await SendAsync(
+                new GuestMessage
+                {
+                    Type = GuestMessageTypes.UnregisterPackageRequest,
+                    OperationId = operationId.ToString(),
+                    TargetEpoch = _targetEpoch,
+                    PackageFamilyName = packageFamilyName,
+                    PackageFullName = packageFullName,
+                    ExpectedRegisteredLocation = expectedRegisteredLocation,
+                },
+                cancellationToken).ConfigureAwait(false);
+
+            await state.FileCompletion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _operations.TryRemove(operationId, out _);
+        }
+    }
+
     /// <summary>    /// Asks the guest to stop one specific tracked process before a redeploy mutates files it may
     /// still have open.
     /// </summary>
@@ -651,6 +723,26 @@ internal sealed class GuestCommandChannel : IAsyncDisposable, ITargetOperationEx
                 state.Files.TrySetResult(files);
                 break;
 
+            case GuestMessageTypes.QueryPackageResponse
+                when message.PackageRegistered is true && message.RegisteredPackage is { } package:
+                state.RegisteredPackage.TrySetResult(package);
+                break;
+
+            case GuestMessageTypes.QueryPackageResponse when message.PackageRegistered is false:
+                state.RegisteredPackage.TrySetResult(null);
+                break;
+
+            case GuestMessageTypes.QueryPackageResponse:
+                Fail(
+                    state,
+                    new ExecutionTargetErrorInfo
+                    {
+                        Code = ExecutionTargetErrorCodes.TransportFailed,
+                        Message = "The guest returned an incomplete package registration response.",
+                        UserAction = "Retry the command.",
+                    });
+                break;
+
             case GuestMessageTypes.FileCompleted:
                 state.FileCompletion.TrySetResult(true);
                 break;
@@ -703,6 +795,7 @@ internal sealed class GuestCommandChannel : IAsyncDisposable, ITargetOperationEx
         state.Capabilities.TrySetException(exception);
         state.Files.TrySetException(exception);
         state.FileCompletion.TrySetException(exception);
+        state.RegisteredPackage.TrySetException(exception);
     }
 
     /// <summary>Per-operation state owned by the receive pump.</summary>
@@ -717,6 +810,9 @@ internal sealed class GuestCommandChannel : IAsyncDisposable, ITargetOperationEx
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public TaskCompletionSource<bool> FileCompletion { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<GuestPackageRegistration?> RegisteredPackage { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public GuestExecCallbacks? Callbacks { get; set; }

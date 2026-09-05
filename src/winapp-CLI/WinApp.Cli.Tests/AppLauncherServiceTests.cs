@@ -167,7 +167,12 @@ public class AppLauncherServiceTests
         Assert.IsFalse(Directory.Exists(missingLocation), "Precondition: the simulated location must not exist.");
 
         _service.FindRegisteredPackageImpl = _ =>
-            new RegisteredPackage("Contoso.App_1.0.0.0_x64__abcdefgh", missingLocation);
+            new RegisteredPackage(
+                "Contoso.App_1.0.0.0_x64__abcdefgh",
+                "Contoso.App",
+                "CN=Contoso",
+                missingLocation,
+                IsDevelopmentMode: true);
 
         var result = _service.GetRegisteredPackageOrThrow("Contoso.App_abcdefgh");
 

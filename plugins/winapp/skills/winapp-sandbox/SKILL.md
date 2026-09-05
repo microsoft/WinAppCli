@@ -100,6 +100,14 @@ winapp run . --on sandbox --clean    # fresh application data
 winapp unregister --on sandbox       # remove just this app from the Sandbox
 ```
 
+Target unregister follows Windows' one current development registration back to the matching
+winapp-managed layout. Stale records from earlier layouts or architectures are repaired
+automatically. It removes only Windows' exact reported package full name, confirms absence before
+clearing recovery records, and does not require the old layout files to remain. It never removes an
+external package with the same identity, and `--force` is not supported with `--on`. If an external
+or non-development package currently owns the identity, the command fails and leaves both the
+package and winapp's recovery records unchanged.
+
 Several winapp commands can use one Sandbox at the same time, so a foreground `winapp run .
 --on sandbox` running in one terminal does not hold up `winapp ui list-windows --on sandbox` in another.
 Past eight commands at once the next one fails immediately with `sandbox_agent_busy` instead of

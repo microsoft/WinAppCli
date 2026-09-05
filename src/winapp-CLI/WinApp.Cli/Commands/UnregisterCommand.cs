@@ -8,6 +8,7 @@ using System.CommandLine.Invocation;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using WinApp.Cli.ExecutionTargets.Abstractions;
 using WinApp.Cli.ExecutionTargets.Orchestration;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
@@ -46,6 +47,7 @@ internal partial class UnregisterCommand : Command, IShortDescription, ITargetAw
 
     public partial class Handler(
         IPackageRegistrationService packageRegistrationService,
+        IAppLauncherService appLauncherService,
         ICurrentDirectoryProvider currentDirectoryProvider,
         ExecutionTargetOrchestrator orchestrator,
         GuestApplicationRunner guestApplicationRunner,
@@ -92,6 +94,20 @@ internal partial class UnregisterCommand : Command, IShortDescription, ITargetAw
             // state never decides what happens on that target.
             if (!target.IsLocal)
             {
+                if (force)
+                {
+                    return TargetOutput.RejectOptions(
+                        ansiConsole,
+                        isJson,
+                        new ExecutionTargetErrorInfo
+                        {
+                            Code = ExecutionTargetErrorCodes.TargetInvalidArguments,
+                            Message =
+                                "'--force' is not supported with '--on'. Target packages are removed only when winapp can prove ownership.",
+                            UserAction = "Retry without '--force'.",
+                        });
+                }
+
                 return await UnregisterOnTargetAsync(identity, isJson, cancellationToken);
             }
 

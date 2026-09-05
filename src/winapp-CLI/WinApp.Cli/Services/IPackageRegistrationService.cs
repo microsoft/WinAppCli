@@ -164,4 +164,5 @@ internal sealed record DevPackageInfo(
     string Name,
     string Version,
     string? InstallLocation,
-    bool IsDevelopmentMode);
+    bool IsDevelopmentMode,
+    string? Publisher = null);

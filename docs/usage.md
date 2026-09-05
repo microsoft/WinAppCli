@@ -899,8 +899,8 @@ winapp unregister [options]
 **Options:**
 
 - `--manifest <path>` - Path to Package.appxmanifest (default: auto-detect from current directory)
-- `--force` - Skip the install-location directory check and unregister even if the package was registered from a different project tree
-- `--on <target>` - Unregister the package on the named execution target instead of on this machine. Only the exact package the matching deployment registered is removed: winapp's own record must show it registered this identity in the current target generation, and the target must independently confirm the registration is a development package rooted in that deployment's managed folder. A package installed on the target by anything other than winapp is never touched. See [Windows Sandbox execution](sandbox-execution.md).
+- `--force` - For local unregister only, skip the install-location directory check and unregister even if the package was registered from a different project tree. It is rejected with `--on`; target ownership checks cannot be bypassed.
+- `--on <target>` - Unregister the package on the named execution target instead of on this machine. Windows' current registration selects the matching winapp-managed deployment, so stale ownership records left by deploying the same identity from another layout do not make the command ambiguous. The target must independently confirm the registration is a development package rooted in a current-generation managed folder, removes only its exact package full name, and clears ownership records only after Windows confirms it is gone. A package installed on the target by anything other than winapp is never touched. See [Windows Sandbox execution](sandbox-execution.md).
 - `--json` - Format output as JSON
 
 **What it does:**
