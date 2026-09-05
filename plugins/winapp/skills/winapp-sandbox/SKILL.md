@@ -104,6 +104,9 @@ a folder to place it in. A directory keeps its own structure beneath the destina
 
 ## What to know before relying on it
 
+**Check build-specific shell integration limits before validating app contracts.** See
+[Windows Sandbox execution](https://github.com/microsoft/WinAppCli/blob/main/docs/sandbox-execution.md#share-targets-on-build-28000).
+
 **The Sandbox stays and is reused.** The instance, its agent, and your deployment persist between
 commands, so `winapp run . --on sandbox` followed by several `winapp ui ... --on sandbox` commands is one
 environment, not several. A later command reconnects to the agent that is already running rather than

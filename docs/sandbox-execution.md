@@ -111,6 +111,14 @@ have run locally:
 Build options — `--configuration`, `--arch`, `--framework`, `--property`, `--no-build`,
 `--no-restore` — still apply on the host, before anything is transferred.
 
+### Share targets on build 28000
+
+The Windows Sandbox image on OS build 28000 does not list packaged desktop
+(`packagedClassicApp`) `windows.shareTarget` extensions in the Share UI, even when package
+registration succeeds. Use Sandbox to test the rest of the app, but validate Share-target discovery
+on another supported Windows build. Do not change the manifest to `windowsApp` as a workaround:
+that selects a different runtime and activation model.
+
 ### Detached apps and the agent's lifetime
 
 `--detach` returns as soon as the app is running, and the Sandbox is not shut down afterwards. For an
