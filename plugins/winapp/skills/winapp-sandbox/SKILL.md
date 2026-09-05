@@ -144,8 +144,9 @@ a folder to place it in. A directory keeps its own structure beneath the destina
 
 ## What to know before relying on it
 
-**Check build-specific shell integration limits before validating app contracts.** See
-[Windows Sandbox execution](https://github.com/microsoft/WinAppCli/blob/main/docs/sandbox-execution.md#share-targets-on-build-28000).
+**The tested build 28000 Sandbox Share UI cannot enumerate Share targets.** Validate Share
+source-to-target flows outside Sandbox; see
+[Windows Sandbox execution](https://github.com/microsoft/WinAppCli/blob/main/docs/sandbox-execution.md#share-targets-in-the-build-28000-sandbox).
 
 **The Sandbox stays and is reused.** The instance, its agent, and your deployment persist between
 commands, so `winapp run . --on sandbox` followed by several `winapp ui ... --on sandbox` commands is one

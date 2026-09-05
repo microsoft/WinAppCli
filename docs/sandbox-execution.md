@@ -122,13 +122,14 @@ have run locally:
 Build options — `--configuration`, `--arch`, `--framework`, `--property`, `--no-build`,
 `--no-restore` — still apply on the host, before anything is transferred.
 
-### Share targets on build 28000
+### Share targets in the build 28000 Sandbox
 
-The Windows Sandbox image on OS build 28000 does not list packaged desktop
-(`packagedClassicApp`) `windows.shareTarget` extensions in the Share UI, even when package
-registration succeeds. Use Sandbox to test the rest of the app, but validate Share-target discovery
-on another supported Windows build. Do not change the manifest to `windowsApp` as a workaround:
-that selects a different runtime and activation model.
+The tested Windows Sandbox image on OS build 28000 cannot enumerate Share targets: the Share UI
+fails before showing any targets. The identical packaged desktop app, source, payload, and loose
+registration work on a build 28000 host, while the Sandbox still fails with a successfully indexed
+`windowsApp` control package. This is a limitation of the tested Sandbox environment, not winapp
+registration or a specific application runtime model. Use Sandbox to test the rest of the app, but
+validate Share source-to-target flows outside Sandbox.
 
 ### Detached apps and the agent's lifetime
 
