@@ -71,6 +71,80 @@ public class TargetCaptureCommandTests
         StringAssert.Contains(report, "Calculator");
     }
 
+    /// <summary>
+    /// The whole point of a report is that it describes what was already there. A snapshot that
+    /// prepared the target would create the Sandbox it then cheerfully reports as running, and the
+    /// caller asking "is one up?" would be told yes because it asked.
+    /// </summary>
+    [TestMethod]
+    public async Task Snapshot_NeverPreparesTheTarget()
+    {
+        await using var harness = new Harness(GuestWindows());
+
+        Assert.AreEqual(0, await RunSnapshotAsync(harness, new TestConsole(), "sandbox"));
+
+        Assert.AreEqual(0, harness.Backend.EnsureCalls, "A snapshot must never create, connect, or repair.");
+        Assert.AreEqual(1, harness.Backend.AttachCalls);
+    }
+
+    [TestMethod]
+    public async Task Snapshot_NothingRunning_SaysSoAndSucceeds()
+    {
+        await using var harness = new Harness(GuestWindows());
+        harness.Backend.Running = false;
+        var console = new TestConsole();
+
+        Assert.AreEqual(0, await RunSnapshotAsync(harness, console, "sandbox"));
+
+        StringAssert.Contains(console.Output, "not running");
+        StringAssert.Contains(console.Output, "winapp run . --on sandbox");
+        Assert.AreEqual(0, harness.Backend.EnsureCalls);
+    }
+
+    [TestMethod]
+    public async Task Snapshot_NothingRunning_Json_ReportsItWithoutAnEpochOrCapabilities()
+    {
+        await using var harness = new Harness(GuestWindows());
+        harness.Backend.Running = false;
+        var console = new TestConsole();
+
+        Assert.AreEqual(0, await RunSnapshotAsync(harness, console, "sandbox", "--json"));
+
+        var output = Deserialize(console.Output);
+
+        Assert.IsFalse(output.Running);
+        Assert.IsFalse(output.Attached);
+        Assert.IsNull(output.Capabilities);
+        Assert.IsNull(output.ExecutionTarget.Epoch);
+        Assert.IsFalse(output.Desktop.Rendered);
+        Assert.AreEqual(0, output.Deployments.Length);
+        Assert.IsNull(output.Windows);
+    }
+
+    /// <summary>
+    /// A running instance whose agent is not answering is a state a caller needs reported, not
+    /// repaired: repairing it is what <c>winapp run</c> does, and doing it here would replace the
+    /// agent the caller was asking about.
+    /// </summary>
+    [TestMethod]
+    public async Task Snapshot_RunningButAgentSilent_ReportsWhatTheHostKnowsAndDoesNotRepair()
+    {
+        await using var harness = new Harness(GuestWindows());
+        harness.Backend.AgentAnswers = false;
+        var console = new TestConsole();
+
+        Assert.AreEqual(0, await RunSnapshotAsync(harness, console, "sandbox", "--json"));
+
+        var output = Deserialize(console.Output);
+
+        Assert.IsTrue(output.Running);
+        Assert.IsFalse(output.Attached);
+        Assert.IsNull(output.Capabilities);
+        Assert.IsTrue(output.Desktop.Rendered, "The client window is a host-side fact, so it is still reported.");
+        Assert.IsNull(output.Windows);
+        Assert.AreEqual(0, harness.Backend.EnsureCalls);
+    }
+
     [TestMethod]
     public async Task Snapshot_Json_IsOneDocumentDescribingTheTargetAndItsWindows()
     {
@@ -87,7 +161,7 @@ public class TargetCaptureCommandTests
 
         Assert.AreEqual("sandbox", output.ExecutionTarget.Kind);
         Assert.AreEqual(Epoch.Value, output.ExecutionTarget.Epoch);
-        Assert.IsTrue(output.Capabilities.SupportsRealInput);
+        Assert.IsTrue(output.Capabilities!.SupportsRealInput);
         Assert.IsTrue(output.Desktop.Rendered);
         Assert.AreEqual(DesktopHwnd, output.Desktop.WindowHandle);
         Assert.AreEqual(DesktopProcessId, output.Desktop.ProcessId);
@@ -133,7 +207,7 @@ public class TargetCaptureCommandTests
 
         Assert.IsNull(output.Windows);
         Assert.IsTrue(output.Desktop.Rendered);
-        Assert.IsTrue(output.Capabilities.SupportsRealInput);
+        Assert.IsTrue(output.Capabilities!.SupportsRealInput);
     }
 
     [TestMethod]
@@ -171,11 +245,14 @@ public class TargetCaptureCommandTests
     {
         await using var harness = new Harness(GuestWindows());
         var console = new TestConsole();
-        var automation = new RecordingUiAutomation { Result = (new byte[4 * 3 * 2], 3, 2) };
+        var capture = new FakeWindowCapture
+        {
+            CaptureWithoutActivationOverride = _ => (new byte[4 * 3 * 2], 3, 2),
+        };
         var destination = TestPaths.Under(_root, "shots", "desktop.png");
 
         var exitCode = await RunScreenshotAsync(
-            harness, console, automation, "sandbox", "-o", destination, "--json");
+            harness, console, capture, "sandbox", "-o", destination, "--json");
 
         Assert.AreEqual(0, exitCode);
         Assert.IsTrue(File.Exists(destination));
@@ -187,34 +264,54 @@ public class TargetCaptureCommandTests
         Assert.AreEqual(3, payload.Width);
         Assert.AreEqual(2, payload.Height);
         Assert.AreEqual(DesktopHwnd, payload.Hwnd);
+        Assert.AreEqual(DesktopProcessId, payload.ProcessId);
         Assert.AreEqual(Epoch.Value, payload.ExecutionTarget!.Epoch);
     }
 
     /// <summary>
-    /// A managed client window is parked off-screen on purpose. Focusing it would drag it back onto
-    /// the user's screen, and reading the screen instead of the window would photograph whatever is
-    /// at those coordinates — which is the user's own desktop, not the target's.
+    /// A managed client window is parked off-screen on purpose. The ordinary screenshot path
+    /// recovers from a blank frame by foregrounding the window and trying again, which would drag
+    /// the target's window back onto the user's screen mid-command.
     /// </summary>
     [TestMethod]
-    public async Task Screenshot_NeverFocusesTheWindowOrReadsTheScreen()
+    public async Task Screenshot_CapturesTheDesktopWindowThroughTheNoActivationPathOnly()
     {
         await using var harness = new Harness(GuestWindows());
-        var automation = new RecordingUiAutomation();
+        var capture = new FakeWindowCapture();
 
         Assert.AreEqual(
             0,
             await RunScreenshotAsync(
                 harness,
                 new TestConsole(),
-                automation,
+                capture,
                 "sandbox",
                 "-o",
                 TestPaths.Under(_root, "desktop.png")));
 
-        Assert.IsFalse(automation.LastFocus);
-        Assert.IsFalse(automation.LastCaptureScreen);
-        Assert.IsNull(automation.LastElementId, "The whole desktop is the subject, so nothing is cropped to.");
-        Assert.AreEqual(DesktopHwnd, automation.LastTarget!.WindowHandle);
+        CollectionAssert.AreEqual(new[] { DesktopHwnd }, capture.CapturedWithoutActivation);
+    }
+
+    /// <summary>
+    /// The command promises it takes no focus. When the only way left to get pixels would be to
+    /// bring the window to the front, the honest outcome is to fail and say so.
+    /// </summary>
+    [TestMethod]
+    public async Task Screenshot_WindowCannotBeCapturedWhereItSits_FailsInsteadOfForegroundingIt()
+    {
+        await using var harness = new Harness(GuestWindows());
+        var console = new TestConsole();
+        var destination = TestPaths.Under(_root, "desktop.png");
+        var capture = new FakeWindowCapture { CaptureWithoutActivationOverride = _ => null };
+
+        var (exitCode, stderr) = await CaptureStandardErrorAsync(() => RunScreenshotAsync(
+            harness, console, capture, "sandbox", "-o", destination, "--json"));
+
+        Assert.AreEqual(TargetOutput.TargetInfrastructureExitCode, exitCode);
+        Assert.AreEqual(string.Empty, console.Output, "A failure must not put anything on stdout under --json.");
+        StringAssert.Contains(stderr, ExecutionTargetErrorCodes.ArtifactFailed);
+        StringAssert.Contains(stderr, "without bringing its window to the front");
+        Assert.IsFalse(File.Exists(destination), "Nothing was captured, so nothing is published.");
     }
 
     [TestMethod]
@@ -225,7 +322,7 @@ public class TargetCaptureCommandTests
         var destination = TestPaths.Under(_root, "desktop.png");
 
         var (exitCode, stderr) = await CaptureStandardErrorAsync(() => RunScreenshotAsync(
-            harness, console, new RecordingUiAutomation(), "sandbox", "-o", destination, "--json"));
+            harness, console, new FakeWindowCapture(), "sandbox", "-o", destination, "--json"));
 
         Assert.AreEqual(TargetOutput.TargetInfrastructureExitCode, exitCode);
         Assert.AreEqual(string.Empty, console.Output, "A failure must not put anything on stdout under --json.");
@@ -238,14 +335,14 @@ public class TargetCaptureCommandTests
     public async Task Screenshot_UnknownTarget_IsRefusedBeforeAnythingIsCaptured()
     {
         await using var harness = new Harness(GuestWindows());
-        var automation = new RecordingUiAutomation();
+        var capture = new FakeWindowCapture();
 
         Assert.AreEqual(
             TargetOutput.InvalidCommandLineExitCode,
             await RunScreenshotAsync(
-                harness, new TestConsole(), automation, "vm", "-o", TestPaths.Under(_root, "desktop.png")));
+                harness, new TestConsole(), capture, "vm", "-o", TestPaths.Under(_root, "desktop.png")));
 
-        Assert.IsNull(automation.LastTarget);
+        Assert.AreEqual(0, capture.CapturedWithoutActivation.Count);
         Assert.AreEqual(0, harness.Backend.EnsureCalls);
     }
 
@@ -275,6 +372,35 @@ public class TargetCaptureCommandTests
         Assert.IsNull(recording.LastElementId);
         Assert.IsFalse(recording.LastRecordOptions!.CaptureScreen);
         Assert.AreEqual(1, recording.LastRecordOptions.DurationSec);
+    }
+
+    /// <summary>
+    /// A guest connection is a scarce, single-occupant channel, and a recording can legitimately run
+    /// for hours. Everything a recording needs is a host window handle read once up front, so the
+    /// channel must be handed back before the long wait starts.
+    /// </summary>
+    [TestMethod]
+    public async Task Record_ReleasesTheGuestChannelBeforeTheLongWaitBegins()
+    {
+        await using var harness = new Harness(GuestWindows());
+        var recording = new FakeUiRecordingService();
+        bool? connectedWhileRecording = null;
+        recording.WhileRecording = () =>
+            connectedWhileRecording = harness.Backend.LastHostTransport?.IsConnected;
+
+        var exitCode = await RunRecordAsync(
+            harness,
+            new TestConsole(),
+            recording,
+            "sandbox",
+            "-o",
+            TestPaths.Under(_root, "desktop.mp4"),
+            "--duration-sec",
+            "1");
+
+        Assert.AreEqual(0, exitCode);
+        Assert.IsNotNull(harness.Backend.LastHostTransport, "The target was prepared, so a channel was opened.");
+        Assert.AreEqual(false, connectedWhileRecording, "The channel is still held while recording.");
     }
 
     [TestMethod]
@@ -337,12 +463,12 @@ public class TargetCaptureCommandTests
     private Task<int> RunScreenshotAsync(
         Harness harness,
         IAnsiConsole console,
-        IUiAutomation automation,
+        IWindowCapture capture,
         params string[] arguments)
     {
         var command = new TargetScreenshotCommand();
         var handler = new TargetScreenshotCommand.Handler(
-            harness.Orchestrator, automation, console, NullLogger<TargetScreenshotCommand>.Instance);
+            harness.Orchestrator, capture, console, NullLogger<TargetScreenshotCommand>.Instance);
 
         return handler.InvokeAsync(Parse(command, arguments), TestContext.CancellationToken);
     }
@@ -431,7 +557,6 @@ public class TargetCaptureCommandTests
 
             Orchestrator = new ExecutionTargetOrchestrator(Backend, new FakeLock(this), new FakeLock(this));
         }
-
         public FakeBackend Backend { get; }
 
         public ExecutionTargetOrchestrator Orchestrator { get; }
@@ -468,11 +593,29 @@ public class TargetCaptureCommandTests
     }
 
     /// <summary>A target that runs commands but draws nothing on this machine.</summary>
-    private class FakeBackend(Harness harness, string stdout, int exitCode) : IExecutionTargetBackend
+    private class FakeBackend(Harness harness, string stdout, int exitCode)
+        : IExecutionTargetBackend, IInspectableTarget
     {
         public ExecutionTargetRef Target => WindowsSandboxTarget.Default;
 
+        /// <summary>How many times a command asked for a prepared, connected target.</summary>
+        /// <remarks>
+        /// The measure of "did this command change anything?": preparing is what creates, connects,
+        /// and repairs. A snapshot that leaves this at zero cannot have started a Sandbox.
+        /// </remarks>
         public int EnsureCalls { get; private set; }
+
+        /// <summary>How many times a command asked what was already there.</summary>
+        public int AttachCalls { get; private set; }
+
+        /// <summary>Whether the managed target is running at all.</summary>
+        public bool Running { get; set; } = true;
+
+        /// <summary>Whether the running target's agent answers an inspect-only attach.</summary>
+        public bool AgentAnswers { get; set; } = true;
+
+        /// <summary>The host end of the last channel handed out, so a test can watch it close.</summary>
+        public IGuestTransport? LastHostTransport { get; private set; }
 
         public Task<TargetSupportResult> ProbeSupportAsync(CancellationToken cancellationToken) =>
             Task.FromResult(TargetSupportResult.Supported);
@@ -482,7 +625,28 @@ public class TargetCaptureCommandTests
             CancellationToken cancellationToken)
         {
             EnsureCalls++;
+            return Task.FromResult(Connect());
+        }
 
+        public Task<TargetAttachment> TryAttachAsync(CancellationToken cancellationToken)
+        {
+            AttachCalls++;
+
+            if (!Running)
+            {
+                return Task.FromResult(TargetAttachment.NotRunning);
+            }
+
+            return Task.FromResult(AgentAnswers
+                ? new TargetAttachment(true, Epoch, Connect())
+                : new TargetAttachment(true, Epoch, null));
+        }
+
+        public IReadOnlyDictionary<string, string> DescribeForDiagnostics() =>
+            new Dictionary<string, string> { ["sandboxId"] = "sandbox-1" };
+
+        private TargetConnection Connect()
+        {
             var pair = new LoopbackTransportPair();
 
             var server = new GuestCommandServer(
@@ -495,11 +659,9 @@ public class TargetCaptureCommandTests
 
             harness.Track(server.RunAsync(harness.ServerToken));
 
-            return Task.FromResult(new TargetConnection(Epoch, pair.Host, Reused: true));
+            LastHostTransport = pair.Host;
+            return new TargetConnection(Epoch, pair.Host, Reused: true);
         }
-
-        public IReadOnlyDictionary<string, string> DescribeForDiagnostics() =>
-            new Dictionary<string, string> { ["sandboxId"] = "sandbox-1" };
     }
 
     /// <summary>The same target, but one whose desktop this machine draws in a window.</summary>
@@ -571,82 +733,5 @@ public class TargetCaptureCommandTests
             throw new NotSupportedException("A snapshot never clears deployment state.");
 
         public IReadOnlyList<DeploymentState> List(ExecutionTargetRef target) => [];
-    }
-
-    /// <summary>
-    /// Records how the screenshot was asked for, which is the part of this verb worth pinning.
-    /// </summary>
-    private sealed class RecordingUiAutomation : IUiAutomation
-    {
-        public (byte[] Pixels, int Width, int Height) Result { get; set; } = (new byte[4], 1, 1);
-
-        public UiTarget? LastTarget { get; private set; }
-
-        public string? LastElementId { get; private set; }
-
-        public bool LastCaptureScreen { get; private set; } = true;
-
-        public bool LastFocus { get; private set; } = true;
-
-        public Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(
-            UiTarget uiTarget,
-            string? elementId,
-            bool captureScreen,
-            bool focus,
-            CancellationToken ct)
-        {
-            LastTarget = uiTarget;
-            LastElementId = elementId;
-            LastCaptureScreen = captureScreen;
-            LastFocus = focus;
-            return Task.FromResult(Result);
-        }
-
-        public List<(nint Hwnd, int Pid, string Title)> FindWindowsByTitle(string titleQuery) => throw Unused();
-
-        public List<(nint Hwnd, int Pid, string Title)> FindWindowsByPid(int pid) => throw Unused();
-
-        public bool TryGetWindowRect(long hwnd, out PointerRect rect) => throw Unused();
-
-        public Task<UiElement[]> InspectAsync(UiTarget uiTarget, string? elementId, int depth, CancellationToken ct) =>
-            throw Unused();
-
-        public Task<UiElement[]> InspectAncestorsAsync(UiTarget uiTarget, string elementId, CancellationToken ct) =>
-            throw Unused();
-
-        public Task<UiElement[]> SearchAsync(UiTarget uiTarget, UiSelector selector, int maxResults, CancellationToken ct) =>
-            throw Unused();
-
-        public Task<UiElement?> FindSingleElementAsync(UiTarget uiTarget, UiSelector selector, CancellationToken ct) =>
-            throw Unused();
-
-        public Task<Dictionary<string, object?>> GetPropertiesAsync(
-            UiTarget uiTarget, UiElement element, string? propertyName, CancellationToken ct) => throw Unused();
-
-        public Task<string> InvokeAsync(UiTarget uiTarget, UiElement element, CancellationToken ct) => throw Unused();
-
-        public Task SetValueAsync(UiTarget uiTarget, UiElement element, string text, CancellationToken ct) =>
-            throw Unused();
-
-        public Task FocusAsync(UiTarget uiTarget, UiElement element, CancellationToken ct) => throw Unused();
-
-        public Task ScrollIntoViewAsync(UiTarget uiTarget, UiElement element, CancellationToken ct) => throw Unused();
-
-        public Task ScrollContainerAsync(
-            UiTarget uiTarget, UiElement element, string? direction, string? destination, CancellationToken ct) =>
-            throw Unused();
-
-        public Task<UiElement?> GetFocusedElementAsync(UiTarget uiTarget, CancellationToken ct) => throw Unused();
-
-        public Task<string?> GetTextAsync(UiTarget uiTarget, UiElement element, CancellationToken ct) => throw Unused();
-
-        public bool TryResolveRootWindow(UiTarget target, out nint hwnd, out string? title) => throw Unused();
-
-        public nint ResolveElementTopLevelWindow(UiTarget target, UiElement element) => throw Unused();
-
-        public PointerRect GetVisibleWindowBounds(nint hwnd, PointerRect fallback) => throw Unused();
-
-        private static NotSupportedException Unused() =>
-            new("'winapp target screenshot' captures a window and does nothing else with UI Automation.");
     }
 }

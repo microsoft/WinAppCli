@@ -106,6 +106,10 @@ internal static class Program
                 {
                     EmitFindUiJsonError(message);
                 }
+                else if (ResolveEffectiveJson(parseResult) && IsTargetDescendant(parseResult))
+                {
+                    TargetOutput.RejectCommandLine(message);
+                }
                 else
                 {
                     Console.Error.WriteLine(message);
@@ -201,6 +205,18 @@ internal static class Program
                         CommandInvokedEvent.Log(parsedArgs.CommandResult);
                     }
                     EmitFindUiJsonError($"Unknown option '{typo}'. Did you mean '{suggested}'?");
+                    if (!isCompleteMode)
+                    {
+                        CommandCompletedEvent.Log(parsedArgs.CommandResult, 1);
+                    }
+                }
+                else if (effectiveJson && IsTargetDescendant(parsedArgs))
+                {
+                    if (!isCompleteMode)
+                    {
+                        CommandInvokedEvent.Log(parsedArgs.CommandResult);
+                    }
+                    TargetOutput.RejectCommandLine(typoMessage);
                     if (!isCompleteMode)
                     {
                         CommandCompletedEvent.Log(parsedArgs.CommandResult, 1);
@@ -404,6 +420,21 @@ internal static class Program
                 return 1;
             }
 
+            // Parse-error → JSON bridge for the `target` verbs, which own their own error envelope
+            // ({"error":{"code":...}} on stderr). Same reasoning as the ui bridge: a caller that
+            // passed --json must never have to read human help text off stdout to find out that its
+            // command line was wrong.
+            if (effectiveJson && parsedArgs.Errors.Count > 0 && IsTargetDescendant(parsedArgs))
+            {
+                var errorMsg = string.Join("; ", parsedArgs.Errors.Select(e => e.Message));
+                var exitCode = TargetOutput.RejectCommandLine(errorMsg);
+                if (!isCompleteMode)
+                {
+                    logCommandCompleted(parsedArgs.CommandResult, exitCode);
+                }
+                return exitCode;
+            }
+
             var returnCode = await invoke();
 
             if (!isCompleteMode)
@@ -482,6 +513,25 @@ internal static class Program
     /// </summary>
     private static bool IsFindUi(System.CommandLine.ParseResult parseResult) =>
         parseResult.CommandResult.Command.Name == "find-ui";
+
+    /// <summary>
+    /// Returns <see langword="true"/> when the selected command is <c>target</c> or one of its
+    /// descendants, so a parse failure is reported in the target error envelope rather than as
+    /// help text.
+    /// </summary>
+    private static bool IsTargetDescendant(System.CommandLine.ParseResult parseResult)
+    {
+        var cmd = parseResult.CommandResult.Command;
+        while (cmd is not null)
+        {
+            if (cmd.Name == "target")
+            {
+                return true;
+            }
+            cmd = cmd.Parents.OfType<System.CommandLine.Command>().FirstOrDefault();
+        }
+        return false;
+    }
 
     /// <summary>
     /// Writes a flat <c>{"error":"..."}</c> object to stdout — the same schema and sink

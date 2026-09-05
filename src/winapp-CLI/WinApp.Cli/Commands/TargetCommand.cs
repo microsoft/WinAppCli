@@ -553,6 +553,33 @@ internal static class TargetOutput
     /// <summary>Exit code for a command line that does not name a usable target.</summary>
     internal const int InvalidCommandLineExitCode = 1;
 
+    /// <summary>
+    /// Reports a <c>target</c> command line the parser rejected, in the same envelope every other
+    /// target failure uses.
+    /// </summary>
+    /// <remarks>
+    /// Needed because a parse failure happens before any handler exists to report it. Without this,
+    /// <c>winapp target record sandbox --json --fps abc</c> would print human help text and a caller
+    /// that asked for JSON would have to parse prose to find out what went wrong. Same sink (stderr),
+    /// same shape, and the same exit code a malformed command line gets everywhere else.
+    /// </remarks>
+    public static int RejectCommandLine(string message)
+    {
+        Console.Error.WriteLine(JsonSerializer.Serialize(
+            new TargetErrorOutput
+            {
+                Error = new ExecutionTargetErrorInfo
+                {
+                    Code = ExecutionTargetErrorCodes.TargetInvalidArguments,
+                    Message = message,
+                    UserAction = "Fix the command line, then retry.",
+                },
+            },
+            TargetJsonContext.Default.TargetErrorOutput));
+
+        return InvalidCommandLineExitCode;
+    }
+
     /// <summary>Exit code used for execution-target infrastructure failures.</summary>
     internal const int TargetInfrastructureExitCode = 70;
 }

@@ -565,6 +565,45 @@ function targetPush(options: TargetPushOptions): Promise<WinappResult>
 
 ---
 
+### `targetScreenshot()`
+
+Capture an execution target's entire desktop as a PNG on this machine. Captures the whole rendered guest desktop, so no application or window has to be named.
+
+```typescript
+function targetScreenshot(options: TargetScreenshotOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `target` | `string` | Yes | Execution target to act on. Currently: 'sandbox'. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `output` | `string \| undefined` | No | Save output to this file path. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `targetSnapshot()`
+
+Report an execution target's readiness, capabilities, deployments, and top-level guest windows. Inspects only: never starts, connects, or repairs a target, and reports plainly when none is running. Writes only to stdout: no screenshots and no files.
+
+```typescript
+function targetSnapshot(options: TargetSnapshotOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `target` | `string` | Yes | Execution target to act on. Currently: 'sandbox'. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
 ### `tool()`
 
 Run Windows SDK tools directly (makeappx, signtool, makepri, etc.). Auto-downloads Build Tools if needed. For most tasks, prefer higher-level commands like 'package' or 'sign'. Example: winapp tool makeappx pack /d ./folder /p ./out.msix
@@ -1127,6 +1166,27 @@ function uiRecord(options: UiRecordOptions): Promise<WinappResult>
 
 ---
 
+### `targetRecord()`
+
+Record an execution target's entire desktop to an H.264 MP4 on this machine.
+
+**`durationSec` is required and must be > 0.** Unbounded recording (`durationSec == 0`) is only
+supported from the CLI, where Ctrl+C or closing redirected stdin ends it; this wrapper has no
+way to stop the spawned process, so an unbounded call would never return.
+Set `frames` to write timestamped JPEG evidence beside the MP4.
+
+```typescript
+function targetRecord(options: TargetRecordOptions): Promise<WinappResult>
+```
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `options` | `TargetRecordOptions` | Yes |  |
+
+---
+
 ### `execWithBuildTools()`
 
 Execute a command with BuildTools bin path added to PATH environment
@@ -1413,6 +1473,16 @@ Survives regeneration because it is defined here in the hand-written guard modul
 
 ```typescript
 type UiRecordOptions = Omit<GeneratedUiRecordOptions, "durationSec"> & { durationSec: number; }
+```
+
+### `TargetRecordOptions`
+
+Stricter version of the generated `TargetRecordOptions` where `durationSec` is **required**.
+This type is the public surface of `targetRecord`; the generated type has it optional.
+Survives regeneration because it is defined here in the hand-written guard module.
+
+```typescript
+type TargetRecordOptions = Omit<GeneratedTargetRecordOptions, "durationSec"> & { durationSec: number; }
 ```
 
 ### `IfExists`
@@ -1742,6 +1812,27 @@ type ManifestTemplates = "packaged" | "sparse"
 | `target` | `string` | Yes | Execution target to act on. Currently: 'sandbox'. |
 | `source` | `string` | Yes | File or directory on this machine to copy. |
 | `destination` | `string` | Yes | Destination path on the target, relative to its managed work area. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `TargetScreenshotOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `target` | `string` | Yes | Execution target to act on. Currently: 'sandbox'. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `output` | `string \| undefined` | No | Save output to this file path. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `TargetSnapshotOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `target` | `string` | Yes | Execution target to act on. Currently: 'sandbox'. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |

@@ -24,8 +24,10 @@ namespace WinApp.Cli.Commands;
 /// the picture worth having when a command failed and nobody knows why.
 /// <para>
 /// The client window is captured where it is, which for a managed Sandbox is parked off-screen. No
-/// window is activated and no focus is taken, so this is safe to run while something else on the
-/// desktop is being used.
+/// window is activated and no focus is taken — and that is a hard rule, not an intention: if the
+/// window cannot be captured where it sits, the command fails and says so rather than bringing it to
+/// the front to get a picture. Running this while something else on the desktop is being used never
+/// interrupts it.
 /// </para>
 /// </remarks>
 internal class TargetScreenshotCommand : Command, IShortDescription
@@ -51,7 +53,7 @@ internal class TargetScreenshotCommand : Command, IShortDescription
     /// <summary>Resolves the target's desktop window and captures it.</summary>
     public class Handler(
         ExecutionTargetOrchestrator orchestrator,
-        IUiAutomation uiAutomation,
+        IWindowCapture windowCapture,
         IAnsiConsole console,
         ILogger<TargetScreenshotCommand> logger) : AsynchronousCommandLineAction
     {
@@ -87,14 +89,28 @@ internal class TargetScreenshotCommand : Command, IShortDescription
                     .ConfigureAwait(false);
 
                 var surface = orchestrator.ResolveDesktopSurface();
-                var uiTarget = UiTarget.FromWindowHandle(surface.WindowHandle);
 
-                // Neither focus nor screen capture: both would foreground the client window, which
-                // for a parked Sandbox means yanking it onto the user's screen to take a picture of
-                // it. Window capture reads the client's own frames where it sits.
-                var (pixels, width, height) = await uiAutomation
-                    .ScreenshotAsync(uiTarget, elementId: null, captureScreen: false, focus: false, cancellationToken)
+                // Strictly no activation. The ordinary screenshot path recovers from a blank frame by
+                // foregrounding the window and trying again, which for a parked Sandbox client means
+                // yanking it onto the user's screen -- the exact thing this command promises not to
+                // do. Here a blank frame ends the command instead.
+                var frame = await windowCapture
+                    .TryCaptureWindowWithoutActivationAsync(surface.WindowHandle, cancellationToken)
                     .ConfigureAwait(false);
+
+                if (frame is not { } captured)
+                {
+                    return TargetOutput.Fail(console, json, ExecutionTargetException.Create(
+                        ExecutionTargetErrorCodes.ArtifactFailed,
+                        $"The {reference.Selector} desktop could not be captured without bringing its " +
+                        "window to the front, so nothing was captured.",
+                        userAction:
+                            "The target's window is minimized, has no size, or is not rendering. " +
+                            $"'winapp target snapshot {reference.Selector}' reports which.",
+                        example: $"winapp target snapshot {reference.Selector}").Error);
+                }
+
+                var (pixels, width, height) = captured;
 
                 var png = PngImage.Encode(pixels, width, height);
 
@@ -113,9 +129,9 @@ internal class TargetScreenshotCommand : Command, IShortDescription
                             FilePath = filePath,
                             Width = width,
                             Height = height,
-                            ProcessId = uiTarget.ProcessId,
-                            WindowTitle = uiTarget.WindowTitle,
-                            Hwnd = uiTarget.WindowHandle,
+                            ProcessId = surface.ProcessId,
+                            WindowTitle = null,
+                            Hwnd = surface.WindowHandle,
                             ExecutionTarget = ExecutionTargetScope.For(reference, target.Epoch),
                         },
                         UiJsonContext.Default.UiScreenshotResult));
@@ -189,8 +205,16 @@ internal class TargetRecordCommand : Command, IShortDescription
     /// Records the target's desktop window through the ordinary recording pipeline.
     /// </summary>
     /// <remarks>
-    /// The prepared target is held for the whole recording. Releasing it early would let another
-    /// winapp process reconnect the client mid-take, which replaces the very window being recorded.
+    /// The guest channel is opened only long enough to validate the target and resolve which window
+    /// on this machine is its desktop, then released before a single frame is captured. Recording is
+    /// entirely host-side — Windows Graphics Capture reads the client window, not the guest — so
+    /// holding a channel for the length of a take would occupy one of the few the agent allows for
+    /// hours, and block deployments and other commands the whole time, in exchange for nothing.
+    /// <para>
+    /// The window can therefore close mid-take. That is reported the way the recording pipeline
+    /// already reports it: the take ends early, the frames captured so far are published, and the
+    /// result says the target closed.
+    /// </para>
     /// </remarks>
     public class Handler(
         ExecutionTargetOrchestrator orchestrator,
@@ -227,14 +251,21 @@ internal class TargetRecordCommand : Command, IShortDescription
 
             try
             {
-                await using var target = await orchestrator
-                    .PrepareAsync(PrepareTargetOptions.Interactive, cancellationToken)
-                    .ConfigureAwait(false);
+                TargetDesktopSurface surface;
+                ExecutionTargetEpoch epoch;
 
-                var surface = orchestrator.ResolveDesktopSurface();
+                // Scoped tightly on purpose: everything the recording needs from the target is known
+                // by the end of this block, and the channel is a resource the guest agent rations.
+                await using (var target = await orchestrator
+                    .PrepareAsync(PrepareTargetOptions.Interactive, cancellationToken)
+                    .ConfigureAwait(false))
+                {
+                    surface = orchestrator.ResolveDesktopSurface();
+                    epoch = target.Epoch;
+                }
 
                 _subject = UiTarget.FromWindowHandle(surface.WindowHandle);
-                _scope = ExecutionTargetScope.For(reference, target.Epoch);
+                _scope = ExecutionTargetScope.For(reference, epoch);
 
                 return await base.InvokeAsync(parseResult, cancellationToken).ConfigureAwait(false);
             }

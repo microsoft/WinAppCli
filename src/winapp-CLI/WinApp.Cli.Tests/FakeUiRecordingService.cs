@@ -29,11 +29,15 @@ internal sealed class FakeUiRecordingService : IUiRecordingService
 
     public bool? RecordingStartedFrameArtifactsActiveOverride { get; set; }
 
+    /// <summary>Runs at the moment recording begins, to observe what the caller still holds open.</summary>
+    public Action? WhileRecording { get; set; }
+
     public async Task<RecordCaptureResult> RecordAsync(UiTarget uiTarget, string? elementId, RecordOptions options, CancellationToken ct, Action<bool>? onRecordingStarted = null)
     {
         LastRecordOptions = options;
         LastTarget = uiTarget;
         LastElementId = elementId;
+        WhileRecording?.Invoke();
         if (RecordException is not null)
         {
             throw RecordException;

@@ -113,6 +113,18 @@ internal static class ExecutionTargetErrorCodes
     public const string TargetInvalid = "target_invalid";
 
     /// <summary>
+    /// A <c>winapp target</c> command line could not be parsed: an unknown option, a missing
+    /// argument, or a value of the wrong type.
+    /// </summary>
+    /// <remarks>
+    /// Distinct from <see cref="TargetInvalid"/>, which is about the target a well-formed command
+    /// line named. This one is raised before a handler runs at all, and exists so that
+    /// <c>--json</c> callers get the same error envelope for a bad command line as for a failed
+    /// one instead of human help text on stdout.
+    /// </remarks>
+    public const string TargetInvalidArguments = "target_invalid_arguments";
+
+    /// <summary>
     /// Every released code, in the order the spec lists them. Used by the snapshot test and by
     /// diagnostics that need to present the full set.
     /// </summary>
@@ -142,5 +154,6 @@ internal static class ExecutionTargetErrorCodes
         SetupFailed,
         SetupIncomplete,
         TargetInvalid,
+        TargetInvalidArguments,
     ];
 }

@@ -40,8 +40,9 @@ internal interface IWindowsSandboxWindowController
     /// Places the client this connect created, and reports which window that was.
     /// </summary>
     /// <returns>
-    /// The placed client, or null when no new window appeared in time, or when several did at once
-    /// and none could be attributed to this connect.
+    /// The placed client, or null when no new window appeared in time, or when winapp could not
+    /// prove exactly one belonged to this connect — several appeared at once, or a second appeared
+    /// while the first was being confirmed. Nothing is moved or recorded in those cases.
     /// </returns>
     Task<SandboxClientWindow?> PlaceConnectedClientAsync(
         WindowsSandboxWindowSnapshot snapshot,
@@ -67,19 +68,47 @@ internal sealed class WindowsSandboxWindowController : IWindowsSandboxWindowCont
     private static readonly TimeSpan WindowTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(100);
 
+    /// <summary>
+    /// How long a lone new client must stay the only new client before winapp claims it.
+    /// </summary>
+    /// <remarks>
+    /// A client process appears a measurable moment before the next one, so the first poll that
+    /// sees exactly one new window is not evidence that only one was created — it is evidence that
+    /// only one has appeared <em>so far</em>. Claiming it there is what lets a second connect
+    /// starting at the same time have its window parked, persisted, and later captured as if it were
+    /// winapp's. Watching for a further window before committing turns that silent mistake into the
+    /// ambiguity it actually is.
+    /// <para>
+    /// Sized against what it defends: the whole risk window is the gap between two nearly
+    /// simultaneous connects, which is milliseconds, and the cost is a fixed addition to a connect
+    /// that already takes seconds.
+    /// </para>
+    /// </remarks>
+    internal static readonly TimeSpan ClientStabilizationWindow = TimeSpan.FromMilliseconds(750);
+
     private readonly Func<IReadOnlyList<SandboxClientWindow>> _listClients;
+    private readonly Action<SandboxClientWindow, HWND> _park;
 
     /// <summary>Creates a controller that reads the real desktop.</summary>
     public WindowsSandboxWindowController()
-        : this(ListLiveClients)
+        : this(ListLiveClients, (client, foreground) => PlaceOffScreen(new HWND(client.Handle), foreground))
     {
     }
 
-    /// <summary>Creates a controller over a scripted window source, for tests.</summary>
-    internal WindowsSandboxWindowController(Func<IReadOnlyList<SandboxClientWindow>> listClients)
+    /// <summary>Creates a controller over scripted windows and placement, for tests.</summary>
+    internal WindowsSandboxWindowController(
+        Func<IReadOnlyList<SandboxClientWindow>> listClients,
+        Action<SandboxClientWindow, HWND>? park = null)
     {
         _listClients = listClients;
+        _park = park ?? ((client, foreground) => PlaceOffScreen(new HWND(client.Handle), foreground));
     }
+
+    /// <summary>Delay seam, so the stabilization window is exercised without real waiting.</summary>
+    internal Func<TimeSpan, CancellationToken, Task> Delay { get; set; } = Task.Delay;
+
+    /// <summary>Clock seam, so timeouts are exercised without real time passing.</summary>
+    internal Func<DateTimeOffset> UtcNow { get; set; } = () => DateTimeOffset.UtcNow;
 
     public WindowsSandboxWindowSnapshot Capture() =>
         new(SnapshotProcessIds(), PInvoke.GetForegroundWindow());
@@ -90,37 +119,86 @@ internal sealed class WindowsSandboxWindowController : IWindowsSandboxWindowCont
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
-        var deadline = DateTimeOffset.UtcNow + WindowTimeout;
-        while (DateTimeOffset.UtcNow < deadline)
+        var deadline = UtcNow() + WindowTimeout;
+        while (UtcNow() < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             var (client, ambiguous) = SelectNewClient(snapshot.ExistingProcessIds, _listClients());
 
-            if (client is not null)
-            {
-                PlaceOffScreen(new HWND(client.Handle), snapshot.ForegroundWindow);
-                return client;
-            }
-
             if (ambiguous)
             {
-                // Two clients that were both absent a moment ago. Parking one would be a coin toss
-                // over a window that may belong to something else on this desktop, and recording it
-                // would make every later capture confidently wrong.
-                Trace.TraceWarning(
-                    "Several new Windows Sandbox client windows appeared at once, so winapp cannot tell " +
-                    "which one it connected; leaving them where they are.");
+                WarnAmbiguous();
                 return null;
             }
 
-            await Task.Delay(PollInterval, cancellationToken).ConfigureAwait(false);
+            if (client is not null)
+            {
+                var settled = await SettleAsync(snapshot, client, cancellationToken).ConfigureAwait(false);
+                if (settled is null)
+                {
+                    // Either a second client appeared while watching, or the candidate went away.
+                    // Both are reasons to claim nothing rather than guess.
+                    return null;
+                }
+
+                _park(settled, snapshot.ForegroundWindow);
+                return settled;
+            }
+
+            await Delay(PollInterval, cancellationToken).ConfigureAwait(false);
         }
 
         Trace.TraceWarning(
             "The Windows Sandbox client started, but its remote-session window was not found in time.");
         return null;
     }
+
+    /// <summary>
+    /// Watches a lone new client for <see cref="ClientStabilizationWindow"/> and returns it only if
+    /// it stays the only new one.
+    /// </summary>
+    /// <remarks>
+    /// Nothing is parked or persisted until this returns non-null, so a client that turns out to
+    /// belong to a concurrent <c>wsb connect</c> is never moved off-screen by winapp and never
+    /// recorded as winapp's own.
+    /// </remarks>
+    private async Task<SandboxClientWindow?> SettleAsync(
+        WindowsSandboxWindowSnapshot snapshot,
+        SandboxClientWindow candidate,
+        CancellationToken cancellationToken)
+    {
+        var settleUntil = UtcNow() + ClientStabilizationWindow;
+        while (UtcNow() < settleUntil)
+        {
+            await Delay(PollInterval, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var (recheck, ambiguous) = SelectNewClient(snapshot.ExistingProcessIds, _listClients());
+
+            if (ambiguous || (recheck is not null && recheck != candidate))
+            {
+                WarnAmbiguous();
+                return null;
+            }
+
+            if (recheck is null)
+            {
+                // The window winapp was about to claim closed again. Report nothing rather than
+                // persist a handle that is already gone.
+                Trace.TraceWarning(
+                    "The new Windows Sandbox client window disappeared before winapp could claim it.");
+                return null;
+            }
+        }
+
+        return candidate;
+    }
+
+    private static void WarnAmbiguous() =>
+        Trace.TraceWarning(
+            "Several new Windows Sandbox client windows appeared at once, so winapp cannot tell " +
+            "which one it connected; leaving them where they are.");
 
     /// <inheritdoc/>
     public SandboxClientWindow ResolveClient(SandboxClientWindow? remembered) =>

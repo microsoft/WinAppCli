@@ -20,6 +20,12 @@ namespace WinApp.Cli.Commands;
 /// take input, what did winapp deploy there, and what is on its desktop. Everything reported is
 /// already known to winapp or is one read-only guest query, so the answer is cheap and repeatable.
 /// <para>
+/// Inspect-only, in the strong sense: it starts nothing, connects no Sandbox client, and repairs no
+/// agent. "Is a target running?" would otherwise be a question that starts one — and every later
+/// answer would describe the target the question created, not the one the caller asked about.
+/// A target that is not running is reported as such, and the command still exits 0.
+/// </para>
+/// <para>
 /// Deliberately produces no files and embeds no image data. A snapshot is something a caller reads
 /// and discards; anything worth keeping is what <c>winapp target screenshot</c> and <c>winapp target
 /// record</c> exist to produce.
@@ -46,7 +52,8 @@ internal class TargetSnapshotCommand : Command, IShortDescription
         : base(
             "snapshot",
             "Report an execution target's readiness, capabilities, deployments, and top-level guest windows. " +
-            "Writes only to stdout: no screenshots, no files, and nothing that changes the target.")
+            "Inspects only: never starts, connects, or repairs a target, and reports plainly when none is running. " +
+            "Writes only to stdout: no screenshots and no files.")
     {
         Arguments.Add(SelectorArgument);
         Options.Add(WinAppRootCommand.JsonOption);
@@ -79,29 +86,34 @@ internal class TargetSnapshotCommand : Command, IShortDescription
 
             try
             {
-                // Read-only on purpose. Asking for an interactive desktop would reconnect the
-                // Sandbox window and tear down whatever the user is looking at -- a command that
-                // only reports state must never change the state it reports.
-                await using var target = await orchestrator
-                    .PrepareAsync(PrepareTargetOptions.ReadOnly, cancellationToken)
-                    .ConfigureAwait(false);
+                // Inspect-only: never creates, starts, reconnects, or repairs. A command whose whole
+                // job is to report state must not be the reason that state exists — an agent asking
+                // "is a Sandbox up?" would otherwise start one by asking, and then be told yes.
+                var inspection = await orchestrator.InspectAsync(cancellationToken).ConfigureAwait(false);
+                await using var target = inspection.Target;
 
                 var output = new TargetSnapshotOutput
                 {
-                    ExecutionTarget = ExecutionTargetScope.For(reference, target.Epoch),
-                    Reused = target.Reused,
-                    Capabilities = target.Capabilities,
-                    Desktop = DescribeDesktop(),
-                    Deployments = DescribeDeployments(reference, target.Epoch),
+                    ExecutionTarget = ExecutionTargetScope.For(reference, inspection.Epoch),
+                    Running = inspection.Running,
+                    Attached = target is not null,
+                    Capabilities = target?.Capabilities,
+                    Desktop = DescribeDesktop(inspection.Running),
+                    Deployments = inspection.Running
+                        ? DescribeDeployments(reference, inspection.Epoch)
+                        : [],
                 };
 
-                var windows = await ListGuestWindowsAsync(target, cancellationToken).ConfigureAwait(false);
-
-                if (windows is not null)
+                if (target is not null)
                 {
-                    output.WindowCount = windows.Length;
-                    output.Windows = [.. Rank(windows).Take(MaxWindows)];
-                    output.WindowsTruncated = windows.Length > MaxWindows;
+                    var windows = await ListGuestWindowsAsync(target, cancellationToken).ConfigureAwait(false);
+
+                    if (windows is not null)
+                    {
+                        output.WindowCount = windows.Length;
+                        output.Windows = [.. Rank(windows).Take(MaxWindows)];
+                        output.WindowsTruncated = windows.Length > MaxWindows;
+                    }
                 }
 
                 if (json)
@@ -130,8 +142,20 @@ internal class TargetSnapshotCommand : Command, IShortDescription
         /// identified, is reported as such rather than failing the snapshot: the rest of the report
         /// is exactly what a caller needs to work out why.
         /// </remarks>
-        private TargetSnapshotDesktop DescribeDesktop()
+        private TargetSnapshotDesktop DescribeDesktop(bool running)
         {
+            if (!running)
+            {
+                // Resolving a client window for a target that is not running would find whatever
+                // remote-session window happens to be open on this desktop and report it as this
+                // target's.
+                return new TargetSnapshotDesktop
+                {
+                    Rendered = false,
+                    Unavailable = ExecutionTargetErrorCodes.TargetStale,
+                };
+            }
+
             try
             {
                 var surface = orchestrator.ResolveDesktopSurface();
@@ -245,12 +269,27 @@ internal class TargetSnapshotCommand : Command, IShortDescription
 
         private static void Render(IAnsiConsole console, ExecutionTargetRef reference, TargetSnapshotOutput output)
         {
-            var capabilities = output.Capabilities;
+            if (!output.Running)
+            {
+                console.MarkupLineInterpolated($"{reference.Selector}: not running");
+                console.MarkupLineInterpolated(
+                    $"  Start one with: winapp run . --on {reference.Selector}");
+                return;
+            }
 
             console.MarkupLineInterpolated(
-                $"{reference.Selector}: {(output.Reused ? "reused" : "started")}, {capabilities.Architecture}, epoch {output.ExecutionTarget.Epoch ?? "none"}");
-            console.MarkupLineInterpolated(
-                $"  Input: real input {Yes(capabilities.SupportsRealInput)}, screen capture {Yes(capabilities.SupportsScreenCapture)}, interactive desktop {Yes(capabilities.SupportsInteractiveDesktop)}");
+                $"{reference.Selector}: running, epoch {output.ExecutionTarget.Epoch ?? "none"}");
+
+            if (output.Capabilities is { } capabilities)
+            {
+                console.MarkupLineInterpolated($"  Architecture: {capabilities.Architecture}");
+                console.MarkupLineInterpolated(
+                    $"  Input: real input {Yes(capabilities.SupportsRealInput)}, screen capture {Yes(capabilities.SupportsScreenCapture)}, interactive desktop {Yes(capabilities.SupportsInteractiveDesktop)}");
+            }
+            else
+            {
+                console.MarkupLine("  Agent: not answering, so capabilities and windows are unknown");
+            }
 
             if (output.Desktop.Rendered)
             {
@@ -279,7 +318,9 @@ internal class TargetSnapshotCommand : Command, IShortDescription
 
             if (output.Windows is null)
             {
-                console.MarkupLine("  Windows: unavailable (the guest did not report its desktop)");
+                console.MarkupLine(output.Attached
+                    ? "  Windows: unavailable (the guest did not report its desktop)"
+                    : "  Windows: unavailable (no agent to ask)");
                 return;
             }
 
@@ -303,11 +344,18 @@ internal sealed class TargetSnapshotOutput
     /// <summary>Which target, and which incarnation of it, was described.</summary>
     public required ExecutionTargetScope ExecutionTarget { get; init; }
 
-    /// <summary>True when the snapshot attached to a target that was already running.</summary>
-    public required bool Reused { get; init; }
+    /// <summary>True when the target winapp manages is running right now.</summary>
+    /// <remarks>
+    /// False is an ordinary answer, not a failure: the command exits 0 and reports what it found.
+    /// A snapshot never starts a target to be able to describe one.
+    /// </remarks>
+    public required bool Running { get; init; }
 
-    /// <summary>What the live guest reports it can do.</summary>
-    public required ExecutionTargetCapabilities Capabilities { get; init; }
+    /// <summary>True when the guest agent answered, so the report includes what only it knows.</summary>
+    public required bool Attached { get; init; }
+
+    /// <summary>What the live guest reports it can do, or null when no agent answered.</summary>
+    public ExecutionTargetCapabilities? Capabilities { get; init; }
 
     /// <summary>Where this target's desktop is drawn on this machine, if anywhere.</summary>
     public required TargetSnapshotDesktop Desktop { get; init; }

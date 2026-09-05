@@ -2765,7 +2765,7 @@
           }
         },
         "snapshot": {
-          "description": "Report an execution target's readiness, capabilities, deployments, and top-level guest windows. Writes only to stdout: no screenshots, no files, and nothing that changes the target.",
+          "description": "Report an execution target's readiness, capabilities, deployments, and top-level guest windows. Inspects only: never starts, connects, or repairs a target, and reports plainly when none is running. Writes only to stdout: no screenshots and no files.",
           "hidden": false,
           "arguments": {
             "target": {

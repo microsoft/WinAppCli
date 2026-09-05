@@ -36,7 +36,7 @@ internal sealed class WindowsSandboxBackend(
     IHostWinappBinaryProvider hostBinaryProvider,
     IWindowsSandboxWindowController windowController,
     IWindowsSandboxSetup? setup = null,
-    ITargetStateStore? stateStore = null) : IExecutionTargetBackend, IHostRenderedTarget
+    ITargetStateStore? stateStore = null) : IExecutionTargetBackend, IHostRenderedTarget, IInspectableTarget
 {
     /// <summary>Guest path prefix the read-only bootstrap folder is mapped under.</summary>
     /// <remarks>
@@ -365,6 +365,50 @@ internal sealed class WindowsSandboxBackend(
         TryClearResultFolder(bootstrap.HostResult);
 
         return new TargetConnection(lease.Epoch, transport, lease.IsWarm);
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Built entirely out of the two operations that already change nothing: the reconciliation that
+    /// compares persisted state against <c>wsb list</c>, and the reconnect that attaches to an agent
+    /// already serving this epoch. Neither creates an instance, connects a client, or stages an
+    /// agent, so this answers "what is there?" without becoming the reason something is.
+    /// <para>
+    /// No connection lock is taken. Waiting for another winapp process to finish bootstrapping would
+    /// make a report of the current state block for minutes on the state changing; a snapshot taken
+    /// mid-bootstrap honestly says the agent is not answering yet.
+    /// </para>
+    /// </remarks>
+    public async Task<TargetAttachment> TryAttachAsync(CancellationToken cancellationToken)
+    {
+        var reconciliation = await lifecycle.ReconcileAsync(cancellationToken).ConfigureAwait(false);
+
+        if (reconciliation.State != TargetLifecycleState.Running ||
+            reconciliation.InstanceId is not { } instanceId)
+        {
+            return TargetAttachment.NotRunning;
+        }
+
+        _instanceId = instanceId;
+
+        // Warm means a previous command finished bootstrapping this exact epoch, which is the only
+        // case where connection material on disk describes an agent that is actually there. Anything
+        // else has no agent to attach to, and manufacturing one is what this method exists not to do.
+        var state = stateStore?.Read(Target);
+        var isWarm = string.Equals(
+            state?.BootstrappedEpoch, reconciliation.Epoch.Value, StringComparison.Ordinal);
+
+        if (!isWarm)
+        {
+            return new TargetAttachment(true, reconciliation.Epoch, null);
+        }
+
+        var lease = new SandboxInstanceLease(
+            instanceId, reconciliation.Epoch, SandboxInstanceOrigin.Reused, IsWarm: true);
+
+        var connection = await TryReconnectAsync(lease, cancellationToken).ConfigureAwait(false);
+
+        return new TargetAttachment(true, reconciliation.Epoch, connection);
     }
 
     /// <summary>

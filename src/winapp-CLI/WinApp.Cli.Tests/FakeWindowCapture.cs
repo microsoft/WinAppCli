@@ -25,6 +25,16 @@ internal sealed class FakeWindowCapture : IWindowCapture
     /// </summary>
     public Func<int, int, int, int, int, int, int, int, byte[]>? CaptureScreenOverride { get; set; }
 
+    /// <summary>
+    /// Substitutes the strict no-activation capture. Returning null models "the window could only
+    /// have been captured by foregrounding it", which the target screenshot must report as a
+    /// failure rather than act on.
+    /// </summary>
+    public Func<nint, (byte[] Pixels, int Width, int Height)?>? CaptureWithoutActivationOverride { get; set; }
+
+    /// <summary>Handles the no-activation capture was asked for, in call order.</summary>
+    public List<nint> CapturedWithoutActivation { get; } = [];
+
     public bool IsFrameCaptureSupported => Supported;
 
     public IFrameGrabber StartFrameGrabber(nint hwnd, int fps = 0)
@@ -36,6 +46,16 @@ internal sealed class FakeWindowCapture : IWindowCapture
         => CaptureWindowOverride is not null
             ? CaptureWindowOverride(hwnd, width, height)
             : new byte[Math.Max(0, width * height * 4)];
+
+    public Task<(byte[] Pixels, int Width, int Height)?> TryCaptureWindowWithoutActivationAsync(
+        nint hwnd, CancellationToken cancellationToken)
+    {
+        CapturedWithoutActivation.Add(hwnd);
+
+        return Task.FromResult(CaptureWithoutActivationOverride is not null
+            ? CaptureWithoutActivationOverride(hwnd)
+            : ((byte[] Pixels, int Width, int Height)?)(new byte[4 * 4 * 4], 4, 4));
+    }
 
     public byte[] CaptureScreenPixels(
         int x, int y, int cropWidth, int cropHeight,

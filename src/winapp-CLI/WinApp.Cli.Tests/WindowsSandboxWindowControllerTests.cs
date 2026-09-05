@@ -126,6 +126,131 @@ public class WindowsSandboxWindowControllerTests
         Assert.AreEqual(ExecutionTargetErrorCodes.TargetAmbiguous, ex.Error.Code);
     }
 
+    // ---- claiming the window a connect created ---------------------------------------
+
+    [TestMethod]
+    public async Task PlaceConnectedClient_ParksTheNewWindowOnceItHasStayedTheOnlyOne()
+    {
+        var scripted = new ScriptedDesktop([Client(11, 100)]);
+        scripted.Add([Client(11, 100), Client(12, 200)]);
+        var controller = scripted.CreateController();
+
+        var placed = await controller.PlaceConnectedClientAsync(
+            Snapshot(11), TestContext.CancellationToken);
+
+        Assert.IsNotNull(placed);
+        Assert.AreEqual((nint)200, placed.Handle);
+        CollectionAssert.AreEqual(new nint[] { 200 }, scripted.Parked);
+    }
+
+    /// <summary>
+    /// Two <c>wsb connect</c> calls a few milliseconds apart both create a client, but the second
+    /// process is not visible on the poll that sees the first. Claiming on that poll is what parks
+    /// and persists the other caller's window as winapp's own.
+    /// </summary>
+    [TestMethod]
+    public async Task PlaceConnectedClient_AnotherConnectsClientAppearsWhileConfirming_ClaimsNothing()
+    {
+        var scripted = new ScriptedDesktop([Client(11, 100)]);
+        scripted.Add([Client(11, 100), Client(12, 200)]);
+        scripted.Add([Client(11, 100), Client(12, 200)]);
+        scripted.Add([Client(11, 100), Client(12, 200), Client(13, 300)]);
+        var controller = scripted.CreateController();
+
+        var placed = await controller.PlaceConnectedClientAsync(
+            Snapshot(11), TestContext.CancellationToken);
+
+        Assert.IsNull(placed, "winapp cannot tell which client is its own, so it claims neither.");
+        Assert.AreEqual(0, scripted.Parked.Count, "Another caller's window must never be moved off-screen.");
+    }
+
+    [TestMethod]
+    public async Task PlaceConnectedClient_TheCandidateClosesWhileConfirming_ClaimsNothing()
+    {
+        var scripted = new ScriptedDesktop([Client(11, 100)]);
+        scripted.Add([Client(11, 100), Client(12, 200)]);
+        scripted.Add([Client(11, 100)]);
+        var controller = scripted.CreateController();
+
+        var placed = await controller.PlaceConnectedClientAsync(
+            Snapshot(11), TestContext.CancellationToken);
+
+        Assert.IsNull(placed, "A handle that is already gone is worse than no handle at all.");
+        Assert.AreEqual(0, scripted.Parked.Count);
+    }
+
+    [TestMethod]
+    public async Task PlaceConnectedClient_TwoNewWindowsOnTheFirstLook_ClaimsNothingImmediately()
+    {
+        var scripted = new ScriptedDesktop([Client(11, 100), Client(12, 200), Client(13, 300)]);
+        var controller = scripted.CreateController();
+
+        Assert.IsNull(await controller.PlaceConnectedClientAsync(
+            Snapshot(11), TestContext.CancellationToken));
+        Assert.AreEqual(0, scripted.Parked.Count);
+        Assert.AreEqual(1, scripted.Looks, "There is nothing to confirm, so no time is spent confirming.");
+    }
+
+    [TestMethod]
+    public async Task PlaceConnectedClient_NoWindowEverAppears_GivesUpWithoutClaimingAnything()
+    {
+        var scripted = new ScriptedDesktop([Client(11, 100)]);
+        var controller = scripted.CreateController();
+
+        Assert.IsNull(await controller.PlaceConnectedClientAsync(
+            Snapshot(11), TestContext.CancellationToken));
+        Assert.AreEqual(0, scripted.Parked.Count);
+    }
+
+    public TestContext TestContext { get; set; } = null!;
+
+    private static WindowsSandboxWindowSnapshot Snapshot(params int[] existingProcessIds) =>
+        new(new HashSet<int>(existingProcessIds), default);
+
     private static SandboxClientWindow Client(int processId, nint handle, long startTicksUtc = 1000) =>
         new(handle, processId, startTicksUtc);
+
+    /// <summary>
+    /// A desktop whose client windows change on a script, with time advancing only when the
+    /// controller waits, so a race that lasts milliseconds in production is reproducible here.
+    /// </summary>
+    private sealed class ScriptedDesktop
+    {
+        private readonly List<IReadOnlyList<SandboxClientWindow>> _looks = [];
+        private DateTimeOffset _now = new(2024, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+        public ScriptedDesktop(IReadOnlyList<SandboxClientWindow> initial) => _looks.Add(initial);
+
+        /// <summary>What the next look at the desktop returns; the last entry then repeats.</summary>
+        public void Add(IReadOnlyList<SandboxClientWindow> clients) => _looks.Add(clients);
+
+        public List<nint> Parked { get; } = [];
+
+        public int Looks { get; private set; }
+
+        public WindowsSandboxWindowController CreateController()
+        {
+            var controller = new WindowsSandboxWindowController(
+                Look,
+                (client, _) => Parked.Add(client.Handle))
+            {
+                UtcNow = () => _now,
+            };
+
+            controller.Delay = (delay, _) =>
+            {
+                _now += delay;
+                return Task.CompletedTask;
+            };
+
+            return controller;
+        }
+
+        private IReadOnlyList<SandboxClientWindow> Look()
+        {
+            var index = Math.Min(Looks, _looks.Count - 1);
+            Looks++;
+            return _looks[index];
+        }
+    }
 }

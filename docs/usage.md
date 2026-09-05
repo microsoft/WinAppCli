@@ -1315,7 +1315,7 @@ Answers the question worth asking before deciding what to do next: is the target
 
 ```bash
 winapp target snapshot sandbox
-# sandbox: reused, x64, epoch 3f2a...
+# sandbox: running, x64, epoch 3f2a...
 #   Input: real input yes, screen capture yes, interactive desktop yes
 #   Desktop: HWND 984156 (WindowsSandboxRemoteSession, PID 24160)
 #   Deployments: 1
@@ -1324,13 +1324,25 @@ winapp target snapshot sandbox
 #     HWND 197326 Contoso.App (PID 5104) 1280x720 [foreground] "Contoso"
 ```
 
+When nothing is running, that is the answer, not a failure:
+
+```bash
+winapp target snapshot sandbox
+# sandbox: not running
+#   Start one with: winapp run . --on sandbox
+```
+
 **Behavior:**
 
-- Writes only to stdout. It creates no files, embeds no image data, and changes nothing on the target — including the desktop, which it never reconnects or brings to the foreground.
+- Inspects and nothing more. It never starts a target, never connects or reconnects one, and never repairs an agent that is not answering — so asking whether a target is running can never be what makes one exist. Use `winapp run . --on <target>` to start one.
+- Exits 0 whether or not a target is running. "Nothing is running" is a fact about the target, not an error in the command.
+- Writes only to stdout. It creates no files and embeds no image data.
 - Lists at most 50 top-level guest windows, foreground first then largest, and always reports the true total so a truncated list is never mistaken for the whole desktop.
 - Reports the host window the guest desktop is drawn into, which is what `target screenshot` and `target record` capture. A target that renders nowhere on this machine says so and the rest of the report still arrives.
-- If the guest cannot report its windows, the readiness, capability, and deployment facts that explain why are still reported rather than the whole command failing.
+- If the guest cannot report its windows, the readiness, capability, and deployment facts that explain why are still reported rather than the whole command failing. Under `--json` this is `attached: false` with `capabilities` omitted.
 - Deployments are filtered to the current epoch, because a record from a previous Sandbox describes files and a registration that no longer exist.
+
+`target screenshot` and `target record` are the other way round: they need a target to capture, so they prepare one the way every other `target` verb does.
 
 #### target screenshot
 
@@ -1351,7 +1363,7 @@ The difference from `winapp ui screenshot --on <target>` is *what* is captured, 
 
 - Needs no application, window, or element selector. There is nothing to name and nothing to get wrong.
 - Writes the PNG to a path on **this machine**, not on the target.
-- Activates nothing and takes no focus, so it is safe to run while you are using your own desktop. The Sandbox's client window is captured where winapp parked it, off-screen.
+- Activates nothing and takes no focus, so it is safe to run while you are using your own desktop. The Sandbox's client window is captured where winapp parked it, off-screen. If the window cannot be captured where it sits, the command fails and says so rather than bringing it to the front to get a picture.
 - `--json` reports the absolute host path, the pixel dimensions, and the target and epoch the image came from.
 
 #### target record
@@ -1370,8 +1382,9 @@ Same capture as `target screenshot`, over time. Options, cadence, frame artifact
 
 **Behavior:**
 
-- Prefer `--duration-sec`. Without it the recording runs until Ctrl+C or a newline on redirected stdin, which is not something an unattended script or an agent can rely on.
-- Holds the target prepared for the whole take, so another `winapp` invocation cannot reconnect the Sandbox client out from under the recording.
+- Prefer `--duration-sec`. Without it the recording runs until Ctrl+C or a newline on redirected stdin, which is not something an unattended script or an agent can rely on. The npm wrapper requires it, because a spawned process has no Ctrl+C to press.
+- Records from this machine, reading the window the target's desktop is drawn into. The target's connection is resolved before the take starts and released immediately, so a recording that runs for hours does not hold the target's single guest connection for hours — other `winapp` commands keep working throughout.
+- If the target's desktop window closes mid-take, the recording ends there and publishes what it captured.
 - An interrupted recording still publishes what it captured, exactly as `ui record` does.
 - `--frames` writes the same timestamped JPEGs, `frames.ndjson`, and `manifest.json` sidecar next to the MP4.
 

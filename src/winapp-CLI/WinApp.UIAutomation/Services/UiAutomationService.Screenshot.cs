@@ -159,6 +159,62 @@ internal sealed partial class UiAutomationService
         => CaptureFromWindowWithBlankRetry(hwnd, width, height, _logger);
 
     /// <summary>
+    /// Captures a window exactly where it sits, or reports that it could not be captured that way.
+    /// </summary>
+    /// <remarks>
+    /// The strict counterpart to <see cref="CaptureFromWindowWithBlankRetry(global::Windows.Win32.Foundation.HWND, int, int, ILogger)"/>.
+    /// Nothing here restores, activates, or foregrounds the window: frame capture reads the window's
+    /// own frames wherever it is, and the <c>PrintWindow</c> fallback gets exactly one attempt whose
+    /// blank result is returned as "no capture" instead of being retried from the foreground.
+    /// <para>
+    /// A window that is minimized or has no size is not special-cased into an error here; it simply
+    /// produces no usable frame, and the caller reports that in its own words.
+    /// </para>
+    /// </remarks>
+    /// <returns>The captured frame, or null when no frame could be taken without activating.</returns>
+    internal static async Task<(byte[] Pixels, int Width, int Height)?> CaptureWithoutActivationAsync(
+        global::Windows.Win32.Foundation.HWND hwnd,
+        bool allowFrameCapture,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        ct.ThrowIfCancellationRequested();
+
+#if WINDOWS10_0_19041_0_OR_GREATER
+        if (allowFrameCapture && WgcCapture.IsSupported())
+        {
+            try
+            {
+                var frame = await WgcCapture.CaptureAsync(hwnd, logger, ct).ConfigureAwait(false);
+                return (frame.Pixels, frame.Width, frame.Height);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "Frame capture failed; falling back to a single PrintWindow attempt");
+            }
+        }
+#endif
+
+        global::Windows.Win32.PInvoke.GetWindowRect(hwnd, out var rect);
+        var width = rect.right - rect.left;
+        var height = rect.bottom - rect.top;
+
+        if (width <= 0 || height <= 0)
+        {
+            return null;
+        }
+
+        var pixels = s_captureFromWindow(hwnd, width, height);
+
+        return IsBlankCapture(pixels) ? null : (pixels, width, height);
+    }
+
+    /// <summary>
     /// Static entry point so <see cref="IWindowCapture"/> implementations can offer the same
     /// blank-retry capture the screenshot path uses, without depending on a UI Automation instance.
     /// </summary>

@@ -564,6 +564,9 @@ function generate(schema) {
 const FN_NAME_OVERRIDES = {
   'package': 'packageApp', // `package` is a TS reserved-ish word
   'ui record': '_uiRecordGenerated', // the public uiRecord is the guarded wrapper in ui-record-guard.ts
+  // A recording the caller cannot stop is a hang, so both record verbs go through a guard that
+  // requires a duration. See target-record-guard.ts.
+  'target record': '_targetRecordGenerated',
 };
 
 function getFunctionName(cmdPath) {

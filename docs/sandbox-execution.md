@@ -316,11 +316,22 @@ because the pixels were on your machine the whole time.
 
 The client window winapp parked off-screen is captured where it is. No window is activated and no
 focus is taken, so a Sandbox capture cannot interrupt what you are doing, exactly like every other
-Sandbox workflow. `winapp target snapshot` goes further and never reconnects the client at all, so
-reporting the Sandbox's state can never change it.
+Sandbox workflow — and if a frame cannot be obtained without activating the window, the capture fails
+rather than pulling the Sandbox onto your screen.
+
+`winapp target snapshot` goes further: it never starts a Sandbox, never connects or reconnects the
+client, and never repairs an unresponsive agent, so asking what the Sandbox is doing can never be what
+makes it do something. With no Sandbox running it reports that and exits 0. Start one with
+`winapp run . --on sandbox`.
+
+`winapp target record` resolves the client window and then releases the guest connection before the
+take begins, because the recording runs entirely on the host. A recording that lasts hours does not
+occupy the Sandbox's single guest connection for hours.
 
 winapp captures only the client window it knows it created or adopted, identified by handle, process
-ID, and process start time together, and remembers it across invocations. Windows can leave extra
+ID, and process start time together, and remembers it across invocations. It claims a newly created
+client only after that window has stayed the only new one for a moment, so a `wsb connect` running at
+the same time never has its window parked or recorded as winapp's. Windows can leave extra
 `WindowsSandboxRemoteSession` processes behind, so when more than one is running and none is provably
 winapp's, these verbs fail with `sandbox_target_ambiguous` and name the candidate process IDs instead
 of capturing a window that may belong to something else.
@@ -683,6 +694,11 @@ run your app" is always distinguishable from "your app failed".
 | `sandbox_setup_requires_restart` | The feature is enabled; Windows needs a restart |
 | `sandbox_setup_failed` | Windows refused to enable the feature or start the client |
 | `sandbox_setup_incomplete` | Windows is still installing the client; retrying resumes it |
+
+Two more codes are target-neutral, because they are raised before any provider is chosen:
+`target_invalid` (the named target is not one winapp knows) and `target_invalid_arguments` (the
+command line itself was rejected). A `target` command run with `--json` reports even a mistyped option
+as the same JSON error envelope on stderr, so a caller parsing JSON never has to parse help text.
 
 ## Architecture
 Windows Sandbox is the only public target. Internally it sits behind a narrow boundary so a future

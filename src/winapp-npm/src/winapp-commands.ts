@@ -870,22 +870,8 @@ export interface TargetRecordOptions extends CommonOptions {
   output?: string;
 }
 
-/**
- * Record an execution target's entire desktop to an H.264 MP4 on this machine. Records the whole rendered guest desktop, so no application or window has to be named. Prefer --duration-sec: without it the recording runs until Ctrl+C or a newline on redirected stdin.
- */
-export async function targetRecord(options: TargetRecordOptions): Promise<WinappResult> {
-  const args: string[] = ['target', 'record'];
-  const positionals: string[] = [];
-  positionals.push(options.target);
-  if (options.durationSec !== undefined) args.push('--duration-sec', options.durationSec.toString());
-  if (options.fps !== undefined) args.push('--fps', options.fps.toString());
-  if (options.frames) args.push('--frames');
-  if (options.json) args.push('--json');
-  if (options.maxEdge !== undefined) args.push('--max-edge', options.maxEdge.toString());
-  if (options.output) args.push('--output', options.output);
-  if (positionals.length > 0) args.push('--', ...positionals);
-  return execCommand(args, options);
-}
+// _targetRecordGenerated: options interface exported above; function body omitted — use the
+//   public guarded wrapper (e.g. uiRecord from ui-record-guard.ts) instead.
 
 // ---------------------------------------------------------------------------
 // target screenshot
@@ -925,7 +911,7 @@ export interface TargetSnapshotOptions extends CommonOptions {
 }
 
 /**
- * Report an execution target's readiness, capabilities, deployments, and top-level guest windows. Writes only to stdout: no screenshots, no files, and nothing that changes the target.
+ * Report an execution target's readiness, capabilities, deployments, and top-level guest windows. Inspects only: never starts, connects, or repairs a target, and reports plainly when none is running. Writes only to stdout: no screenshots and no files.
  */
 export async function targetSnapshot(options: TargetSnapshotOptions): Promise<WinappResult> {
   const args: string[] = ['target', 'snapshot'];

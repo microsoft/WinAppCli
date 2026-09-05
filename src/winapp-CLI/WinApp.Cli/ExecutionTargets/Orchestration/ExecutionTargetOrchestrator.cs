@@ -123,6 +123,20 @@ internal sealed record PrepareTargetOptions(bool RequireInteractiveDesktop, bool
     public static PrepareTargetOptions ReadOnly { get; } = new(false, false);
 }
 
+/// <summary>What an inspect-only look at a target found.</summary>
+/// <param name="Running">True when the target winapp manages is running right now.</param>
+/// <param name="Epoch">
+/// Which generation is running. <see cref="ExecutionTargetEpoch.None"/> when nothing is.
+/// </param>
+/// <param name="Target">
+/// A prepared channel to the running agent, or null when the target is not running or its agent
+/// did not answer. The caller owns it and must dispose it.
+/// </param>
+internal sealed record TargetInspection(
+    bool Running,
+    ExecutionTargetEpoch Epoch,
+    PreparedTarget? Target);
+
 /// <summary>
 /// The single entry point every targeted command goes through
 /// (spec §"Ensure and reuse", §"Shared orchestration").
@@ -176,6 +190,62 @@ internal sealed class ExecutionTargetOrchestrator(
         }
 
         return rendered.ResolveDesktopSurface();
+    }
+
+    /// <summary>
+    /// Reports what the target looks like right now, without creating or repairing anything.
+    /// </summary>
+    /// <remarks>
+    /// The counterpart to <see cref="PrepareAsync"/> for commands that only report. It deliberately
+    /// skips every step that could change what it is about to describe: no support probe (which may
+    /// enable a Windows feature or ask for elevation), no instance creation, no client reconnect, no
+    /// agent repair, and no lock. A target that is not running is a result, not an error.
+    /// <para>
+    /// The caller owns <see cref="TargetInspection.Target"/> and must dispose it when it is not null.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ExecutionTargetException">
+    /// This target cannot be inspected without preparing it, or the host could not be asked at all.
+    /// </exception>
+    public async Task<TargetInspection> InspectAsync(CancellationToken cancellationToken)
+    {
+        if (backend is not IInspectableTarget inspectable)
+        {
+            throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.Unsupported,
+                $"The '{Target.Selector}' target cannot be inspected without preparing it first.",
+                userAction: $"Run a command that prepares the target, such as 'winapp run . --on {Target.Selector}'.");
+        }
+
+        var attachment = await inspectable.TryAttachAsync(cancellationToken).ConfigureAwait(false);
+
+        if (attachment.Connection is not { } connection)
+        {
+            return new TargetInspection(attachment.Running, attachment.Epoch, null);
+        }
+
+        GuestCommandChannel? channel = null;
+
+        try
+        {
+            channel = new GuestCommandChannel(connection.Transport, connection.Epoch);
+            channel.Start();
+
+            var capabilities = await channel.GetCapabilitiesAsync(cancellationToken).ConfigureAwait(false);
+
+            var prepared = new PreparedTarget(
+                backend.Target, channel, connection.Epoch, capabilities, Reused: true, MutationLease: null);
+
+            channel = null;
+            return new TargetInspection(true, connection.Epoch, prepared);
+        }
+        finally
+        {
+            if (channel is not null)
+            {
+                await channel.DisposeAsync().ConfigureAwait(false);
+            }
+        }
     }
 
     /// <summary>

@@ -45,6 +45,7 @@ public class ExecutionTargetErrorTests
         "sandbox_setup_failed",
         "sandbox_setup_incomplete",
         "target_invalid",
+        "target_invalid_arguments",
     ];
 
     [TestMethod]
