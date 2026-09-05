@@ -320,6 +320,15 @@ internal class TargetRecordCommand : Command, IShortDescription
         protected override bool CaptureScreen(ParseResult parseResult) => false;
 
         /// <inheritdoc/>
+        /// <remarks>
+        /// Always. This verb records a machine the user is not looking at, from a host window they
+        /// did not open and may not know exists, so restoring or foregrounding it would interrupt
+        /// whatever they are actually doing. A window that can only be recorded by activating it is
+        /// reported as uncapturable instead.
+        /// </remarks>
+        protected override bool NoActivation(ParseResult parseResult) => true;
+
+        /// <inheritdoc/>
         protected override string DescribeSubject(UiTarget uiTarget) => $"the {_selector} desktop";
 
         /// <inheritdoc/>

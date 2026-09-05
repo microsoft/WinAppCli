@@ -21,11 +21,17 @@ public class WindowsSandboxWindowControllerTests
     private const int OurLauncher = 5100;
     private const int OtherLauncher = 5200;
 
+    /// <summary>When winapp's own <c>wsb connect</c> started.</summary>
+    private const long LauncherStartTicks = 1_000_000;
+
+    /// <summary>When a client winapp's launcher created started: after it, as a child must.</summary>
+    private const long ClientStartTicks = LauncherStartTicks + 10_000;
+
     [TestMethod]
     public void SelectOwnedClient_TakesTheClientTheLauncherCreated()
     {
         var (client, ambiguous) = WindowsSandboxWindowController.SelectOwnedClient(
-            new SandboxConnectOwnership(OurLauncher),
+            Ownership(),
             [
                 Candidate(11, 100, OtherLauncher),
                 Candidate(12, 200, OurLauncher),
@@ -41,7 +47,7 @@ public class WindowsSandboxWindowControllerTests
     public void SelectOwnedClient_IgnoresHandlelessProcesses()
     {
         var (client, ambiguous) = WindowsSandboxWindowController.SelectOwnedClient(
-            new SandboxConnectOwnership(OurLauncher),
+            Ownership(),
             [Candidate(12, nint.Zero, OurLauncher)]);
 
         Assert.IsNull(client, "A process with no window yet is not something that can be parked.");
@@ -52,7 +58,7 @@ public class WindowsSandboxWindowControllerTests
     public void SelectOwnedClient_IgnoresClientsWhoseParentWindowsWouldNotReport()
     {
         var (client, ambiguous) = WindowsSandboxWindowController.SelectOwnedClient(
-            new SandboxConnectOwnership(OurLauncher),
+            Ownership(),
             [Candidate(12, 200, parentProcessId: null)]);
 
         Assert.IsNull(client, "No parentage is no proof, and a guess is what this class exists to avoid.");
@@ -68,7 +74,7 @@ public class WindowsSandboxWindowControllerTests
     public void SelectOwnedClient_NeverTakesAnotherLaunchersOnlyClient()
     {
         var (client, ambiguous) = WindowsSandboxWindowController.SelectOwnedClient(
-            new SandboxConnectOwnership(OurLauncher),
+            Ownership(),
             [Candidate(12, 200, OtherLauncher)]);
 
         Assert.IsNull(client);
@@ -79,7 +85,7 @@ public class WindowsSandboxWindowControllerTests
     public void SelectOwnedClient_RefusesToGuessBetweenTwoClientsOfOneLauncher()
     {
         var (client, ambiguous) = WindowsSandboxWindowController.SelectOwnedClient(
-            new SandboxConnectOwnership(OurLauncher),
+            Ownership(),
             [
                 Candidate(12, 200, OurLauncher),
                 Candidate(13, 300, OurLauncher),
@@ -87,6 +93,53 @@ public class WindowsSandboxWindowControllerTests
 
         Assert.IsNull(client);
         Assert.IsTrue(ambiguous);
+    }
+
+    /// <summary>
+    /// The trap a bare parent ID walks into. Windows stamps a client's parent ID once, when the
+    /// client is created, and never revises it: the client outlives its launcher, that launcher's
+    /// process ID is eventually handed to something else, and one day that something else is
+    /// winapp's own <c>wsb connect</c>. From then on a window that has been sitting on the user's
+    /// desktop for an hour claims, truthfully as far as Windows is concerned, to be winapp's child.
+    /// It cannot be: it is older than the launcher it names.
+    /// </summary>
+    [TestMethod]
+    public void SelectOwnedClient_IgnoresAClientOlderThanTheLauncherItNames()
+    {
+        var (client, ambiguous) = WindowsSandboxWindowController.SelectOwnedClient(
+            Ownership(),
+            [Candidate(12, 200, OurLauncher, startTicksUtc: LauncherStartTicks - 1)]);
+
+        Assert.IsNull(client, "A child cannot predate the parent that created it.");
+        Assert.IsFalse(ambiguous, "A stale parent ID is not an ambiguity, it is a non-match.");
+    }
+
+    /// <summary>
+    /// Windows records process creation coarsely enough that a client started immediately can share
+    /// its launcher's timestamp, so the test is "not older", not "strictly newer" — otherwise the
+    /// rule would reject the very windows it exists to identify.
+    /// </summary>
+    [TestMethod]
+    public void SelectOwnedClient_TakesAClientThatStartedInTheSameTickAsItsLauncher()
+    {
+        var (client, ambiguous) = WindowsSandboxWindowController.SelectOwnedClient(
+            Ownership(),
+            [Candidate(12, 200, OurLauncher, startTicksUtc: LauncherStartTicks)]);
+
+        Assert.IsNotNull(client);
+        Assert.AreEqual((nint)200, client.Handle);
+        Assert.IsFalse(ambiguous);
+    }
+
+    [TestMethod]
+    public void SelectOwnedClient_IgnoresClientsWhoseStartTimeWindowsWouldNotReport()
+    {
+        var (client, ambiguous) = WindowsSandboxWindowController.SelectOwnedClient(
+            Ownership(),
+            [Candidate(12, 200, OurLauncher, startTicksUtc: 0)]);
+
+        Assert.IsNull(client, "An age that cannot be read cannot rule out a recycled parent ID.");
+        Assert.IsFalse(ambiguous);
     }
 
     [TestMethod]
@@ -243,6 +296,46 @@ public class WindowsSandboxWindowControllerTests
         Assert.AreEqual(1, scripted.Looks, "The evidence is already lost, so there is nothing to wait for.");
     }
 
+    /// <summary>
+    /// The recycled-parent-ID case as it reaches the desktop: a Sandbox window the user opened long
+    /// ago is sitting there when winapp connects, and Windows reports its parent as the very process
+    /// ID winapp's launcher now has. Nothing about it may be touched.
+    /// </summary>
+    [TestMethod]
+    public async Task PlaceConnectedClient_PreExistingClientWithARecycledParentId_IsNeverClaimed()
+    {
+        var scripted = new ScriptedDesktop(
+            [Candidate(12, 200, OurLauncher, startTicksUtc: LauncherStartTicks - 60_000_000)]);
+        var controller = scripted.CreateController();
+
+        var placed = await controller.PlaceConnectedClientAsync(
+            Snapshot(), Ownership(), TestContext.CancellationToken);
+
+        Assert.IsNull(placed, "An older window cannot be the one this connect just created.");
+        Assert.AreEqual(0, scripted.Parked.Count, "The user's own Sandbox window must not be moved.");
+    }
+
+    /// <summary>
+    /// The same stale window, with winapp's real client arriving a few polls later. The stale one is
+    /// never claimed even while it is the only window on the desktop, and the genuine one still is.
+    /// </summary>
+    [TestMethod]
+    public async Task PlaceConnectedClient_StaleParentIdWindowIsSkippedAndTheRealClientIsStillFound()
+    {
+        var stale = Candidate(12, 200, OurLauncher, startTicksUtc: LauncherStartTicks - 60_000_000);
+        var scripted = new ScriptedDesktop([stale]);
+        scripted.Add([stale]);
+        scripted.Add([stale, Candidate(13, 300, OurLauncher)]);
+        var controller = scripted.CreateController();
+
+        var placed = await controller.PlaceConnectedClientAsync(
+            Snapshot(), Ownership(), TestContext.CancellationToken);
+
+        Assert.IsNotNull(placed);
+        Assert.AreEqual((nint)300, placed.Handle);
+        CollectionAssert.AreEqual(new nint[] { 300 }, scripted.Parked);
+    }
+
     [TestMethod]
     public async Task PlaceConnectedClient_NoWindowEverAppears_GivesUpWithoutClaimingAnything()
     {
@@ -259,13 +352,17 @@ public class WindowsSandboxWindowControllerTests
 
     private static WindowsSandboxWindowSnapshot Snapshot() => new(default);
 
-    private static SandboxConnectOwnership Ownership() => new(OurLauncher);
+    private static SandboxConnectOwnership Ownership() => new(OurLauncher, LauncherStartTicks);
 
     private static SandboxClientWindow Client(int processId, nint handle, long startTicksUtc = 1000) =>
         new(handle, processId, startTicksUtc);
 
-    private static SandboxClientCandidate Candidate(int processId, nint handle, int? parentProcessId) =>
-        new(Client(processId, handle), parentProcessId);
+    private static SandboxClientCandidate Candidate(
+        int processId,
+        nint handle,
+        int? parentProcessId,
+        long startTicksUtc = ClientStartTicks) =>
+        new(Client(processId, handle, startTicksUtc), parentProcessId);
 
     /// <summary>
     /// A desktop whose client windows change on a script, with time advancing only when the

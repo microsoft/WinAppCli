@@ -85,7 +85,9 @@ internal interface IWindowsSandboxWindowController
 /// Which window belongs to which connect is established by <em>parentage</em>, not by timing or by
 /// novelty. Windows Sandbox creates the client as a direct child of the <c>wsb connect</c> process
 /// winapp started, so "the client whose parent is my launcher" is a fact about the process tree that
-/// stays true no matter how many other connects run at the same moment.
+/// stays true no matter how many other connects run at the same moment. The client must also be no
+/// older than that launcher, since a process ID Windows recorded as a parent long ago may since have
+/// been recycled onto winapp's own connect.
 /// </para>
 /// <para>
 /// That distinction is the whole point. Selecting the new window that happened to appear first would
@@ -184,9 +186,23 @@ internal sealed class WindowsSandboxWindowController : IWindowsSandboxWindowCont
     /// Picks the client the launcher in <paramref name="ownership"/> created.
     /// </summary>
     /// <remarks>
-    /// Selection is by parentage alone. A client another <c>wsb connect</c> created is not a weaker
-    /// candidate here, it is not a candidate at all, so this returns the same answer whether that
-    /// other client appeared before winapp's, after it, or never.
+    /// Selection is by parentage <em>and</em> age. A client another <c>wsb connect</c> created is not
+    /// a weaker candidate here, it is not a candidate at all, so this returns the same answer whether
+    /// that other client appeared before winapp's, after it, or never.
+    /// <para>
+    /// The age test is what keeps the parent ID honest. Windows records a client's parent ID once, at
+    /// creation, and never revises it — a client outlives its launcher, and once that launcher's ID
+    /// is recycled the client goes on naming a number that now belongs to something else, possibly to
+    /// winapp's own <c>wsb connect</c>. A window that already existed before winapp launched anything
+    /// cannot have been created by it, so requiring the client to be no older than its claimed parent
+    /// rejects exactly those stale matches. <c>&gt;=</c> rather than <c>&gt;</c>, because a child
+    /// started immediately can share its parent's timestamp at the granularity Windows records, and
+    /// the case being excluded is a client that started measurably <em>earlier</em>.
+    /// </para>
+    /// <para>
+    /// A client whose start time Windows will not report (0) is not claimed at all: its age cannot be
+    /// compared, so its parentage cannot be trusted either.
+    /// </para>
     /// <para>
     /// Two clients parented to one launcher is not something Windows Sandbox does, so it is treated
     /// as the loss of the evidence it is rather than resolved by preference.
@@ -202,7 +218,9 @@ internal sealed class WindowsSandboxWindowController : IWindowsSandboxWindowCont
         var owned = candidates
             .Where(candidate =>
                 candidate.Window.Handle != 0 &&
-                candidate.ParentProcessId == ownership.LauncherProcessId)
+                candidate.ParentProcessId == ownership.LauncherProcessId &&
+                candidate.Window.StartTicksUtc != 0 &&
+                candidate.Window.StartTicksUtc >= ownership.StartTicksUtc)
             .ToList();
 
         return owned.Count switch

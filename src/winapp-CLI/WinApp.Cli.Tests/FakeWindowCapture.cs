@@ -35,6 +35,13 @@ internal sealed class FakeWindowCapture : IWindowCapture
     /// <summary>Handles the no-activation capture was asked for, in call order.</summary>
     public List<nint> CapturedWithoutActivation { get; } = [];
 
+    /// <summary>Handles the blank-retry <c>PrintWindow</c> capture was asked for, in call order.</summary>
+    /// <remarks>
+    /// Recorded so a test can prove a caller that promised not to activate never reached the capture
+    /// that recovers a blank frame by foregrounding the window.
+    /// </remarks>
+    public List<nint> CapturedWithBlankRetry { get; } = [];
+
     public bool IsFrameCaptureSupported => Supported;
 
     public IFrameGrabber StartFrameGrabber(nint hwnd, int fps = 0)
@@ -43,9 +50,13 @@ internal sealed class FakeWindowCapture : IWindowCapture
             : throw new PlatformNotSupportedException("No frame grabber configured for this test.");
 
     public byte[] CaptureWindowPixels(nint hwnd, int width, int height)
-        => CaptureWindowOverride is not null
+    {
+        CapturedWithBlankRetry.Add(hwnd);
+
+        return CaptureWindowOverride is not null
             ? CaptureWindowOverride(hwnd, width, height)
             : new byte[Math.Max(0, width * height * 4)];
+    }
 
     public Task<(byte[] Pixels, int Width, int Height)?> TryCaptureWindowWithoutActivationAsync(
         nint hwnd, CancellationToken cancellationToken)

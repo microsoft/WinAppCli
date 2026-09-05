@@ -78,12 +78,17 @@ redirected stdin, which an unattended script cannot supply. Bad options are reje
 `target_invalid_arguments` before any Sandbox is started. Nothing is ever activated or focused, so
 none of these interrupt what the user is doing; `target screenshot` fails rather than bringing the
 Sandbox window to the front to get a frame, and publishes by rename so an existing screenshot at the
-destination survives a failed capture.
+destination survives a failed capture. `target record` holds that promise for the whole take: a
+minimized client fails the recording up front instead of being restored, and a client that stops being
+capturable mid-take ends the recording with `"stopReason": "capture_unavailable"` and publishes the
+frames already captured. `winapp ui record` is unaffected and still recovers a blank frame from the
+foreground.
 
 winapp identifies its own client window by parentage — the client is a child of the `wsb connect`
-winapp launched — so a concurrent `wsb connect` is never parked or captured as winapp's. If Windows
-will not report that parentage, winapp leaves the client alone; capture then still works when exactly
-one client window is open, which winapp adopts without moving it.
+winapp launched — plus start time, since Windows reuses process IDs and a client that predates the
+launcher cannot be its child. If Windows will not report that evidence, winapp leaves the client
+alone; capture then still works when exactly one client window is open, which winapp adopts without
+moving it.
 
 ### Iterate
 

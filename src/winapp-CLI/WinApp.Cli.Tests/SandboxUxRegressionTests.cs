@@ -716,7 +716,7 @@ public class SandboxUxRegressionTests
         public Task<SandboxConnectAttempt> ConnectAsync(string id, CancellationToken cancellationToken)
         {
             Operations.Add($"connect:{id}");
-            return Task.FromResult(SandboxConnectAttempt.ForLauncher(4242));
+            return Task.FromResult(SandboxConnectAttempt.ForLauncher(4242, 1_000_000));
         }
 
         public Task<int> ExecuteAsync(

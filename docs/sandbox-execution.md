@@ -326,13 +326,25 @@ makes it do something. With no Sandbox running it reports that and exits 0. Star
 
 `winapp target record` resolves the client window and then releases the guest connection before the
 take begins, because the recording runs entirely on the host. A recording that lasts hours does not
-occupy the Sandbox's single guest connection for hours.
+occupy the Sandbox's single guest connection for hours. It holds the same promise as a screenshot for
+its whole length: the client window is never restored, brought to the front, or activated to rescue a
+frame. A minimized client fails the recording up front, before any file is written, rather than
+reappearing on your screen; a client that stops being capturable mid-take ends the recording and
+publishes what it captured with the stop reason `capture_unavailable`. Recording an app you are
+watching with `winapp ui record` is unchanged.
 
 winapp captures only the client window it knows it created or adopted, identified by handle, process
 ID, and process start time together, and remembers it across invocations. A window winapp creates is
 identified by **parentage**: Windows Sandbox starts the client as a direct child of the `wsb connect`
 process winapp launched, so the client whose parent is that launcher is winapp's, however many other
 connects are running at the same moment. Nothing is claimed on timing or on being the newest window.
+
+Parentage is checked together with **age**, because Windows records a process's parent ID once and
+never revises it: a launcher exits, Windows reuses its process ID, and a client started hours earlier
+by something else can end up naming winapp's launcher as its parent. A client that already existed
+before winapp's launcher started therefore cannot be that launcher's child, and winapp requires the
+client to be no older than the launcher it names before claiming it. Where either start time cannot
+be read, nothing is claimed.
 
 When that evidence is missing — Windows would not report the parent, or no client with the right
 parent appeared — winapp claims nothing: the client is left visible where the Sandbox put it and is

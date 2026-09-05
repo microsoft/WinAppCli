@@ -116,6 +116,17 @@ internal class UiRecordCommand : Command, IShortDescription
             return $"\"{uiTarget.WindowTitle ?? ""}\" (PID {uiTarget.ProcessId})";
         }
 
+        /// <summary>
+        /// Whether this recording must never restore, activate, or foreground the window.
+        /// </summary>
+        /// <remarks>
+        /// False for <c>ui record</c>, which records an app the user pointed at and is watching: a
+        /// minimized window is raised, and a blank <c>PrintWindow</c> frame is recovered from the
+        /// foreground, because the alternative is failing a recording the user is standing in front
+        /// of. A verb that advertises taking no focus overrides this.
+        /// </remarks>
+        protected virtual bool NoActivation(ParseResult parseResult) => false;
+
         /// <summary>The execution target that produced the recording, or null for this machine.</summary>
         protected virtual ExecutionTargetScope? Scope => null;
 
@@ -220,6 +231,7 @@ internal class UiRecordCommand : Command, IShortDescription
                     MaxEdge = maxEdge,
                     CaptureScreen = captureScreen,
                     FramesDirectory = framesDirectory,
+                    NoActivation = NoActivation(parseResult),
                 };
 
                 var result = await recordingService.RecordAsync(uiTarget, selector, options, linkedCts.Token, OnRecordingStarted);

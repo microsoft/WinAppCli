@@ -661,11 +661,14 @@ public class SandboxAdoptionTests
                 ? throw ExecutionTargetException.Create(
                     ExecutionTargetErrorCodes.NoInteractiveSession,
                     "The Windows Sandbox client could not connect to the Sandbox.")
-                : Task.FromResult(SandboxConnectAttempt.ForLauncher(LauncherProcessId));
+                : Task.FromResult(SandboxConnectAttempt.ForLauncher(LauncherProcessId, LauncherStartTicks));
         }
 
         /// <summary>The 'wsb connect' this fake reports having launched.</summary>
         public int LauncherProcessId { get; set; } = 4242;
+
+        /// <summary>When that launcher started, which its client must not predate.</summary>
+        public long LauncherStartTicks { get; set; } = 1_000_000;
 
         public Task<int> ExecuteAsync(
             string id,
