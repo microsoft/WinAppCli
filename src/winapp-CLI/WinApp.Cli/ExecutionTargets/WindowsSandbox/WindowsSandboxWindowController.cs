@@ -4,16 +4,18 @@
 using System.Diagnostics;
 using System.Globalization;
 using WinApp.Cli.ExecutionTargets.Abstractions;
+using WinApp.Cli.ExecutionTargets.Orchestration;
 using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.UI.WindowsAndMessaging;
 
 namespace WinApp.Cli.ExecutionTargets.WindowsSandbox;
 
-/// <summary>Host window state captured before <c>wsb connect</c> starts a new client.</summary>
-internal sealed record WindowsSandboxWindowSnapshot(
-    IReadOnlySet<int> ExistingProcessIds,
-    HWND ForegroundWindow);
+/// <summary>Host desktop state captured before <c>wsb connect</c> starts a new client.</summary>
+/// <param name="ForegroundWindow">
+/// What the user was working in, so parking the client can hand focus straight back.
+/// </param>
+internal sealed record WindowsSandboxWindowSnapshot(HWND ForegroundWindow);
 
 /// <summary>
 /// One live Sandbox client window on the host, identified by more than its handle.
@@ -31,21 +33,37 @@ internal sealed record WindowsSandboxWindowSnapshot(
 /// </param>
 internal sealed record SandboxClientWindow(nint Handle, int ProcessId, long StartTicksUtc);
 
+/// <summary>A live client window together with the evidence used to attribute it.</summary>
+/// <param name="Window">The window itself.</param>
+/// <param name="ParentProcessId">
+/// The host process that created this client, or null when Windows would not say. This is the
+/// evidence: Windows Sandbox spawns the client as a direct child of the <c>wsb connect</c> process
+/// that asked for it, so a client whose parent is the launcher winapp started is winapp's, and one
+/// whose parent is anything else is somebody else's.
+/// </param>
+internal sealed record SandboxClientCandidate(SandboxClientWindow Window, int? ParentProcessId);
+
 /// <summary>Keeps the connected Sandbox client non-minimized, off-screen, and non-activating.</summary>
 internal interface IWindowsSandboxWindowController
 {
     WindowsSandboxWindowSnapshot Capture();
 
     /// <summary>
-    /// Places the client this connect created, and reports which window that was.
+    /// Places the client that <paramref name="ownership"/> created, and reports which window it was.
     /// </summary>
+    /// <param name="snapshot">Host desktop state from before the connect, for restoring focus.</param>
+    /// <param name="ownership">
+    /// The <c>wsb connect</c> winapp launched. Null when winapp could not identify it, in which case
+    /// nothing is claimed: there is no evidence left to tell winapp's client from anyone else's.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the wait for the client window.</param>
     /// <returns>
-    /// The placed client, or null when no new window appeared in time, or when winapp could not
-    /// prove exactly one belonged to this connect — several appeared at once, or a second appeared
-    /// while the first was being confirmed. Nothing is moved or recorded in those cases.
+    /// The placed client, or null when winapp could not prove which window this connect created.
+    /// Nothing is moved and nothing is recorded in that case.
     /// </returns>
     Task<SandboxClientWindow?> PlaceConnectedClientAsync(
         WindowsSandboxWindowSnapshot snapshot,
+        SandboxConnectOwnership? ownership,
         CancellationToken cancellationToken);
 
     /// <summary>
@@ -61,32 +79,29 @@ internal interface IWindowsSandboxWindowController
     SandboxClientWindow ResolveClient(SandboxClientWindow? remembered);
 }
 
-/// <summary>Controls only the new remote-session window created by the current connect operation.</summary>
+/// <summary>Controls only the remote-session window the current connect actually created.</summary>
+/// <remarks>
+/// <para>
+/// Which window belongs to which connect is established by <em>parentage</em>, not by timing or by
+/// novelty. Windows Sandbox creates the client as a direct child of the <c>wsb connect</c> process
+/// winapp started, so "the client whose parent is my launcher" is a fact about the process tree that
+/// stays true no matter how many other connects run at the same moment.
+/// </para>
+/// <para>
+/// That distinction is the whole point. Selecting the new window that happened to appear first would
+/// pick a concurrent caller's client whenever theirs arrived first, and no amount of waiting can
+/// turn "nothing else has shown up yet" into proof of ownership. When the proof is unavailable —
+/// Windows would not report the parent, or the launcher could not be identified — winapp claims
+/// nothing: the client is left visible and unrecorded rather than parked off-screen on a guess.
+/// </para>
+/// </remarks>
 internal sealed class WindowsSandboxWindowController : IWindowsSandboxWindowController
 {
     internal const string RemoteSessionProcessName = "WindowsSandboxRemoteSession";
     private static readonly TimeSpan WindowTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(100);
 
-    /// <summary>
-    /// How long a lone new client must stay the only new client before winapp claims it.
-    /// </summary>
-    /// <remarks>
-    /// A client process appears a measurable moment before the next one, so the first poll that
-    /// sees exactly one new window is not evidence that only one was created — it is evidence that
-    /// only one has appeared <em>so far</em>. Claiming it there is what lets a second connect
-    /// starting at the same time have its window parked, persisted, and later captured as if it were
-    /// winapp's. Watching for a further window before committing turns that silent mistake into the
-    /// ambiguity it actually is.
-    /// <para>
-    /// Sized against what it defends: the whole risk window is the gap between two nearly
-    /// simultaneous connects, which is milliseconds, and the cost is a fixed addition to a connect
-    /// that already takes seconds.
-    /// </para>
-    /// </remarks>
-    internal static readonly TimeSpan ClientStabilizationWindow = TimeSpan.FromMilliseconds(750);
-
-    private readonly Func<IReadOnlyList<SandboxClientWindow>> _listClients;
+    private readonly Func<IReadOnlyList<SandboxClientCandidate>> _listClients;
     private readonly Action<SandboxClientWindow, HWND> _park;
 
     /// <summary>Creates a controller that reads the real desktop.</summary>
@@ -97,142 +112,110 @@ internal sealed class WindowsSandboxWindowController : IWindowsSandboxWindowCont
 
     /// <summary>Creates a controller over scripted windows and placement, for tests.</summary>
     internal WindowsSandboxWindowController(
-        Func<IReadOnlyList<SandboxClientWindow>> listClients,
+        Func<IReadOnlyList<SandboxClientCandidate>> listClients,
         Action<SandboxClientWindow, HWND>? park = null)
     {
         _listClients = listClients;
         _park = park ?? ((client, foreground) => PlaceOffScreen(new HWND(client.Handle), foreground));
     }
 
-    /// <summary>Delay seam, so the stabilization window is exercised without real waiting.</summary>
+    /// <summary>Delay seam, so waiting for the client is exercised without real waiting.</summary>
     internal Func<TimeSpan, CancellationToken, Task> Delay { get; set; } = Task.Delay;
 
     /// <summary>Clock seam, so timeouts are exercised without real time passing.</summary>
     internal Func<DateTimeOffset> UtcNow { get; set; } = () => DateTimeOffset.UtcNow;
 
-    public WindowsSandboxWindowSnapshot Capture() =>
-        new(SnapshotProcessIds(), PInvoke.GetForegroundWindow());
+    public WindowsSandboxWindowSnapshot Capture() => new(PInvoke.GetForegroundWindow());
 
     public async Task<SandboxClientWindow?> PlaceConnectedClientAsync(
         WindowsSandboxWindowSnapshot snapshot,
+        SandboxConnectOwnership? ownership,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
+        if (ownership is null)
+        {
+            // Without the launcher there is no way to tell winapp's client from a concurrent
+            // caller's, and moving the wrong window off-screen is worse than moving none.
+            Trace.TraceWarning(
+                "winapp could not identify the Windows Sandbox client it launched, so the window was " +
+                "left where the Sandbox put it.");
+            return null;
+        }
+
         var deadline = UtcNow() + WindowTimeout;
-        while (UtcNow() < deadline)
+
+        while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var (client, ambiguous) = SelectNewClient(snapshot.ExistingProcessIds, _listClients());
+            var (client, ambiguous) = SelectOwnedClient(ownership, _listClients());
 
             if (ambiguous)
             {
-                WarnAmbiguous();
+                Trace.TraceWarning(
+                    "One 'wsb connect' produced several Windows Sandbox client windows, so winapp " +
+                    "cannot tell which one it asked for; leaving them where they are.");
                 return null;
             }
 
             if (client is not null)
             {
-                var settled = await SettleAsync(snapshot, client, cancellationToken).ConfigureAwait(false);
-                if (settled is null)
-                {
-                    // Either a second client appeared while watching, or the candidate went away.
-                    // Both are reasons to claim nothing rather than guess.
-                    return null;
-                }
+                _park(client, snapshot.ForegroundWindow);
+                return client;
+            }
 
-                _park(settled, snapshot.ForegroundWindow);
-                return settled;
+            if (UtcNow() >= deadline)
+            {
+                break;
             }
 
             await Delay(PollInterval, cancellationToken).ConfigureAwait(false);
         }
 
         Trace.TraceWarning(
-            "The Windows Sandbox client started, but its remote-session window was not found in time.");
+            "The Windows Sandbox client started, but no remote-session window winapp launched " +
+            "appeared in time.");
         return null;
     }
 
     /// <summary>
-    /// Watches a lone new client for <see cref="ClientStabilizationWindow"/> and returns it only if
-    /// it stays the only new one.
+    /// Picks the client the launcher in <paramref name="ownership"/> created.
     /// </summary>
     /// <remarks>
-    /// Nothing is parked or persisted until this returns non-null, so a client that turns out to
-    /// belong to a concurrent <c>wsb connect</c> is never moved off-screen by winapp and never
-    /// recorded as winapp's own.
+    /// Selection is by parentage alone. A client another <c>wsb connect</c> created is not a weaker
+    /// candidate here, it is not a candidate at all, so this returns the same answer whether that
+    /// other client appeared before winapp's, after it, or never.
+    /// <para>
+    /// Two clients parented to one launcher is not something Windows Sandbox does, so it is treated
+    /// as the loss of the evidence it is rather than resolved by preference.
+    /// </para>
     /// </remarks>
-    private async Task<SandboxClientWindow?> SettleAsync(
-        WindowsSandboxWindowSnapshot snapshot,
-        SandboxClientWindow candidate,
-        CancellationToken cancellationToken)
+    internal static (SandboxClientWindow? Client, bool Ambiguous) SelectOwnedClient(
+        SandboxConnectOwnership ownership,
+        IEnumerable<SandboxClientCandidate> candidates)
     {
-        var settleUntil = UtcNow() + ClientStabilizationWindow;
-        while (UtcNow() < settleUntil)
-        {
-            await Delay(PollInterval, cancellationToken).ConfigureAwait(false);
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var (recheck, ambiguous) = SelectNewClient(snapshot.ExistingProcessIds, _listClients());
-
-            if (ambiguous || (recheck is not null && recheck != candidate))
-            {
-                WarnAmbiguous();
-                return null;
-            }
-
-            if (recheck is null)
-            {
-                // The window winapp was about to claim closed again. Report nothing rather than
-                // persist a handle that is already gone.
-                Trace.TraceWarning(
-                    "The new Windows Sandbox client window disappeared before winapp could claim it.");
-                return null;
-            }
-        }
-
-        return candidate;
-    }
-
-    private static void WarnAmbiguous() =>
-        Trace.TraceWarning(
-            "Several new Windows Sandbox client windows appeared at once, so winapp cannot tell " +
-            "which one it connected; leaving them where they are.");
-
-    /// <inheritdoc/>
-    public SandboxClientWindow ResolveClient(SandboxClientWindow? remembered) =>
-        ResolveClient(remembered, _listClients());
-
-    /// <summary>
-    /// Picks the client this connect created out of everything running now.
-    /// </summary>
-    /// <remarks>
-    /// Selection is by <em>absence from the pre-connect snapshot</em>, never "the first process with
-    /// that name": Windows routinely leaves earlier remote-session processes behind, and one of
-    /// those is exactly as likely to be first. When two windows are new at once there is nothing to
-    /// tell them apart, so neither is chosen.
-    /// </remarks>
-    internal static (SandboxClientWindow? Client, bool Ambiguous) SelectNewClient(
-        IReadOnlySet<int> existingProcessIds,
-        IEnumerable<SandboxClientWindow> candidates)
-    {
-        ArgumentNullException.ThrowIfNull(existingProcessIds);
+        ArgumentNullException.ThrowIfNull(ownership);
         ArgumentNullException.ThrowIfNull(candidates);
 
-        var appeared = candidates
+        var owned = candidates
             .Where(candidate =>
-                !existingProcessIds.Contains(candidate.ProcessId) &&
-                candidate.Handle != 0)
+                candidate.Window.Handle != 0 &&
+                candidate.ParentProcessId == ownership.LauncherProcessId)
             .ToList();
 
-        return appeared.Count switch
+        return owned.Count switch
         {
             0 => (null, false),
-            1 => (appeared[0], false),
+            1 => (owned[0].Window, false),
             _ => (null, true),
         };
     }
+
+    /// <inheritdoc/>
+    public SandboxClientWindow ResolveClient(SandboxClientWindow? remembered) =>
+        ResolveClient(remembered, [.. _listClients().Select(candidate => candidate.Window)]);
 
     /// <summary>
     /// Decides which live client window a capture may use.
@@ -240,9 +223,14 @@ internal sealed class WindowsSandboxWindowController : IWindowsSandboxWindowCont
     /// <remarks>
     /// A recorded client is honoured only while it is still one of the windows actually open, which
     /// is what stops a handle persisted by an earlier winapp process from resolving against whatever
-    /// owns that number now. With no usable record, exactly one open client is unambiguous and is
-    /// adopted; zero or several fail, because the alternative is capturing a desktop winapp does not
-    /// manage and reporting it as this target's.
+    /// owns that number now.
+    /// <para>
+    /// With no usable record, a single open client is <em>adopted</em>: read where it stands, never
+    /// moved, and reported as adopted so a caller can see that winapp recognised the window rather
+    /// than created it. Only one Sandbox instance can exist at a time, so a lone client is
+    /// necessarily showing this target's desktop. Zero or several fail, because the alternative is
+    /// capturing a desktop winapp does not manage and reporting it as this target's.
+    /// </para>
     /// </remarks>
     internal static SandboxClientWindow ResolveClient(
         SandboxClientWindow? remembered,
@@ -286,9 +274,9 @@ internal sealed class WindowsSandboxWindowController : IWindowsSandboxWindowCont
     }
 
     /// <summary>Every remote-session client window open on this desktop right now.</summary>
-    private static IReadOnlyList<SandboxClientWindow> ListLiveClients()
+    private static IReadOnlyList<SandboxClientCandidate> ListLiveClients()
     {
-        var clients = new List<SandboxClientWindow>();
+        var clients = new List<SandboxClientCandidate>();
 
         foreach (var process in Process.GetProcessesByName(RemoteSessionProcessName))
         {
@@ -298,10 +286,12 @@ internal sealed class WindowsSandboxWindowController : IWindowsSandboxWindowCont
 
                 if (process.MainWindowHandle != 0)
                 {
-                    clients.Add(new SandboxClientWindow(
-                        process.MainWindowHandle,
-                        process.Id,
-                        TryReadStartTicks(process)));
+                    clients.Add(new SandboxClientCandidate(
+                        new SandboxClientWindow(
+                            process.MainWindowHandle,
+                            process.Id,
+                            TryReadStartTicks(process)),
+                        ParentProcessId.TryGet(process.Id)));
                 }
             }
         }
@@ -324,20 +314,6 @@ internal sealed class WindowsSandboxWindowController : IWindowsSandboxWindowCont
         {
             return 0;
         }
-    }
-
-    private static HashSet<int> SnapshotProcessIds()
-    {
-        var ids = new HashSet<int>();
-        foreach (var process in Process.GetProcessesByName(RemoteSessionProcessName))
-        {
-            using (process)
-            {
-                ids.Add(process.Id);
-            }
-        }
-
-        return ids;
     }
 
     private static void PlaceOffScreen(HWND window, HWND previousForeground)

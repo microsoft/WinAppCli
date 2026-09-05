@@ -176,7 +176,24 @@ internal sealed class ExecutionTargetOrchestrator(
     /// <exception cref="ExecutionTargetException">
     /// This target does not render on this machine, or its client window cannot be identified.
     /// </exception>
-    public TargetDesktopSurface ResolveDesktopSurface()
+    public TargetDesktopSurface ResolveDesktopSurface() =>
+        HostRendered().ResolveDesktopSurface();
+
+    /// <summary>
+    /// Answers the same question as <see cref="ResolveDesktopSurface"/>, writing nothing.
+    /// </summary>
+    /// <remarks>
+    /// What <c>winapp target snapshot</c> uses, so reporting where a desktop is rendered never
+    /// becomes a change to the state being reported.
+    /// </remarks>
+    /// <exception cref="ExecutionTargetException">
+    /// This target does not render on this machine, or its client window cannot be identified.
+    /// </exception>
+    public TargetDesktopSurface InspectDesktopSurface() =>
+        HostRendered().InspectDesktopSurface();
+
+    /// <summary>The backend as a host-rendered target, or a failure explaining that it is not one.</summary>
+    private IHostRenderedTarget HostRendered()
     {
         if (backend is not IHostRenderedTarget rendered)
         {
@@ -189,7 +206,7 @@ internal sealed class ExecutionTargetOrchestrator(
                 example: $"winapp ui screenshot -a MyApp --on {Target.Selector} -o .\\shot.png");
         }
 
-        return rendered.ResolveDesktopSurface();
+        return rendered;
     }
 
     /// <summary>

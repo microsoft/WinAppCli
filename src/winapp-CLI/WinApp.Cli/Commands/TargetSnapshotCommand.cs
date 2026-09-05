@@ -158,7 +158,7 @@ internal class TargetSnapshotCommand : Command, IShortDescription
 
             try
             {
-                var surface = orchestrator.ResolveDesktopSurface();
+                var surface = orchestrator.InspectDesktopSurface();
 
                 return new TargetSnapshotDesktop
                 {
@@ -282,7 +282,7 @@ internal class TargetSnapshotCommand : Command, IShortDescription
 
             if (output.Capabilities is { } capabilities)
             {
-                console.MarkupLineInterpolated($"  Architecture: {capabilities.Architecture}");
+                console.MarkupLineInterpolated($"  Architecture: {TerminalText.Sanitize(capabilities.Architecture)}");
                 console.MarkupLineInterpolated(
                     $"  Input: real input {Yes(capabilities.SupportsRealInput)}, screen capture {Yes(capabilities.SupportsScreenCapture)}, interactive desktop {Yes(capabilities.SupportsInteractiveDesktop)}");
             }
@@ -312,7 +312,7 @@ internal class TargetSnapshotCommand : Command, IShortDescription
                 foreach (var deployment in output.Deployments)
                 {
                     console.MarkupLineInterpolated(
-                        $"    {deployment.PackageFullName ?? deployment.DeploymentId}{(deployment.Dirty ? " (dirty)" : "")}");
+                        $"    {TerminalText.Sanitize(deployment.PackageFullName ?? deployment.DeploymentId)}{(deployment.Dirty ? " (dirty)" : "")}");
                 }
             }
 
@@ -329,8 +329,10 @@ internal class TargetSnapshotCommand : Command, IShortDescription
 
             foreach (var window in output.Windows)
             {
+                // Guest-chosen text, printed to the caller's terminal: sanitized so a window title
+                // cannot repaint the report it appears in. JSON carries the original.
                 console.MarkupLineInterpolated(
-                    $"    HWND {window.Hwnd} {window.ProcessName} (PID {window.ProcessId}) {window.Width}x{window.Height}{(window.IsForeground ? " [foreground]" : "")} \"{window.Title ?? ""}\"");
+                    $"    HWND {window.Hwnd} {TerminalText.Sanitize(window.ProcessName)} (PID {window.ProcessId}) {window.Width}x{window.Height}{(window.IsForeground ? " [foreground]" : "")} \"{TerminalText.Sanitize(window.Title)}\"");
             }
         }
 

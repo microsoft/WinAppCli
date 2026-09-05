@@ -329,9 +329,15 @@ take begins, because the recording runs entirely on the host. A recording that l
 occupy the Sandbox's single guest connection for hours.
 
 winapp captures only the client window it knows it created or adopted, identified by handle, process
-ID, and process start time together, and remembers it across invocations. It claims a newly created
-client only after that window has stayed the only new one for a moment, so a `wsb connect` running at
-the same time never has its window parked or recorded as winapp's. Windows can leave extra
+ID, and process start time together, and remembers it across invocations. A window winapp creates is
+identified by **parentage**: Windows Sandbox starts the client as a direct child of the `wsb connect`
+process winapp launched, so the client whose parent is that launcher is winapp's, however many other
+connects are running at the same moment. Nothing is claimed on timing or on being the newest window.
+
+When that evidence is missing — Windows would not report the parent, or no client with the right
+parent appeared — winapp claims nothing: the client is left visible where the Sandbox put it and is
+not recorded. Capture then still works if exactly one client window is open, which it **adopts**:
+read where it stands, never moved, and reported as adopted. Windows can leave extra
 `WindowsSandboxRemoteSession` processes behind, so when more than one is running and none is provably
 winapp's, these verbs fail with `sandbox_target_ambiguous` and name the candidate process IDs instead
 of capturing a window that may belong to something else.

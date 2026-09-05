@@ -87,6 +87,69 @@ public class TargetCaptureCommandTests
         Assert.AreEqual(1, harness.Backend.AttachCalls);
     }
 
+    /// <summary>
+    /// Resolving the desktop is the other half of the same promise: the path that records what it
+    /// found exists for captures, which have a next command to agree with. A report has none, and
+    /// writing one would make every poll a new revision of the file it is describing.
+    /// </summary>
+    [TestMethod]
+    public async Task Snapshot_ReadsTheDesktopThroughTheInspectionPathThatRecordsNothing()
+    {
+        await using var harness = new Harness(GuestWindows());
+
+        Assert.AreEqual(0, await RunSnapshotAsync(harness, new TestConsole(), "sandbox"));
+
+        Assert.AreEqual(1, harness.Rendering.InspectSurfaceCalls);
+        Assert.AreEqual(0, harness.Rendering.ResolveSurfaceCalls, "Inspection must not take the writing path.");
+    }
+
+    /// <summary>
+    /// Guest window titles are chosen by software the caller is deliberately testing. A terminal
+    /// reads escape sequences in them as instructions, so a title printed verbatim could erase the
+    /// rest of the report or retitle the user's terminal.
+    /// </summary>
+    [TestMethod]
+    public async Task Snapshot_GuestWindowTitleContainingTerminalControls_IsPrintedInert()
+    {
+        await using var harness = new Harness(GuestWindows(
+            Window(0x20, "\u001b]0;pwned\u0007Setup\u001b[2J\u001b[H", 800, 600)));
+        var console = new TestConsole();
+
+        Assert.AreEqual(0, await RunSnapshotAsync(harness, console, "sandbox"));
+
+        StringAssert.Contains(console.Output, "Setup");
+        Assert.IsFalse(console.Output.Contains('\u001b'), "No escape may reach the terminal.");
+        Assert.IsFalse(console.Output.Contains("pwned", StringComparison.Ordinal), "Nor may its payload.");
+    }
+
+    [TestMethod]
+    public async Task Snapshot_MultiLineGuestWindowTitle_StaysOnOneRow()
+    {
+        await using var harness = new Harness(GuestWindows(
+            Window(0x20, "Real title\r\nWindows: 0 running", 800, 600)));
+        var console = new TestConsole();
+
+        Assert.AreEqual(0, await RunSnapshotAsync(harness, console, "sandbox"));
+
+        StringAssert.Contains(console.Output, "Real title\u21b5Windows: 0 running");
+    }
+
+    /// <summary>
+    /// JSON is data rather than instructions, and a caller diffing titles has to see exactly what
+    /// the guest reported. The sanitizing belongs to rendering, not to the value.
+    /// </summary>
+    [TestMethod]
+    public async Task Snapshot_Json_KeepsTheGuestsTitleExactlyAsItWasReported()
+    {
+        const string Title = "\u001b]0;pwned\u0007Setup";
+        await using var harness = new Harness(GuestWindows(Window(0x20, Title, 800, 600)));
+        var console = new TestConsole();
+
+        Assert.AreEqual(0, await RunSnapshotAsync(harness, console, "sandbox", "--json"));
+
+        Assert.AreEqual(Title, Deserialize(console.Output).Windows![0].Title);
+    }
+
     [TestMethod]
     public async Task Snapshot_NothingRunning_SaysSoAndSucceeds()
     {
@@ -346,6 +409,89 @@ public class TargetCaptureCommandTests
         Assert.AreEqual(0, harness.Backend.EnsureCalls);
     }
 
+    /// <summary>
+    /// The destination is often the previous screenshot of the same target, and the reason to take a
+    /// new one is usually that something went wrong. Writing in place would destroy the last good
+    /// picture the moment capture started, and leave it destroyed if the capture then failed.
+    /// </summary>
+    [TestMethod]
+    public async Task Screenshot_CaptureFails_LeavesAnExistingScreenshotIntact()
+    {
+        await using var harness = new Harness(GuestWindows());
+        var destination = TestPaths.Under(_root, "desktop.png");
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        await File.WriteAllTextAsync(destination, "the previous screenshot", TestContext.CancellationToken);
+
+        var capture = new FakeWindowCapture { CaptureWithoutActivationOverride = _ => null };
+
+        var (exitCode, _) = await CaptureStandardErrorAsync(() => RunScreenshotAsync(
+            harness, new TestConsole(), capture, "sandbox", "-o", destination, "--json"));
+
+        Assert.AreEqual(TargetOutput.TargetInfrastructureExitCode, exitCode);
+        Assert.AreEqual(
+            "the previous screenshot",
+            await File.ReadAllTextAsync(destination, TestContext.CancellationToken));
+    }
+
+    [TestMethod]
+    public async Task Screenshot_Cancelled_LeavesAnExistingScreenshotIntact()
+    {
+        await using var harness = new Harness(GuestWindows());
+        var destination = TestPaths.Under(_root, "desktop.png");
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        await File.WriteAllTextAsync(destination, "the previous screenshot", TestContext.CancellationToken);
+
+        using var cancellation = new CancellationTokenSource();
+        var capture = new FakeWindowCapture
+        {
+            CaptureWithoutActivationOverride = _ =>
+            {
+                cancellation.Cancel();
+                return (new byte[4 * 3 * 2], 3, 2);
+            },
+        };
+
+        var command = new TargetScreenshotCommand();
+        var handler = new TargetScreenshotCommand.Handler(
+            harness.Orchestrator, capture, new TestConsole(), NullLogger<TargetScreenshotCommand>.Instance);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => handler.InvokeAsync(
+                Parse(command, "sandbox", "-o", destination), cancellation.Token));
+
+        Assert.AreEqual(
+            "the previous screenshot",
+            await File.ReadAllTextAsync(destination, TestContext.CancellationToken));
+        Assert.AreEqual(
+            0,
+            Directory.GetFiles(Path.GetDirectoryName(destination)!, "*.tmp").Length,
+            "A half-written temporary file must not be left behind either.");
+    }
+
+    [TestMethod]
+    public async Task Screenshot_OverwritingAnExistingFile_ReplacesItWholeOnSuccess()
+    {
+        await using var harness = new Harness(GuestWindows());
+        var destination = TestPaths.Under(_root, "desktop.png");
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        await File.WriteAllTextAsync(destination, "the previous screenshot", TestContext.CancellationToken);
+
+        var capture = new FakeWindowCapture
+        {
+            CaptureWithoutActivationOverride = _ => (new byte[4 * 3 * 2], 3, 2),
+        };
+
+        Assert.AreEqual(
+            0,
+            await RunScreenshotAsync(harness, new TestConsole(), capture, "sandbox", "-o", destination));
+
+        var bytes = await File.ReadAllBytesAsync(destination, TestContext.CancellationToken);
+        CollectionAssert.AreEqual(
+            new byte[] { 0x89, (byte)'P', (byte)'N', (byte)'G' },
+            bytes.Take(4).ToArray(),
+            "The published file is a whole PNG, not the old contents and not a mixture.");
+    }
+
     // ---- record --------------------------------------------------------------------
 
     [TestMethod]
@@ -446,6 +592,84 @@ public class TargetCaptureCommandTests
                 "1"));
 
         Assert.IsNull(recording.LastRecordOptions);
+        Assert.AreEqual(0, harness.Backend.EnsureCalls);
+    }
+
+    /// <summary>
+    /// Preparing a target can start a Windows Sandbox, connect a client, and bootstrap an agent —
+    /// minutes of work and a window on the user's screen. A request that could never have recorded
+    /// must be refused while refusing is still free.
+    /// </summary>
+    [TestMethod]
+    [DataRow("--duration-sec", "-1", DisplayName = "negative duration")]
+    [DataRow("--duration-sec", "86401", DisplayName = "longer than a day")]
+    [DataRow("--fps", "0", DisplayName = "no cadence")]
+    [DataRow("--max-edge", "32", DisplayName = "below the encoder minimum")]
+    public async Task Record_InvalidOption_IsRefusedBeforeTheTargetIsTouched(string option, string value)
+    {
+        await using var harness = new Harness(GuestWindows());
+        var console = new TestConsole();
+        var recording = new FakeUiRecordingService();
+        string[] arguments = option == "--duration-sec"
+            ? ["sandbox", "-o", TestPaths.Under(_root, "desktop.mp4"), option, value, "--json"]
+            : ["sandbox", "-o", TestPaths.Under(_root, "desktop.mp4"), "--duration-sec", "5", option, value, "--json"];
+
+        var (exitCode, stderr) = await CaptureStandardErrorAsync(
+            () => RunRecordAsync(harness, console, recording, arguments));
+
+        Assert.AreEqual(TargetOutput.InvalidCommandLineExitCode, exitCode);
+        Assert.AreEqual(string.Empty, console.Output, "A failure must not put anything on stdout under --json.");
+        StringAssert.Contains(stderr, ExecutionTargetErrorCodes.TargetInvalidArguments);
+        Assert.AreEqual(0, harness.Backend.EnsureCalls, "Nothing may be created to serve a request this bad.");
+        Assert.AreEqual(0, harness.Backend.AttachCalls);
+        Assert.IsNull(recording.LastRecordOptions);
+    }
+
+    [TestMethod]
+    public async Task Record_FramesOverAnExistingArtifact_IsRefusedBeforeTheTargetIsTouched()
+    {
+        await using var harness = new Harness(GuestWindows());
+        var destination = TestPaths.Under(_root, "desktop.mp4");
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        await File.WriteAllTextAsync(destination, "an earlier recording", TestContext.CancellationToken);
+
+        var (exitCode, stderr) = await CaptureStandardErrorAsync(() => RunRecordAsync(
+            harness,
+            new TestConsole(),
+            new FakeUiRecordingService(),
+            "sandbox",
+            "-o",
+            destination,
+            "--duration-sec",
+            "1",
+            "--frames",
+            "--json"));
+
+        Assert.AreEqual(TargetOutput.InvalidCommandLineExitCode, exitCode);
+        StringAssert.Contains(stderr, ExecutionTargetErrorCodes.TargetInvalidArguments);
+        Assert.AreEqual(0, harness.Backend.EnsureCalls);
+        Assert.AreEqual(
+            "an earlier recording",
+            await File.ReadAllTextAsync(destination, TestContext.CancellationToken));
+    }
+
+    [TestMethod]
+    public async Task Record_InvalidOption_HumanOutput_SaysWhatIsWrongAndWhatToDo()
+    {
+        await using var harness = new Harness(GuestWindows());
+
+        var (exitCode, stderr) = await CaptureStandardErrorAsync(() => RunRecordAsync(
+            harness,
+            new TestConsole(),
+            new FakeUiRecordingService(),
+            "sandbox",
+            "-o",
+            TestPaths.Under(_root, "desktop.mp4"),
+            "--fps",
+            "0"));
+
+        Assert.AreEqual(TargetOutput.InvalidCommandLineExitCode, exitCode);
+        StringAssert.Contains(stderr, "--fps must be at least 1");
         Assert.AreEqual(0, harness.Backend.EnsureCalls);
     }
 
@@ -559,6 +783,11 @@ public class TargetCaptureCommandTests
         }
         public FakeBackend Backend { get; }
 
+        /// <summary>The same backend when it draws a desktop here, for asserting which path was used.</summary>
+        public RenderingBackend Rendering =>
+            Backend as RenderingBackend ??
+            throw new InvalidOperationException("This harness's target draws no desktop on this machine.");
+
         public ExecutionTargetOrchestrator Orchestrator { get; }
 
         public CancellationToken ServerToken => _cancellation.Token;
@@ -668,7 +897,25 @@ public class TargetCaptureCommandTests
     private sealed class RenderingBackend(Harness harness, string stdout, int exitCode)
         : FakeBackend(harness, stdout, exitCode), IHostRenderedTarget
     {
-        public TargetDesktopSurface ResolveDesktopSurface() =>
+        /// <summary>How many times a caller asked for the surface on the persisting path.</summary>
+        public int ResolveSurfaceCalls { get; private set; }
+
+        /// <summary>How many times a caller asked for the surface on the inspect-only path.</summary>
+        public int InspectSurfaceCalls { get; private set; }
+
+        public TargetDesktopSurface ResolveDesktopSurface()
+        {
+            ResolveSurfaceCalls++;
+            return Surface();
+        }
+
+        public TargetDesktopSurface InspectDesktopSurface()
+        {
+            InspectSurfaceCalls++;
+            return Surface();
+        }
+
+        private static TargetDesktopSurface Surface() =>
             new(DesktopHwnd, DesktopProcessId, "WindowsSandboxRemoteSession", Adopted: false);
     }
 

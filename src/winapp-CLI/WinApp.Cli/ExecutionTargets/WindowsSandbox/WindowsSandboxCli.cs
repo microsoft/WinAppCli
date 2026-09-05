@@ -173,7 +173,7 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
     }
 
     /// <inheritdoc/>
-    public async Task ConnectAsync(string id, CancellationToken cancellationToken)
+    public async Task<SandboxConnectAttempt> ConnectAsync(string id, CancellationToken cancellationToken)
     {
         if (Executable is not { } executable)
         {
@@ -211,16 +211,21 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
 
         if (client is null)
         {
-            return;
+            return SandboxConnectAttempt.Unidentified;
         }
 
-        // Some client builds exit immediately and leave the window to a separate process; others
-        // stay up for the life of the session. Watching for a bounded moment catches a fast,
-        // outright failure without ever blocking on the long-lived case -- which is why a client
-        // still running when the window closes is simply left alone, never waited on and never
-        // killed.
-        using (client)
+        // The handle stays open past this method so the caller can attribute client windows to this
+        // exact launcher. Only a connect that turns out to have failed releases it here.
+        var attempt = SandboxConnectAttempt.From(client);
+        var identified = false;
+
+        try
         {
+            // Some client builds exit immediately and leave the window to a separate process; others
+            // stay up for the life of the session. Watching for a bounded moment catches a fast,
+            // outright failure without ever blocking on the long-lived case -- which is why a client
+            // still running when the window closes is simply left alone, never waited on and never
+            // killed.
             using var window = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             window.CancelAfter(ConnectFailureWindow);
 
@@ -231,14 +236,16 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
                 // Still running, which is the ordinary healthy case for an interactive client.
-                return;
+                identified = true;
+                return attempt;
             }
             catch (Exception ex) when (
                 ex is InvalidOperationException or System.ComponentModel.Win32Exception)
             {
                 // The client is already gone and its state is unavailable. Not being able to observe
                 // a failure is not evidence of one; the agent heartbeat proves the session works.
-                return;
+                identified = true;
+                return attempt;
             }
 
             int exitCode;
@@ -250,7 +257,8 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
             catch (Exception ex) when (
                 ex is InvalidOperationException or System.ComponentModel.Win32Exception)
             {
-                return;
+                identified = true;
+                return attempt;
             }
 
             if (exitCode != 0)
@@ -264,6 +272,18 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
                         ["sandboxId"] = id,
                         ["exitCode"] = exitCode.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     });
+            }
+
+            // The launcher exited cleanly, which is one of the shapes a healthy connect takes: the
+            // window it created lives on in its own process, and that process is still its child.
+            identified = true;
+            return attempt;
+        }
+        finally
+        {
+            if (!identified)
+            {
+                attempt.Dispose();
             }
         }
     }

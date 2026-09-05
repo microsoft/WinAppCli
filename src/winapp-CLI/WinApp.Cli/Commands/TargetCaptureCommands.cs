@@ -119,7 +119,11 @@ internal class TargetScreenshotCommand : Command, IShortDescription
                     Directory.CreateDirectory(directory);
                 }
 
-                await File.WriteAllBytesAsync(filePath, png, cancellationToken).ConfigureAwait(false);
+                // Published by rename, so the destination is only ever absent or a whole PNG. A
+                // direct write would truncate an existing screenshot the moment capture started and
+                // leave it truncated if the write failed or was cancelled -- destroying the last
+                // good picture of a target in the middle of diagnosing why the target went wrong.
+                await AtomicFile.WriteAllBytesAsync(filePath, png, cancellationToken).ConfigureAwait(false);
 
                 if (json)
                 {
@@ -248,6 +252,23 @@ internal class TargetRecordCommand : Command, IShortDescription
             }
 
             _selector = reference.Selector;
+
+            // Before anything is prepared. Preparing a target can create a Windows Sandbox, connect
+            // a client, and bootstrap an agent -- minutes of work and a visible window -- so a
+            // request that was never going to record must be refused while refusing is still free.
+            if (UiRecordOptionValidator.Validate(parseResult, out _) is { } optionError)
+            {
+                return TargetOutput.RejectOptions(
+                    Output,
+                    json,
+                    ExecutionTargetException.Create(
+                        ExecutionTargetErrorCodes.TargetInvalidArguments,
+                        optionError.Message,
+                        userAction: optionError.RecoveryHint ??
+                            "Correct the option and run the command again.",
+                        example:
+                            $"winapp target record {reference.Selector} -o .\\desktop.mp4 --duration-sec 10").Error);
+            }
 
             try
             {

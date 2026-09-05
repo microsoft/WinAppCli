@@ -65,16 +65,25 @@ desktop. `ui` verbs capture one application's window from inside the guest; `tar
 whole rendered desktop from the host, so the shell and any unnamed window are included.
 
 Start with `winapp target snapshot sandbox`. It inspects only: it never starts a Sandbox, never
-connects or reconnects the client, and never repairs an unresponsive agent, so running it can never be
-what creates the thing it reports. It is stdout-only and writes no files. It reports readiness and
-capabilities, the deployments winapp made in this Sandbox generation, and the guest's top-level windows
-(foreground first, capped at 50, with the true total always shown). With no Sandbox running it says so
-and exits 0 — start one with `winapp run . --on sandbox`.
+connects or reconnects the client, never repairs an unresponsive agent, and never writes to winapp's
+own state, so running it can never be what creates or changes the thing it reports. It is stdout-only
+and writes no files. It reports readiness and capabilities, the deployments winapp made in this
+Sandbox generation, and the guest's top-level windows (foreground first, capped at 50, with the true
+total always shown). Guest window titles are printed inert — terminal escape sequences in a title are
+stripped for the human report and preserved verbatim under `--json`. With no Sandbox running it says
+so and exits 0 — start one with `winapp run . --on sandbox`.
 
 Prefer `--duration-sec` on `target record`. Without it the recording runs until Ctrl+C or a newline on
-redirected stdin, which an unattended script cannot supply. Nothing is ever activated or focused, so
+redirected stdin, which an unattended script cannot supply. Bad options are rejected with
+`target_invalid_arguments` before any Sandbox is started. Nothing is ever activated or focused, so
 none of these interrupt what the user is doing; `target screenshot` fails rather than bringing the
-Sandbox window to the front to get a frame.
+Sandbox window to the front to get a frame, and publishes by rename so an existing screenshot at the
+destination survives a failed capture.
+
+winapp identifies its own client window by parentage — the client is a child of the `wsb connect`
+winapp launched — so a concurrent `wsb connect` is never parked or captured as winapp's. If Windows
+will not report that parentage, winapp leaves the client alone; capture then still works when exactly
+one client window is open, which winapp adopts without moving it.
 
 ### Iterate
 

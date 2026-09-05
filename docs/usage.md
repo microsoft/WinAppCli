@@ -1363,7 +1363,8 @@ The difference from `winapp ui screenshot --on <target>` is *what* is captured, 
 
 - Needs no application, window, or element selector. There is nothing to name and nothing to get wrong.
 - Writes the PNG to a path on **this machine**, not on the target.
-- Activates nothing and takes no focus, so it is safe to run while you are using your own desktop. The Sandbox's client window is captured where winapp parked it, off-screen. If the window cannot be captured where it sits, the command fails and says so rather than bringing it to the front to get a picture.
+- Activates nothing and takes no focus, so it is safe to run while you are using your own desktop. The Sandbox's client window is captured where it stands — parked off-screen when winapp opened it, or exactly where you left it when winapp adopted a window you opened. If the window cannot be captured where it sits, the command fails and says so rather than bringing it to the front to get a picture.
+- Never truncates the destination. The PNG is published by rename, so an existing screenshot at that path survives a failed or interrupted capture intact.
 - `--json` reports the absolute host path, the pixel dimensions, and the target and epoch the image came from.
 
 #### target record
@@ -1383,12 +1384,15 @@ Same capture as `target screenshot`, over time. Options, cadence, frame artifact
 **Behavior:**
 
 - Prefer `--duration-sec`. Without it the recording runs until Ctrl+C or a newline on redirected stdin, which is not something an unattended script or an agent can rely on. The npm wrapper requires it, because a spawned process has no Ctrl+C to press.
+- Options are checked before the target is touched. A bad `--duration-sec`, `--fps`, `--max-edge`, `--frames`, or `--output` fails immediately with `target_invalid_arguments`, so a request that could never have recorded never starts a Sandbox to find that out.
 - Records from this machine, reading the window the target's desktop is drawn into. The target's connection is resolved before the take starts and released immediately, so a recording that runs for hours does not hold the target's single guest connection for hours — other `winapp` commands keep working throughout.
 - If the target's desktop window closes mid-take, the recording ends there and publishes what it captured.
 - An interrupted recording still publishes what it captured, exactly as `ui record` does.
 - `--frames` writes the same timestamped JPEGs, `frames.ndjson`, and `manifest.json` sidecar next to the MP4.
 
 **When the desktop cannot be captured:** all three verbs report the reason rather than guessing. If the Sandbox has no connected client, they fail with `sandbox_no_interactive_session`. If more than one remote-session window is running and none of them is provably the one winapp manages, they fail with `sandbox_target_ambiguous` and name the candidate process IDs — parking, capturing, or recording a window that might belong to someone else's Sandbox is worse than stopping.
+
+**How winapp knows which window is its own:** the client is started as a child process of the `wsb connect` winapp launched, so winapp matches on that parentage rather than on which window appeared first. A second `wsb connect` running at the same instant therefore never has its window parked or recorded as winapp's. When Windows will not report the parentage, winapp claims nothing and leaves the client where it is; capture still works if exactly one client window is open, which winapp adopts and reads without moving it.
 
 ---
 

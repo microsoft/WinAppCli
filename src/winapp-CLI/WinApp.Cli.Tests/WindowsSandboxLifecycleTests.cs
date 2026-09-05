@@ -124,7 +124,8 @@ internal sealed class FakeWindowsSandboxCli : IWindowsSandboxCli
         bool allowWrite,
         CancellationToken cancellationToken) => Task.CompletedTask;
 
-    public Task ConnectAsync(string id, CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task<SandboxConnectAttempt> ConnectAsync(string id, CancellationToken cancellationToken) =>
+        Task.FromResult(SandboxConnectAttempt.ForLauncher(4242));
 
     public Task<int> ExecuteAsync(
         string id,

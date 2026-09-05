@@ -232,7 +232,7 @@ internal sealed class WindowsSandboxBackend(
         // nothing in it was prepared under the epoch that now identifies it, so its "persisted"
         // material describes a generation that no longer exists.
         if (lease.IsWarm &&
-            await TryReconnectAsync(lease, cancellationToken).ConfigureAwait(false) is { } reused)
+            await TryReconnectAsync(lease, remember: true, cancellationToken).ConfigureAwait(false) is { } reused)
         {
             return reused;
         }
@@ -406,7 +406,8 @@ internal sealed class WindowsSandboxBackend(
         var lease = new SandboxInstanceLease(
             instanceId, reconciliation.Epoch, SandboxInstanceOrigin.Reused, IsWarm: true);
 
-        var connection = await TryReconnectAsync(lease, cancellationToken).ConfigureAwait(false);
+        var connection = await TryReconnectAsync(lease, remember: false, cancellationToken)
+            .ConfigureAwait(false);
 
         return new TargetAttachment(true, reconciliation.Epoch, connection);
     }
@@ -414,6 +415,14 @@ internal sealed class WindowsSandboxBackend(
     /// <summary>
     /// Reconnects to an agent that is already serving this epoch, or returns null.
     /// </summary>
+    /// <param name="lease">The instance and epoch to reconnect to.</param>
+    /// <param name="remember">
+    /// Whether a successful reconnect may be written back to persisted state. False for inspection,
+    /// which must be able to answer "what is there?" without becoming a revision in the answer: a
+    /// snapshot that recorded the address it just looked up would change the file every caller is
+    /// asking it to describe, and would contend for it with the command actually doing the work.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the reconnect.</param>
     /// <remarks>
     /// <para>
     /// Every CLI invocation constructs a fresh backend, so in-process fields alone can never make
@@ -431,6 +440,7 @@ internal sealed class WindowsSandboxBackend(
     /// </remarks>
     private async Task<TargetConnection?> TryReconnectAsync(
         SandboxInstanceLease lease,
+        bool remember,
         CancellationToken cancellationToken)
     {
         var material = _activeMaterial ?? TryReadPersistedMaterial(lease.Epoch);
@@ -467,7 +477,11 @@ internal sealed class WindowsSandboxBackend(
 
             _guestAddress = address;
             _activeMaterial = material;
-            RememberConnection(lease, address);
+
+            if (remember)
+            {
+                RememberConnection(lease, address);
+            }
 
             return new TargetConnection(lease.Epoch, transport, Reused: true);
         }
@@ -611,12 +625,35 @@ internal sealed class WindowsSandboxBackend(
             RememberClientWindow(client);
         }
 
-        return new TargetDesktopSurface(
+        return Describe(client, remembered);
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// The same resolution, minus every trace of having asked. Nothing is written back and nothing
+    /// is cached, so repeating a snapshot leaves the state file at the revision it was already at —
+    /// which is what lets an agent poll a target without racing the command that is preparing it.
+    /// <para>
+    /// An adopted client is reported as adopted here exactly as it is elsewhere, and is read where
+    /// it stands: inspection never moves a window it did not open.
+    /// </para>
+    /// </remarks>
+    public TargetDesktopSurface InspectDesktopSurface()
+    {
+        var remembered = _client ?? TryReadPersistedClient();
+
+        return Describe(windowController.ResolveClient(remembered), remembered);
+    }
+
+    /// <summary>Describes a resolved client for a caller.</summary>
+    private static TargetDesktopSurface Describe(
+        SandboxClientWindow client,
+        SandboxClientWindow? remembered) =>
+        new(
             client.Handle,
             client.ProcessId,
             WindowsSandboxWindowController.RemoteSessionProcessName,
             Adopted: client != remembered);
-    }
 
     /// <summary>The client window recorded for this instance, when it is still the same one.</summary>
     private SandboxClientWindow? TryReadPersistedClient()
@@ -1133,19 +1170,21 @@ internal sealed class WindowsSandboxBackend(
     /// No other failure is retried: once a command can be dispatched, its result is authoritative
     /// and repeating it could duplicate a side effect.
     /// </remarks>
-    /// <summary>Connects the interactive client and parks its window without stealing focus.</summary>
+    /// <summary>Connects the interactive client and parks the window this connect created.</summary>
     /// <remarks>
-    /// The snapshot is taken before the client exists so the controller can tell the new window from
-    /// the ones that were already there, and place only the new one.
+    /// The connect is held open across the placement so its process ID cannot be recycled while the
+    /// controller is matching client windows against it. Which window belongs to this connect is
+    /// settled by parentage, so a client another caller opened at the same moment is never a
+    /// candidate — and when the evidence is missing, nothing is parked and nothing is recorded.
     /// </remarks>
     private async Task ConnectClientAsync(
         string instanceId,
         CancellationToken cancellationToken)
     {
         var windowSnapshot = windowController.Capture();
-        await cli.ConnectAsync(instanceId, cancellationToken).ConfigureAwait(false);
+        using var attempt = await cli.ConnectAsync(instanceId, cancellationToken).ConfigureAwait(false);
         _client = await windowController
-            .PlaceConnectedClientAsync(windowSnapshot, cancellationToken)
+            .PlaceConnectedClientAsync(windowSnapshot, attempt.Ownership, cancellationToken)
             .ConfigureAwait(false);
     }
 

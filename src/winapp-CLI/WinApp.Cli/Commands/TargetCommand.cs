@@ -554,6 +554,21 @@ internal static class TargetOutput
     internal const int InvalidCommandLineExitCode = 1;
 
     /// <summary>
+    /// Reports an unusable option on an otherwise well-formed target command line, before any work.
+    /// </summary>
+    /// <remarks>
+    /// The counterpart to <see cref="RejectSelection"/> for the options rather than the selector.
+    /// Kept separate from <see cref="Fail"/> for the same reason: nothing was prepared and nothing
+    /// was attempted, so this exits 1 like every other rejected command line rather than 70, which
+    /// means the target itself could not be used.
+    /// </remarks>
+    public static int RejectOptions(IAnsiConsole console, bool json, ExecutionTargetErrorInfo error)
+    {
+        Fail(console, json, error);
+        return InvalidCommandLineExitCode;
+    }
+
+    /// <summary>
     /// Reports a <c>target</c> command line the parser rejected, in the same envelope every other
     /// target failure uses.
     /// </summary>

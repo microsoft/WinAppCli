@@ -653,7 +653,7 @@ public class SandboxAdoptionTests
             return Task.CompletedTask;
         }
 
-        public Task ConnectAsync(string id, CancellationToken cancellationToken)
+        public Task<SandboxConnectAttempt> ConnectAsync(string id, CancellationToken cancellationToken)
         {
             Operations.Add($"connect:{id}");
 
@@ -661,8 +661,11 @@ public class SandboxAdoptionTests
                 ? throw ExecutionTargetException.Create(
                     ExecutionTargetErrorCodes.NoInteractiveSession,
                     "The Windows Sandbox client could not connect to the Sandbox.")
-                : Task.CompletedTask;
+                : Task.FromResult(SandboxConnectAttempt.ForLauncher(LauncherProcessId));
         }
+
+        /// <summary>The 'wsb connect' this fake reports having launched.</summary>
+        public int LauncherProcessId { get; set; } = 4242;
 
         public Task<int> ExecuteAsync(
             string id,
@@ -764,10 +767,11 @@ public class SandboxAdoptionTests
 
     private sealed class NoOpWindowController : IWindowsSandboxWindowController
     {
-        public WindowsSandboxWindowSnapshot Capture() => new(new HashSet<int>(), default);
+        public WindowsSandboxWindowSnapshot Capture() => new(default);
 
         public Task<SandboxClientWindow?> PlaceConnectedClientAsync(
             WindowsSandboxWindowSnapshot snapshot,
+            SandboxConnectOwnership? ownership,
             CancellationToken cancellationToken) => Task.FromResult<SandboxClientWindow?>(null);
 
         public SandboxClientWindow ResolveClient(SandboxClientWindow? remembered) =>

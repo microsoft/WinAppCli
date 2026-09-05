@@ -713,10 +713,10 @@ public class SandboxUxRegressionTests
             return Task.CompletedTask;
         }
 
-        public Task ConnectAsync(string id, CancellationToken cancellationToken)
+        public Task<SandboxConnectAttempt> ConnectAsync(string id, CancellationToken cancellationToken)
         {
             Operations.Add($"connect:{id}");
-            return Task.CompletedTask;
+            return Task.FromResult(SandboxConnectAttempt.ForLauncher(4242));
         }
 
         public Task<int> ExecuteAsync(
@@ -747,10 +747,11 @@ public class SandboxUxRegressionTests
     private sealed class NoOpWindowController : IWindowsSandboxWindowController
     {
         public WindowsSandboxWindowSnapshot Capture() =>
-            new(new HashSet<int>(), default);
+            new(default);
 
         public Task<SandboxClientWindow?> PlaceConnectedClientAsync(
             WindowsSandboxWindowSnapshot snapshot,
+            SandboxConnectOwnership? ownership,
             CancellationToken cancellationToken) => Task.FromResult<SandboxClientWindow?>(null);
 
         public SandboxClientWindow ResolveClient(SandboxClientWindow? remembered) =>

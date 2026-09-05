@@ -40,10 +40,28 @@ internal interface IHostRenderedTarget
     /// <summary>
     /// Resolves the host window this target's guest desktop is currently rendered into.
     /// </summary>
+    /// <remarks>
+    /// May record what it resolved, so a later command in the same run agrees with this one. Callers
+    /// that must not write use <see cref="InspectDesktopSurface"/> instead.
+    /// </remarks>
     /// <exception cref="ExecutionTargetException">
     /// No client window is open, or several are and none of them can be proved to be the managed
     /// one. Both fail rather than guessing: capturing the wrong desktop would produce a result that
     /// looks exactly like a correct one.
     /// </exception>
     TargetDesktopSurface ResolveDesktopSurface();
+
+    /// <summary>
+    /// Answers the same question as <see cref="ResolveDesktopSurface"/>, writing nothing.
+    /// </summary>
+    /// <remarks>
+    /// The inspect-only counterpart, for commands that report state and must not become part of it.
+    /// Persisting what an inspection resolved would give a read command a write it never advertised:
+    /// it would bump the state revision under whatever command is preparing the target, and would
+    /// make repeated snapshots of an idle machine keep changing the file they describe.
+    /// </remarks>
+    /// <exception cref="ExecutionTargetException">
+    /// No client window is open, or several are and none can be proved to be the managed one.
+    /// </exception>
+    TargetDesktopSurface InspectDesktopSurface();
 }

@@ -18,45 +18,74 @@ namespace WinApp.Cli.Tests;
 [TestClass]
 public class WindowsSandboxWindowControllerTests
 {
+    private const int OurLauncher = 5100;
+    private const int OtherLauncher = 5200;
+
     [TestMethod]
-    public void SelectNewClient_IgnoresPreexistingAndHandlelessProcesses()
+    public void SelectOwnedClient_TakesTheClientTheLauncherCreated()
     {
-        var (client, ambiguous) = WindowsSandboxWindowController.SelectNewClient(
-            new HashSet<int> { 10, 11 },
+        var (client, ambiguous) = WindowsSandboxWindowController.SelectOwnedClient(
+            new SandboxConnectOwnership(OurLauncher),
             [
-                Client(10, 100),
-                Client(12, nint.Zero),
-                Client(13, 300),
+                Candidate(11, 100, OtherLauncher),
+                Candidate(12, 200, OurLauncher),
             ]);
 
         Assert.IsFalse(ambiguous);
         Assert.IsNotNull(client);
-        Assert.AreEqual((nint)300, client.Handle);
-        Assert.AreEqual(13, client.ProcessId);
+        Assert.AreEqual((nint)200, client.Handle);
+        Assert.AreEqual(12, client.ProcessId);
     }
 
     [TestMethod]
-    public void SelectNewClient_SelectsNothingWhenNoWindowAppeared()
+    public void SelectOwnedClient_IgnoresHandlelessProcesses()
     {
-        var (client, ambiguous) = WindowsSandboxWindowController.SelectNewClient(
-            new HashSet<int> { 10 },
-            [Client(10, 100)]);
+        var (client, ambiguous) = WindowsSandboxWindowController.SelectOwnedClient(
+            new SandboxConnectOwnership(OurLauncher),
+            [Candidate(12, nint.Zero, OurLauncher)]);
 
-        Assert.IsNull(client);
+        Assert.IsNull(client, "A process with no window yet is not something that can be parked.");
         Assert.IsFalse(ambiguous);
     }
 
     [TestMethod]
-    public void SelectNewClient_RefusesToGuessBetweenTwoNewWindows()
+    public void SelectOwnedClient_IgnoresClientsWhoseParentWindowsWouldNotReport()
     {
-        var (client, ambiguous) = WindowsSandboxWindowController.SelectNewClient(
-            new HashSet<int> { 10 },
+        var (client, ambiguous) = WindowsSandboxWindowController.SelectOwnedClient(
+            new SandboxConnectOwnership(OurLauncher),
+            [Candidate(12, 200, parentProcessId: null)]);
+
+        Assert.IsNull(client, "No parentage is no proof, and a guess is what this class exists to avoid.");
+        Assert.IsFalse(ambiguous);
+    }
+
+    /// <summary>
+    /// The case a timing rule gets wrong: another caller's client is the only one on the desktop,
+    /// so "the new window that appeared" and "my window" are the same window to anything counting
+    /// windows instead of reading parentage.
+    /// </summary>
+    [TestMethod]
+    public void SelectOwnedClient_NeverTakesAnotherLaunchersOnlyClient()
+    {
+        var (client, ambiguous) = WindowsSandboxWindowController.SelectOwnedClient(
+            new SandboxConnectOwnership(OurLauncher),
+            [Candidate(12, 200, OtherLauncher)]);
+
+        Assert.IsNull(client);
+        Assert.IsFalse(ambiguous, "Someone else's window is not an ambiguity, it is simply not a candidate.");
+    }
+
+    [TestMethod]
+    public void SelectOwnedClient_RefusesToGuessBetweenTwoClientsOfOneLauncher()
+    {
+        var (client, ambiguous) = WindowsSandboxWindowController.SelectOwnedClient(
+            new SandboxConnectOwnership(OurLauncher),
             [
-                Client(12, 200),
-                Client(13, 300),
+                Candidate(12, 200, OurLauncher),
+                Candidate(13, 300, OurLauncher),
             ]);
 
-        Assert.IsNull(client, "Parking a window that may belong to someone else is worse than parking nothing.");
+        Assert.IsNull(client);
         Assert.IsTrue(ambiguous);
     }
 
@@ -129,14 +158,14 @@ public class WindowsSandboxWindowControllerTests
     // ---- claiming the window a connect created ---------------------------------------
 
     [TestMethod]
-    public async Task PlaceConnectedClient_ParksTheNewWindowOnceItHasStayedTheOnlyOne()
+    public async Task PlaceConnectedClient_ParksTheClientItsOwnLauncherCreated()
     {
-        var scripted = new ScriptedDesktop([Client(11, 100)]);
-        scripted.Add([Client(11, 100), Client(12, 200)]);
+        var scripted = new ScriptedDesktop([]);
+        scripted.Add([Candidate(12, 200, OurLauncher)]);
         var controller = scripted.CreateController();
 
         var placed = await controller.PlaceConnectedClientAsync(
-            Snapshot(11), TestContext.CancellationToken);
+            Snapshot(), Ownership(), TestContext.CancellationToken);
 
         Assert.IsNotNull(placed);
         Assert.AreEqual((nint)200, placed.Handle);
@@ -144,71 +173,99 @@ public class WindowsSandboxWindowControllerTests
     }
 
     /// <summary>
-    /// Two <c>wsb connect</c> calls a few milliseconds apart both create a client, but the second
-    /// process is not visible on the poll that sees the first. Claiming on that poll is what parks
-    /// and persists the other caller's window as winapp's own.
+    /// Two <c>wsb connect</c> calls milliseconds apart. The other caller's client is the one that
+    /// appears first and, for several polls, the only window on the desktop. Anything that claims
+    /// "the new window" — with or without a settling delay — parks and persists a stranger's client
+    /// here; parentage does not, because it never considered that window a candidate.
     /// </summary>
     [TestMethod]
-    public async Task PlaceConnectedClient_AnotherConnectsClientAppearsWhileConfirming_ClaimsNothing()
+    public async Task PlaceConnectedClient_AnotherConnectsClientArrivesFirstAndAlone_IsNeverClaimed()
     {
-        var scripted = new ScriptedDesktop([Client(11, 100)]);
-        scripted.Add([Client(11, 100), Client(12, 200)]);
-        scripted.Add([Client(11, 100), Client(12, 200)]);
-        scripted.Add([Client(11, 100), Client(12, 200), Client(13, 300)]);
+        var scripted = new ScriptedDesktop([]);
+        scripted.Add([Candidate(12, 200, OtherLauncher)]);
+        scripted.Add([Candidate(12, 200, OtherLauncher)]);
+        scripted.Add([Candidate(12, 200, OtherLauncher)]);
+        scripted.Add([Candidate(12, 200, OtherLauncher), Candidate(13, 300, OurLauncher)]);
         var controller = scripted.CreateController();
 
         var placed = await controller.PlaceConnectedClientAsync(
-            Snapshot(11), TestContext.CancellationToken);
+            Snapshot(), Ownership(), TestContext.CancellationToken);
 
-        Assert.IsNull(placed, "winapp cannot tell which client is its own, so it claims neither.");
-        Assert.AreEqual(0, scripted.Parked.Count, "Another caller's window must never be moved off-screen.");
+        Assert.IsNotNull(placed, "winapp's own client did arrive, and parentage identifies it.");
+        Assert.AreEqual((nint)300, placed.Handle);
+        CollectionAssert.AreEqual(
+            new nint[] { 300 },
+            scripted.Parked,
+            "Another caller's window must never be moved off-screen.");
     }
 
+    /// <summary>
+    /// The same race, except winapp's own connect never produces a window. Waiting longer cannot
+    /// make the stranger's client winapp's, so the run ends having claimed nothing.
+    /// </summary>
     [TestMethod]
-    public async Task PlaceConnectedClient_TheCandidateClosesWhileConfirming_ClaimsNothing()
+    public async Task PlaceConnectedClient_OnlyAnotherLaunchersClientEverAppears_ClaimsNothing()
     {
-        var scripted = new ScriptedDesktop([Client(11, 100)]);
-        scripted.Add([Client(11, 100), Client(12, 200)]);
-        scripted.Add([Client(11, 100)]);
+        var scripted = new ScriptedDesktop([Candidate(12, 200, OtherLauncher)]);
         var controller = scripted.CreateController();
 
         var placed = await controller.PlaceConnectedClientAsync(
-            Snapshot(11), TestContext.CancellationToken);
+            Snapshot(), Ownership(), TestContext.CancellationToken);
 
-        Assert.IsNull(placed, "A handle that is already gone is worse than no handle at all.");
+        Assert.IsNull(placed);
         Assert.AreEqual(0, scripted.Parked.Count);
     }
 
     [TestMethod]
-    public async Task PlaceConnectedClient_TwoNewWindowsOnTheFirstLook_ClaimsNothingImmediately()
+    public async Task PlaceConnectedClient_LauncherCouldNotBeIdentified_ClaimsNothingWithoutLooking()
     {
-        var scripted = new ScriptedDesktop([Client(11, 100), Client(12, 200), Client(13, 300)]);
+        var scripted = new ScriptedDesktop([Candidate(12, 200, OurLauncher)]);
+        var controller = scripted.CreateController();
+
+        var placed = await controller.PlaceConnectedClientAsync(
+            Snapshot(), ownership: null, TestContext.CancellationToken);
+
+        Assert.IsNull(placed, "With no launcher there is no evidence, and winapp does not guess.");
+        Assert.AreEqual(0, scripted.Parked.Count);
+        Assert.AreEqual(0, scripted.Looks);
+    }
+
+    [TestMethod]
+    public async Task PlaceConnectedClient_OneLauncherSomehowOwnsTwoWindows_ClaimsNothingImmediately()
+    {
+        var scripted = new ScriptedDesktop(
+            [Candidate(12, 200, OurLauncher), Candidate(13, 300, OurLauncher)]);
         var controller = scripted.CreateController();
 
         Assert.IsNull(await controller.PlaceConnectedClientAsync(
-            Snapshot(11), TestContext.CancellationToken));
+            Snapshot(), Ownership(), TestContext.CancellationToken));
         Assert.AreEqual(0, scripted.Parked.Count);
-        Assert.AreEqual(1, scripted.Looks, "There is nothing to confirm, so no time is spent confirming.");
+        Assert.AreEqual(1, scripted.Looks, "The evidence is already lost, so there is nothing to wait for.");
     }
 
     [TestMethod]
     public async Task PlaceConnectedClient_NoWindowEverAppears_GivesUpWithoutClaimingAnything()
     {
-        var scripted = new ScriptedDesktop([Client(11, 100)]);
+        var scripted = new ScriptedDesktop([]);
         var controller = scripted.CreateController();
 
         Assert.IsNull(await controller.PlaceConnectedClientAsync(
-            Snapshot(11), TestContext.CancellationToken));
+            Snapshot(), Ownership(), TestContext.CancellationToken));
         Assert.AreEqual(0, scripted.Parked.Count);
+        Assert.IsTrue(scripted.Looks > 1, "Waiting for a client that is still starting is expected.");
     }
 
     public TestContext TestContext { get; set; } = null!;
 
-    private static WindowsSandboxWindowSnapshot Snapshot(params int[] existingProcessIds) =>
-        new(new HashSet<int>(existingProcessIds), default);
+    private static WindowsSandboxWindowSnapshot Snapshot() => new(default);
+
+    private static SandboxConnectOwnership Ownership() => new(OurLauncher);
 
     private static SandboxClientWindow Client(int processId, nint handle, long startTicksUtc = 1000) =>
         new(handle, processId, startTicksUtc);
+
+    private static SandboxClientCandidate Candidate(int processId, nint handle, int? parentProcessId) =>
+        new(Client(processId, handle), parentProcessId);
 
     /// <summary>
     /// A desktop whose client windows change on a script, with time advancing only when the
@@ -216,13 +273,13 @@ public class WindowsSandboxWindowControllerTests
     /// </summary>
     private sealed class ScriptedDesktop
     {
-        private readonly List<IReadOnlyList<SandboxClientWindow>> _looks = [];
+        private readonly List<IReadOnlyList<SandboxClientCandidate>> _looks = [];
         private DateTimeOffset _now = new(2024, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
-        public ScriptedDesktop(IReadOnlyList<SandboxClientWindow> initial) => _looks.Add(initial);
+        public ScriptedDesktop(IReadOnlyList<SandboxClientCandidate> initial) => _looks.Add(initial);
 
         /// <summary>What the next look at the desktop returns; the last entry then repeats.</summary>
-        public void Add(IReadOnlyList<SandboxClientWindow> clients) => _looks.Add(clients);
+        public void Add(IReadOnlyList<SandboxClientCandidate> clients) => _looks.Add(clients);
 
         public List<nint> Parked { get; } = [];
 
@@ -246,7 +303,7 @@ public class WindowsSandboxWindowControllerTests
             return controller;
         }
 
-        private IReadOnlyList<SandboxClientWindow> Look()
+        private IReadOnlyList<SandboxClientCandidate> Look()
         {
             var index = Math.Min(Looks, _looks.Count - 1);
             Looks++;

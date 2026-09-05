@@ -14,9 +14,6 @@ namespace WinApp.Cli.Commands;
 
 internal class UiRecordCommand : Command, IShortDescription
 {
-    private const int DefaultFrameArtifactMaxEdge = 1280;
-    private const int MaximumFrameArtifactMaxEdge = 4096;
-
     internal static readonly Option<bool> FramesOption = new("--frames")
     {
         Description = "Write timestamped JPEGs, frames.ndjson, and manifest.json to <output-name>.frames. Supports 1-30 fps and max-edge 64-4096 (default 1280), with a 1 GiB frame-data cap.",
@@ -127,60 +124,23 @@ internal class UiRecordCommand : Command, IShortDescription
             var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
             var quiet = parseResult.GetValue(WinAppRootCommand.QuietOption);
             var selector = ElementSelector(parseResult);
-            var durationSec = parseResult.GetValue(SharedUiOptions.DurationSecOption);
-            var fps = parseResult.GetValue(SharedUiOptions.FpsOption);
-            var maxEdge = parseResult.GetValue(SharedUiOptions.MaxEdgeOption);
-            var maxEdgeExplicit = parseResult.GetResult(SharedUiOptions.MaxEdgeOption)?.Implicit == false;
             var captureScreen = CaptureScreen(parseResult);
-            var output = parseResult.GetValue(SharedUiOptions.OutputOption);
-            var frames = parseResult.GetValue(FramesOption);
 
-            // Validate options before resolving the target.
-            if (durationSec < 0)
+            // Validate every option before resolving the subject, so an unusable request never
+            // starts anything it would then have to abandon.
+            if (UiRecordOptionValidator.Validate(parseResult, out var validated) is { } optionError)
             {
-                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--duration-sec must be 0 or greater.");
-                logger.LogError("{Symbol} --duration-sec must be 0 or greater.", UiSymbols.Error);
+                UiJsonError.Emit(
+                    json,
+                    optionError.Code,
+                    optionError.Message,
+                    errorOut: parseResult.InvocationConfiguration.Error,
+                    recoveryHint: optionError.RecoveryHint);
+                logger.LogError("{Symbol} {Message}", UiSymbols.Error, optionError.Message);
                 return 1;
             }
-            if (durationSec > 86400)
-            {
-                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--duration-sec must not exceed 86400 (24 hours).");
-                logger.LogError("{Symbol} --duration-sec must not exceed 86400 (24 hours).", UiSymbols.Error);
-                return 1;
-            }
-            if (fps < 1)
-            {
-                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--fps must be at least 1.");
-                logger.LogError("{Symbol} --fps must be at least 1.", UiSymbols.Error);
-                return 1;
-            }
-            if (!frames && maxEdge != 0 && maxEdge < 64)
-            {
-                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--max-edge must be 0 (unbounded) or >= 64 (encoder minimum).");
-                logger.LogError("{Symbol} --max-edge must be 0 (unbounded) or >= 64 (encoder minimum).", UiSymbols.Error);
-                return 1;
-            }
-            if (frames)
-            {
-                if (fps > 30)
-                {
-                    UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--frames supports --fps values from 1 through 30.");
-                    logger.LogError("{Symbol} --frames supports --fps values from 1 through 30.", UiSymbols.Error);
-                    return 1;
-                }
-                if (maxEdgeExplicit && (maxEdge < 64 || maxEdge > MaximumFrameArtifactMaxEdge))
-                {
-                    const string message = "--frames supports --max-edge values from 64 through 4096; omit --max-edge to use 1280.";
-                    UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, message);
-                    logger.LogError("{Symbol} {Message}", UiSymbols.Error, message);
-                    return 1;
-                }
 
-                if (!maxEdgeExplicit)
-                {
-                    maxEdge = DefaultFrameArtifactMaxEdge;
-                }
-            }
+            var (filePath, framesDirectory, maxEdge, durationSec, fps) = validated!;
 
             if (!TrySelectSubject(parseResult, json))
             {
@@ -192,42 +152,8 @@ internal class UiRecordCommand : Command, IShortDescription
             _stdinMonitorStopped = false;
             try
             {
-                // Resolve output path inside error handling so path errors produce structured output.
-                string filePath;
-                string? framesDirectory = null;
                 try
                 {
-                    // Avoid collisions between concurrent recordings using the default path.
-                    filePath = Path.GetFullPath(
-                        output ?? $"recording-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.mp4");
-                    framesDirectory = frames ? GetFramesDirectory(filePath) : null;
-
-                    if (framesDirectory is not null)
-                    {
-                        if (Path.Exists(filePath))
-                        {
-                            UiJsonError.Emit(
-                                json,
-                                UiJsonError.CodeOutputExists,
-                                $"MP4 output already exists: {filePath}",
-                                errorOut: parseResult.InvocationConfiguration.Error,
-                                recoveryHint: "Choose a new --output path; recording never replaces existing artifacts.");
-                            logger.LogError("{Symbol} MP4 output already exists: {Path}", UiSymbols.Error, filePath);
-                            return 1;
-                        }
-                        if (Path.Exists(framesDirectory))
-                        {
-                            UiJsonError.Emit(
-                                json,
-                                UiJsonError.CodeOutputExists,
-                                $"Frame artifact output already exists: {framesDirectory}",
-                                errorOut: parseResult.InvocationConfiguration.Error,
-                                recoveryHint: "Choose a new --output path; the derived frame directory already exists and is never replaced.");
-                            logger.LogError("{Symbol} Frame artifact output already exists: {Path}", UiSymbols.Error, framesDirectory);
-                            return 1;
-                        }
-                    }
-
                     var dir = Path.GetDirectoryName(filePath);
                     if (dir is not null)
                     {
