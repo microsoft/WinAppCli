@@ -850,6 +850,93 @@ export async function targetPush(options: TargetPushOptions): Promise<WinappResu
 }
 
 // ---------------------------------------------------------------------------
+// target record
+// ---------------------------------------------------------------------------
+
+export interface TargetRecordOptions extends CommonOptions {
+  /** Execution target to act on. Currently: 'sandbox'. */
+  target: string;
+  /** Recording duration in seconds. 0 records until Ctrl+C or redirected-stdin newline/EOF. */
+  durationSec?: number;
+  /** Frames per second to capture */
+  fps?: number;
+  /** Write timestamped JPEGs, frames.ndjson, and manifest.json to <output-name>.frames. Supports 1-30 fps and max-edge 64-4096 (default 1280), with a 1 GiB frame-data cap. */
+  frames?: boolean;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Downscale so the longest edge is at most this many pixels (0 = no downscale) */
+  maxEdge?: number;
+  /** Save output to this file path. */
+  output?: string;
+}
+
+/**
+ * Record an execution target's entire desktop to an H.264 MP4 on this machine. Records the whole rendered guest desktop, so no application or window has to be named. Prefer --duration-sec: without it the recording runs until Ctrl+C or a newline on redirected stdin.
+ */
+export async function targetRecord(options: TargetRecordOptions): Promise<WinappResult> {
+  const args: string[] = ['target', 'record'];
+  const positionals: string[] = [];
+  positionals.push(options.target);
+  if (options.durationSec !== undefined) args.push('--duration-sec', options.durationSec.toString());
+  if (options.fps !== undefined) args.push('--fps', options.fps.toString());
+  if (options.frames) args.push('--frames');
+  if (options.json) args.push('--json');
+  if (options.maxEdge !== undefined) args.push('--max-edge', options.maxEdge.toString());
+  if (options.output) args.push('--output', options.output);
+  if (positionals.length > 0) args.push('--', ...positionals);
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// target screenshot
+// ---------------------------------------------------------------------------
+
+export interface TargetScreenshotOptions extends CommonOptions {
+  /** Execution target to act on. Currently: 'sandbox'. */
+  target: string;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Save output to this file path. */
+  output?: string;
+}
+
+/**
+ * Capture an execution target's entire desktop as a PNG on this machine. Captures the whole rendered guest desktop, so no application or window has to be named.
+ */
+export async function targetScreenshot(options: TargetScreenshotOptions): Promise<WinappResult> {
+  const args: string[] = ['target', 'screenshot'];
+  const positionals: string[] = [];
+  positionals.push(options.target);
+  if (options.json) args.push('--json');
+  if (options.output) args.push('--output', options.output);
+  if (positionals.length > 0) args.push('--', ...positionals);
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// target snapshot
+// ---------------------------------------------------------------------------
+
+export interface TargetSnapshotOptions extends CommonOptions {
+  /** Execution target to act on. Currently: 'sandbox'. */
+  target: string;
+  /** Format output as JSON */
+  json?: boolean;
+}
+
+/**
+ * Report an execution target's readiness, capabilities, deployments, and top-level guest windows. Writes only to stdout: no screenshots, no files, and nothing that changes the target.
+ */
+export async function targetSnapshot(options: TargetSnapshotOptions): Promise<WinappResult> {
+  const args: string[] = ['target', 'snapshot'];
+  const positionals: string[] = [];
+  positionals.push(options.target);
+  if (options.json) args.push('--json');
+  if (positionals.length > 0) args.push('--', ...positionals);
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
 // tool
 // ---------------------------------------------------------------------------
 

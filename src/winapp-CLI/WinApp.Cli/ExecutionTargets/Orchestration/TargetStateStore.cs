@@ -156,6 +156,9 @@ internal sealed class TargetStateStore(ITargetStateDirectoryProvider directoryPr
             AgentVersion = state.AgentVersion,
             AgentBinaryHash = state.AgentBinaryHash,
             GuestAddress = state.GuestAddress,
+            ClientWindowHandle = state.ClientWindowHandle,
+            ClientProcessId = state.ClientProcessId,
+            ClientProcessStartTicksUtc = state.ClientProcessStartTicksUtc,
             UpdatedUtc = DateTimeOffset.UtcNow,
         };
 

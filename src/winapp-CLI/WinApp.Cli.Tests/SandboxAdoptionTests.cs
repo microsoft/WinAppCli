@@ -766,9 +766,12 @@ public class SandboxAdoptionTests
     {
         public WindowsSandboxWindowSnapshot Capture() => new(new HashSet<int>(), default);
 
-        public Task PlaceConnectedClientAsync(
+        public Task<SandboxClientWindow?> PlaceConnectedClientAsync(
             WindowsSandboxWindowSnapshot snapshot,
-            CancellationToken cancellationToken) => Task.CompletedTask;
+            CancellationToken cancellationToken) => Task.FromResult<SandboxClientWindow?>(null);
+
+        public SandboxClientWindow ResolveClient(SandboxClientWindow? remembered) =>
+            throw new NotSupportedException("These tests never capture the target's desktop.");
     }
 
     /// <summary>MSTest injects this; used for per-test cancellation.</summary>

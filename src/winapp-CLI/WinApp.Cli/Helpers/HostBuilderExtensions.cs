@@ -177,6 +177,10 @@ internal static class StoreHostBuilderExtensions
                 .UseCommandHandler<TargetExecCommand, TargetExecCommand.Handler>()
                 .UseCommandHandler<TargetPushCommand, TargetPushCommand.Handler>()
                 .UseCommandHandler<TargetPullCommand, TargetPullCommand.Handler>()
+                // Execution-target diagnostics and host-side capture
+                .UseCommandHandler<TargetSnapshotCommand, TargetSnapshotCommand.Handler>()
+                .UseCommandHandler<TargetScreenshotCommand, TargetScreenshotCommand.Handler>()
+                .UseCommandHandler<TargetRecordCommand, TargetRecordCommand.Handler>()
                 .ConfigureCommand<CompleteCommand>();
     }
 

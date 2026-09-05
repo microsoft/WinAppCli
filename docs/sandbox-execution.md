@@ -296,6 +296,38 @@ that failed.
 Transfers restart rather than resume. The result the command prints reports your path, not the guest
 staging path it was actually written to.
 
+### Seeing the whole Sandbox
+
+`ui` verbs answer questions about one application. When you need to know what the *Sandbox* is doing —
+because a command failed, an installer put up a dialog nobody named, or the app never appeared at all —
+three `target` verbs describe and capture the desktop as a whole:
+
+```powershell
+winapp target snapshot sandbox
+winapp target screenshot sandbox -o .\sandbox.png
+winapp target record sandbox -o .\sandbox.mp4 --duration-sec 20
+```
+
+These are the mirror image of the `ui` verbs. A `ui` capture is performed by guest winapp and returns
+one application's window; a `target` capture is performed on the **host**, against the Sandbox client
+window itself, and returns the entire rendered guest desktop — shell, dialogs, and anything that
+appeared before it could be named. Nothing is staged in the guest and nothing is transferred back,
+because the pixels were on your machine the whole time.
+
+The client window winapp parked off-screen is captured where it is. No window is activated and no
+focus is taken, so a Sandbox capture cannot interrupt what you are doing, exactly like every other
+Sandbox workflow. `winapp target snapshot` goes further and never reconnects the client at all, so
+reporting the Sandbox's state can never change it.
+
+winapp captures only the client window it knows it created or adopted, identified by handle, process
+ID, and process start time together, and remembers it across invocations. Windows can leave extra
+`WindowsSandboxRemoteSession` processes behind, so when more than one is running and none is provably
+winapp's, these verbs fail with `sandbox_target_ambiguous` and name the candidate process IDs instead
+of capturing a window that may belong to something else.
+
+See [`target snapshot`](usage.md#target-snapshot), [`target screenshot`](usage.md#target-screenshot),
+and [`target record`](usage.md#target-record) for the full options.
+
 ## Requirements
 
 - Windows 11 24H2 or newer, on a supported edition
@@ -657,7 +689,7 @@ Windows Sandbox is the only public target. Internally it sits behind a narrow bo
 Hyper-V, Dev Box, or remote-machine target can reuse everything above it without a rewrite.
 
 ```text
-run / ui / unregister / target exec / target push
+run / ui / unregister / target exec / target push / target snapshot / target screenshot / target record
         │
         ▼
 ExecutionTargetOrchestrator      probe → connect (locked) → negotiate → lock (only if mutating)
@@ -679,6 +711,13 @@ UI forwarding, and artifact handling sit above the boundary and never reference 
 or IDs. That separation is enforced by tests rather than convention: the orchestration test suite
 runs the real host channel against the real guest server over an in-memory transport, so any
 dependency on a `wsb` command would make those tests impossible to run.
+
+Host-side capture keeps the same boundary. Which window on this machine renders a guest desktop is a
+fact only a provider can know, so the backend answers it and the orchestrator exposes one narrow
+result — a window handle and the process behind it. `target screenshot` and `target record` consume
+that and then reuse the same host screenshot and recording services `winapp ui` uses; they contain no
+Sandbox knowledge and no capture code of their own. A target that renders nowhere on this machine
+simply does not answer, and the verbs report that instead of failing obscurely.
 
 `wsb exec` is used for exactly two things — launching the agent and enabling the guest development
 prerequisite — because it takes the command as a

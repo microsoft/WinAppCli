@@ -1232,11 +1232,11 @@ winapp get-winapp-path [options]
 
 ### target
 
-Run commands and copy files on an execution target. These are escape hatches: reach for them when you need to prepare a dependency, inspect state, or diagnose something `winapp run --on <target>` cannot resolve on its own.
+Run commands, copy files, and see what is happening on an execution target. These are escape hatches: reach for them when you need to prepare a dependency, inspect state, or diagnose something `winapp run --on <target>` cannot resolve on its own.
 
 Every verb takes the target as its first argument. `sandbox` is the only target these verbs accept today; see [Windows Sandbox execution](sandbox-execution.md) for what it is and how it is prepared.
 
-All three start, reuse, or take over the one Sandbox Windows allows, installing the Sandbox prerequisites first if the machine needs them. None ever stops a Sandbox — ending one stays with the Windows Sandbox CLI (`wsb`).
+They all start, reuse, or take over the one Sandbox Windows allows, installing the Sandbox prerequisites first if the machine needs them. None ever stops a Sandbox — ending one stays with the Windows Sandbox CLI (`wsb`).
 
 > [!NOTE]
 > `--on`, `winapp target`, and Windows Sandbox execution are in development and are not available
@@ -1302,6 +1302,80 @@ winapp target exec sandbox --cwd C:\WinApp\work\Setup -- powershell -ExecutionPo
 - Skips files whose content already matches, compared by hash rather than timestamp.
 - Replaces changed files atomically, after verifying size and hash. An interrupted copy never publishes a partial file over one that was correct.
 - Does not expose arbitrary mapped host folders to target applications.
+
+#### target snapshot
+
+Report what the target looks like right now, in one command.
+
+```bash
+winapp target snapshot <target> [--json]
+```
+
+Answers the question worth asking before deciding what to do next: is the target up, can it take input, what did winapp deploy there, and what is on its desktop.
+
+```bash
+winapp target snapshot sandbox
+# sandbox: reused, x64, epoch 3f2a...
+#   Input: real input yes, screen capture yes, interactive desktop yes
+#   Desktop: HWND 984156 (WindowsSandboxRemoteSession, PID 24160)
+#   Deployments: 1
+#     Contoso.App_1.0.0.0_x64__8wekyb3d8bbwe
+#   Windows: 7
+#     HWND 197326 Contoso.App (PID 5104) 1280x720 [foreground] "Contoso"
+```
+
+**Behavior:**
+
+- Writes only to stdout. It creates no files, embeds no image data, and changes nothing on the target — including the desktop, which it never reconnects or brings to the foreground.
+- Lists at most 50 top-level guest windows, foreground first then largest, and always reports the true total so a truncated list is never mistaken for the whole desktop.
+- Reports the host window the guest desktop is drawn into, which is what `target screenshot` and `target record` capture. A target that renders nowhere on this machine says so and the rest of the report still arrives.
+- If the guest cannot report its windows, the readiness, capability, and deployment facts that explain why are still reported rather than the whole command failing.
+- Deployments are filtered to the current epoch, because a record from a previous Sandbox describes files and a registration that no longer exist.
+
+#### target screenshot
+
+Capture the target's entire desktop as a PNG on this machine.
+
+```bash
+winapp target screenshot <target> -o <host-path> [--json]
+```
+
+```bash
+winapp target screenshot sandbox -o .\sandbox.png
+# Screenshot saved: C:\work\sandbox.png (2738x1146)
+```
+
+The difference from `winapp ui screenshot --on <target>` is *what* is captured, not where the file lands: that routes into the guest and captures one application's window, while this captures the guest desktop as it is being drawn — the shell, dialogs owned by no app winapp deployed, and anything on screen before it could be named. That is the picture worth having when a command failed and nobody knows why.
+
+**Behavior:**
+
+- Needs no application, window, or element selector. There is nothing to name and nothing to get wrong.
+- Writes the PNG to a path on **this machine**, not on the target.
+- Activates nothing and takes no focus, so it is safe to run while you are using your own desktop. The Sandbox's client window is captured where winapp parked it, off-screen.
+- `--json` reports the absolute host path, the pixel dimensions, and the target and epoch the image came from.
+
+#### target record
+
+Record the target's entire desktop to an H.264 MP4 on this machine.
+
+```bash
+winapp target record <target> -o <host-path> [--duration-sec <n>] [--fps <n>] [--max-edge <px>] [--frames] [--json]
+```
+
+```bash
+winapp target record sandbox -o .\sandbox.mp4 --duration-sec 20 --fps 15
+```
+
+Same capture as `target screenshot`, over time. Options, cadence, frame artifacts, partial-output handling, and JSON shape are those of [`ui record`](#ui-record) — this verb only changes what is recorded, from one named application to the whole guest desktop.
+
+**Behavior:**
+
+- Prefer `--duration-sec`. Without it the recording runs until Ctrl+C or a newline on redirected stdin, which is not something an unattended script or an agent can rely on.
+- Holds the target prepared for the whole take, so another `winapp` invocation cannot reconnect the Sandbox client out from under the recording.
+- An interrupted recording still publishes what it captured, exactly as `ui record` does.
+- `--frames` writes the same timestamped JPEGs, `frames.ndjson`, and `manifest.json` sidecar next to the MP4.
+
+**When the desktop cannot be captured:** all three verbs report the reason rather than guessing. If the Sandbox has no connected client, they fail with `sandbox_no_interactive_session`. If more than one remote-session window is running and none of them is provably the one winapp manages, they fail with `sandbox_target_ambiguous` and name the candidate process IDs — parking, capturing, or recording a window that might belong to someone else's Sandbox is worse than stopping.
 
 ---
 

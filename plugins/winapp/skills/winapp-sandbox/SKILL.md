@@ -51,6 +51,28 @@ winapp ui record --on sandbox -a MyApp --duration-sec 5 -o .\demo.mp4
 `-o` lands at the host path given. The file is verified against the size and hash the guest reported
 before it is published, so an interrupted transfer never leaves a plausible-looking partial result.
 
+### See the whole Sandbox, not one app
+
+```powershell
+winapp target snapshot sandbox                                    # readiness, deployments, guest windows
+winapp target screenshot sandbox -o .\sandbox.png                 # the entire guest desktop
+winapp target record sandbox -o .\sandbox.mp4 --duration-sec 20   # the entire guest desktop, over time
+```
+
+Reach for these when a `ui` command cannot help because there is nothing to name: the app never
+appeared, an installer put up a dialog, or a command failed and the reason is somewhere on the
+desktop. `ui` verbs capture one application's window from inside the guest; `target` verbs capture the
+whole rendered desktop from the host, so the shell and any unnamed window are included.
+
+Start with `winapp target snapshot sandbox`. It is stdout-only, writes no files, and never reconnects
+the desktop, so it is safe to run before deciding anything. It reports readiness and capabilities, the
+deployments winapp made in this Sandbox generation, and the guest's top-level windows (foreground
+first, capped at 50, with the true total always shown).
+
+Prefer `--duration-sec` on `target record`. Without it the recording runs until Ctrl+C or a newline on
+redirected stdin, which an unattended script cannot supply. Nothing is ever activated or focused, so
+none of these interrupt what the user is doing.
+
 ### Iterate
 
 ```powershell
@@ -196,6 +218,7 @@ off-screen and without stealing focus. If that still leaves no input desktop it 
 | `sandbox_agent_incompatible` | The guest agent needs a newer winapp, or a different winapp version is already running it | `winapp update`. If you upgraded winapp while a Sandbox was running, close the Sandbox so a fresh agent starts |
 | `sandbox_agent_busy` | Eight winapp commands are already using this Sandbox | Wait for one to finish, then retry |
 | `sandbox_runtime_provision_failed` | A runtime the app requires is missing from the Sandbox | The error names it. Publish self-contained, or install it with `winapp target exec sandbox` |
+| `sandbox_target_ambiguous` | On a `target snapshot`/`screenshot`/`record`, more than one Sandbox client window is running and none is provably winapp's | The error names the candidate process IDs. Close the Sandbox windows you do not need, then retry |
 
 Infrastructure failures use codes distinct from your app's exit codes, so "winapp could not run your
 app" is always distinguishable from "your app failed".

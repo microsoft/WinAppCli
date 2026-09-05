@@ -6,6 +6,7 @@ using System.CommandLine.Invocation;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
+using WinApp.Cli.ExecutionTargets.Abstractions;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
 
@@ -54,18 +55,83 @@ internal class UiRecordCommand : Command, IShortDescription
         // Prevents the stdin monitor from racing disposal of its cancellation source.
         private volatile bool _stdinMonitorStopped;
 
+        /// <summary>The console this verb reports through, shared with any derived verb.</summary>
+        protected IAnsiConsole Output => ansiConsole;
+
+        /// <summary>
+        /// What is being recorded, resolved from this verb's own command line.
+        /// </summary>
+        /// <remarks>
+        /// The one thing that differs between recording an app on this desktop and recording an
+        /// execution target's whole desktop. Everything after it — option validation, output paths,
+        /// cadence, frame artifacts, partial-output handling, and the JSON contract — is identical,
+        /// and is shared rather than reimplemented so the two can never drift apart.
+        /// </remarks>
+        protected virtual Task<UiTarget> ResolveSubjectAsync(
+            ParseResult parseResult,
+            CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(parseResult);
+
+            return targetResolver.ResolveAsync(
+                parseResult.GetValue(SharedUiOptions.AppOption),
+                parseResult.GetValue(SharedUiOptions.WindowOption),
+                cancellationToken);
+        }
+
+        /// <summary>Checks that the command line names something to record.</summary>
+        /// <returns>False when it does not, after reporting why.</returns>
+        protected virtual bool TrySelectSubject(ParseResult parseResult, bool json)
+        {
+            ArgumentNullException.ThrowIfNull(parseResult);
+
+            if (!string.IsNullOrWhiteSpace(parseResult.GetValue(SharedUiOptions.AppOption)) ||
+                parseResult.GetValue(SharedUiOptions.WindowOption) is not null)
+            {
+                return true;
+            }
+
+            UiErrors.MissingApp(logger, json);
+            return false;
+        }
+
+        /// <summary>The element whose region to crop to, or null for the whole window.</summary>
+        protected virtual string? ElementSelector(ParseResult parseResult)
+        {
+            ArgumentNullException.ThrowIfNull(parseResult);
+
+            return parseResult.GetValue(SharedUiOptions.SelectorArgument);
+        }
+
+        /// <summary>Whether to capture the screen region rather than the window's own frames.</summary>
+        protected virtual bool CaptureScreen(ParseResult parseResult)
+        {
+            ArgumentNullException.ThrowIfNull(parseResult);
+
+            return parseResult.GetValue(SharedUiOptions.CaptureScreenOption);
+        }
+
+        /// <summary>How the recording is described while it runs.</summary>
+        protected virtual string DescribeSubject(UiTarget uiTarget)
+        {
+            ArgumentNullException.ThrowIfNull(uiTarget);
+
+            return $"\"{uiTarget.WindowTitle ?? ""}\" (PID {uiTarget.ProcessId})";
+        }
+
+        /// <summary>The execution target that produced the recording, or null for this machine.</summary>
+        protected virtual ExecutionTargetScope? Scope => null;
+
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
             var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
             var quiet = parseResult.GetValue(WinAppRootCommand.QuietOption);
-            var selector = parseResult.GetValue(SharedUiOptions.SelectorArgument);
-            var app = parseResult.GetValue(SharedUiOptions.AppOption);
-            var window = parseResult.GetValue(SharedUiOptions.WindowOption);
+            var selector = ElementSelector(parseResult);
             var durationSec = parseResult.GetValue(SharedUiOptions.DurationSecOption);
             var fps = parseResult.GetValue(SharedUiOptions.FpsOption);
             var maxEdge = parseResult.GetValue(SharedUiOptions.MaxEdgeOption);
             var maxEdgeExplicit = parseResult.GetResult(SharedUiOptions.MaxEdgeOption)?.Implicit == false;
-            var captureScreen = parseResult.GetValue(SharedUiOptions.CaptureScreenOption);
+            var captureScreen = CaptureScreen(parseResult);
             var output = parseResult.GetValue(SharedUiOptions.OutputOption);
             var frames = parseResult.GetValue(FramesOption);
 
@@ -116,9 +182,8 @@ internal class UiRecordCommand : Command, IShortDescription
                 }
             }
 
-            if (string.IsNullOrWhiteSpace(app) && window is null)
+            if (!TrySelectSubject(parseResult, json))
             {
-                UiErrors.MissingApp(logger, json);
                 return 1;
             }
 
@@ -176,7 +241,7 @@ internal class UiRecordCommand : Command, IShortDescription
                     return 1;
                 }
 
-                var uiTarget = await targetResolver.ResolveAsync(app, window, cancellationToken);
+                var uiTarget = await ResolveSubjectAsync(parseResult, cancellationToken);
 
                 var isStdinRedirected = s_isInputRedirectedOverride?.Invoke() ?? Console.IsInputRedirected;
 
@@ -188,7 +253,7 @@ internal class UiRecordCommand : Command, IShortDescription
                     var destinations = framesDirectory is null
                         ? filePath
                         : $"{filePath}; frame artifacts: {framesDirectory}";
-                    ansiConsole.MarkupLine($"[grey]Recording \"{Markup.Escape(uiTarget.WindowTitle ?? "")}\" (PID {uiTarget.ProcessId}) to {Markup.Escape(destinations)} — until {until}, {fps} fps…[/]");
+                    ansiConsole.MarkupLine($"[grey]Recording {Markup.Escape(DescribeSubject(uiTarget))} to {Markup.Escape(destinations)} — until {until}, {fps} fps…[/]");
                 }
 
                 // Stops received before the first frame wait for encoder readiness.
@@ -252,6 +317,7 @@ internal class UiRecordCommand : Command, IShortDescription
                         StopReason = result.StopReason,
                         FrameArtifacts = result.FrameArtifacts,
                         Warnings = result.Warnings,
+                        ExecutionTarget = Scope,
                     };
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(payload, UiJsonContext.Default.UiRecordResult));

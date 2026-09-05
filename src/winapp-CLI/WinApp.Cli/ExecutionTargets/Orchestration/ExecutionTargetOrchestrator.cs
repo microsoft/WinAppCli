@@ -152,6 +152,33 @@ internal sealed class ExecutionTargetOrchestrator(
     internal static readonly TimeSpan LockTimeout = TimeSpan.FromMinutes(10);
 
     /// <summary>
+    /// Resolves the window on this machine that the target's whole desktop is drawn into.
+    /// </summary>
+    /// <remarks>
+    /// The only route from a command to a target's rendered desktop, and deliberately a thin one:
+    /// which window belongs to which target is a fact only the backend can establish, and a backend
+    /// that renders nothing here says so rather than being asked to invent an answer.
+    /// </remarks>
+    /// <exception cref="ExecutionTargetException">
+    /// This target does not render on this machine, or its client window cannot be identified.
+    /// </exception>
+    public TargetDesktopSurface ResolveDesktopSurface()
+    {
+        if (backend is not IHostRenderedTarget rendered)
+        {
+            throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.Unsupported,
+                $"The '{Target.Selector}' target does not draw a desktop on this machine, so it cannot be captured.",
+                userAction:
+                    "Capture from inside the target instead, with 'winapp ui screenshot --on " +
+                    $"{Target.Selector}' or 'winapp ui record --on {Target.Selector}'.",
+                example: $"winapp ui screenshot -a MyApp --on {Target.Selector} -o .\\shot.png");
+        }
+
+        return rendered.ResolveDesktopSurface();
+    }
+
+    /// <summary>
     /// Cheaply checks that this host can use the target at all, before any build or mutation.
     /// </summary>
     /// <exception cref="ExecutionTargetException">The target is not usable on this host.</exception>

@@ -36,7 +36,7 @@ internal sealed class WindowsSandboxBackend(
     IHostWinappBinaryProvider hostBinaryProvider,
     IWindowsSandboxWindowController windowController,
     IWindowsSandboxSetup? setup = null,
-    ITargetStateStore? stateStore = null) : IExecutionTargetBackend
+    ITargetStateStore? stateStore = null) : IExecutionTargetBackend, IHostRenderedTarget
 {
     /// <summary>Guest path prefix the read-only bootstrap folder is mapped under.</summary>
     /// <remarks>
@@ -124,6 +124,7 @@ internal sealed class WindowsSandboxBackend(
     private string? _instanceId;
     private string? _guestAddress;
     private bool _adopted;
+    private SandboxClientWindow? _client;
     private GuestBootstrapMaterial? _activeMaterial;
 
     /// <summary>The host and guest paths one generation's bootstrap share is mapped through.</summary>
@@ -521,7 +522,9 @@ internal sealed class WindowsSandboxBackend(
             var bootstrapChanged = !string.Equals(
                 state.BootstrappedEpoch, lease.Epoch.Value, StringComparison.Ordinal);
 
-            if (!addressChanged && !bootstrapChanged)
+            var clientChanged = _client is not null && ReadClient(state) != _client;
+
+            if (!addressChanged && !bootstrapChanged && !clientChanged)
             {
                 return;
             }
@@ -532,12 +535,108 @@ internal sealed class WindowsSandboxBackend(
                 {
                     GuestAddress = addressChanged ? address : state.GuestAddress,
                     BootstrappedEpoch = lease.Epoch.Value,
+                    ClientWindowHandle = clientChanged ? _client!.Handle : state.ClientWindowHandle,
+                    ClientProcessId = clientChanged ? _client!.ProcessId : state.ClientProcessId,
+                    ClientProcessStartTicksUtc =
+                        clientChanged ? _client!.StartTicksUtc : state.ClientProcessStartTicksUtc,
                 },
                 state.Revision);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ExecutionTargetException)
         {
             // A stale or contended state file costs a re-bootstrap next time, nothing more.
+        }
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// The recorded client is only a hint. It is offered to the controller, which uses it only while
+    /// that exact window is still open, so a handle persisted by an earlier winapp process can never
+    /// resolve against whatever owns that number now. When there is no usable record — an adopted
+    /// Sandbox, or state written before this was recorded — the controller adopts the single open
+    /// client and this remembers it, so the next command in this run agrees with this one.
+    /// </remarks>
+    public TargetDesktopSurface ResolveDesktopSurface()
+    {
+        var remembered = _client ?? TryReadPersistedClient();
+        var client = windowController.ResolveClient(remembered);
+
+        if (client != _client)
+        {
+            _client = client;
+            RememberClientWindow(client);
+        }
+
+        return new TargetDesktopSurface(
+            client.Handle,
+            client.ProcessId,
+            WindowsSandboxWindowController.RemoteSessionProcessName,
+            Adopted: client != remembered);
+    }
+
+    /// <summary>The client window recorded for this instance, when it is still the same one.</summary>
+    private SandboxClientWindow? TryReadPersistedClient()
+    {
+        try
+        {
+            var state = stateStore?.Read(Target);
+
+            return _instanceId is not null &&
+                string.Equals(state?.InstanceId, _instanceId, StringComparison.OrdinalIgnoreCase)
+                ? ReadClient(state!)
+                : null;
+        }
+        catch (Exception ex) when (
+            ex is IOException or UnauthorizedAccessException or ExecutionTargetException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The persisted client triple, or null when any part of it is missing.</summary>
+    private static SandboxClientWindow? ReadClient(TargetState state) =>
+        state is { ClientWindowHandle: { } handle, ClientProcessId: { } pid, ClientProcessStartTicksUtc: { } ticks }
+            ? new SandboxClientWindow((nint)handle, pid, ticks)
+            : null;
+
+    /// <summary>
+    /// Records an adopted client window, best effort.
+    /// </summary>
+    /// <remarks>
+    /// Never fatal: losing it only means the next command re-adopts the same single open window, and
+    /// failing a capture that already succeeded over a contended state file would be worse.
+    /// </remarks>
+    private void RememberClientWindow(SandboxClientWindow client)
+    {
+        if (stateStore is null || _instanceId is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var state = stateStore.Read(Target);
+
+            if (state is null ||
+                !string.Equals(state.InstanceId, _instanceId, StringComparison.OrdinalIgnoreCase) ||
+                ReadClient(state) == client)
+            {
+                return;
+            }
+
+            stateStore.Commit(
+                Target,
+                state with
+                {
+                    ClientWindowHandle = client.Handle,
+                    ClientProcessId = client.ProcessId,
+                    ClientProcessStartTicksUtc = client.StartTicksUtc,
+                },
+                state.Revision);
+        }
+        catch (Exception ex) when (
+            ex is IOException or UnauthorizedAccessException or ExecutionTargetException)
+        {
         }
     }
 
@@ -1001,7 +1100,7 @@ internal sealed class WindowsSandboxBackend(
     {
         var windowSnapshot = windowController.Capture();
         await cli.ConnectAsync(instanceId, cancellationToken).ConfigureAwait(false);
-        await windowController
+        _client = await windowController
             .PlaceConnectedClientAsync(windowSnapshot, cancellationToken)
             .ConfigureAwait(false);
     }

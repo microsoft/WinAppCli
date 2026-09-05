@@ -34,7 +34,10 @@ internal class TargetCommand : Command, IShortDescription
     public TargetCommand(
         TargetExecCommand execCommand,
         TargetPushCommand pushCommand,
-        TargetPullCommand pullCommand)
+        TargetPullCommand pullCommand,
+        TargetSnapshotCommand snapshotCommand,
+        TargetScreenshotCommand screenshotCommand,
+        TargetRecordCommand recordCommand)
         : base(
             "target",
             "Run commands and copy files on an execution target such as the Windows Sandbox winapp manages. " +
@@ -43,6 +46,9 @@ internal class TargetCommand : Command, IShortDescription
         Subcommands.Add(execCommand);
         Subcommands.Add(pushCommand);
         Subcommands.Add(pullCommand);
+        Subcommands.Add(snapshotCommand);
+        Subcommands.Add(screenshotCommand);
+        Subcommands.Add(recordCommand);
     }
 }
 
@@ -476,6 +482,7 @@ internal sealed class TargetErrorOutput
 
 /// <summary>Source-generated serializer context for <c>target</c> command output.</summary>
 [JsonSerializable(typeof(TargetTransferOutput))]
+[JsonSerializable(typeof(TargetSnapshotOutput))]
 [JsonSerializable(typeof(TargetErrorOutput))]
 [JsonSourceGenerationOptions(
     WriteIndented = true,

@@ -98,6 +98,35 @@ public class TargetStateStoreTests
         Assert.AreEqual(ExecutionTargetRef.SandboxKind, read.TargetKind);
     }
 
+    /// <summary>
+    /// The client window winapp parked has to survive the process that parked it, because every
+    /// winapp invocation builds a fresh backend and a capture minutes later must still know which
+    /// window on this machine is the one it manages.
+    /// </summary>
+    [TestMethod]
+    public void ReadAfterCommit_RoundTripsTheManagedClientWindow()
+    {
+        _store.Commit(
+            _target,
+            NewState() with
+            {
+                ClientWindowHandle = 0x2A2A,
+                ClientProcessId = 4242,
+                ClientProcessStartTicksUtc = 638_000_000_000_000_000,
+            },
+            expectedRevision: 0);
+
+        var read = _store.Read(_target);
+
+        Assert.IsNotNull(read);
+        Assert.AreEqual(0x2A2A, read.ClientWindowHandle);
+        Assert.AreEqual(4242, read.ClientProcessId);
+
+        // The start time is what distinguishes this window from whatever owns that handle and
+        // process ID after Windows recycles them.
+        Assert.AreEqual(638_000_000_000_000_000, read.ClientProcessStartTicksUtc);
+    }
+
     [TestMethod]
     public void Commit_IncrementsRevisionMonotonically()
     {

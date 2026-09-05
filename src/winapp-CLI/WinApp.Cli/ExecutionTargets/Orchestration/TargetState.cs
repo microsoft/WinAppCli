@@ -99,6 +99,27 @@ internal sealed record TargetState
     /// </remarks>
     public string? GuestAddress { get; init; }
 
+    /// <summary>
+    /// Host window handle of the Sandbox client winapp recorded connecting, or null.
+    /// </summary>
+    /// <remarks>
+    /// Recorded so a later winapp process can capture the desktop this target renders into without
+    /// having to guess. A handle alone would not be safe to trust across processes — Windows recycles
+    /// them — so it is only ever used together with <see cref="ClientProcessId"/> and
+    /// <see cref="ClientProcessStartTicksUtc"/>, and only when that exact triple is still one of the
+    /// client windows open right now.
+    /// </remarks>
+    public long? ClientWindowHandle { get; init; }
+
+    /// <summary>Host process that owns <see cref="ClientWindowHandle"/>, or null.</summary>
+    public int? ClientProcessId { get; init; }
+
+    /// <summary>
+    /// UTC ticks that client process started, 0 when Windows would not report it, or null when
+    /// there is no recorded client.
+    /// </summary>
+    public long? ClientProcessStartTicksUtc { get; init; }
+
     /// <summary>UTC timestamp of the last commit, for diagnostics only.</summary>
     public DateTimeOffset? UpdatedUtc { get; init; }
 }
