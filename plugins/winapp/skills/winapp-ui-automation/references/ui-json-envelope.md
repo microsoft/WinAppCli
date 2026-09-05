@@ -85,3 +85,66 @@ like a label inside a button).
 The internal `id`, `parentSelector`, and `windowHandle` fields are
 **scrubbed** from results — both at the top level and inside any nested
 `invokableAncestor`. Don't depend on them; use `selector` as the handle.
+
+## Error envelope
+
+Every `winapp ui` command writes errors to **stderr** as:
+
+```json
+{
+  "error": {
+    "code": "element_not_found",
+    "message": "…",
+    "selector": "btn-save-c3d4",
+    "details": "…",
+    "recoveryHint": "…"
+  }
+}
+```
+
+Only `code` and `message` are always present; the rest are omitted when
+they do not apply.
+
+### Desktop coordination
+
+Concurrent `winapp ui` workflows take cooperative turns on the shared
+desktop (see the skill's coordination section). Four additional codes can
+appear:
+
+| `code` | Meaning |
+|---|---|
+| `invalid_ui_workflow_id` | `WINAPP_UI_WORKFLOW_ID` is set but empty/whitespace or longer than 256 characters. Fails before any UI side effect. |
+| `desktop_coordination_unavailable` | Coordination state could not be read, published, or safely rebuilt — including state written by a newer `winapp`. Mutating commands fail closed rather than acting uncoordinated. |
+| `queue_capacity_exceeded` | 64 commands from other workflows are already waiting for the desktop. Counts live foreign waiters, so entries left by commands that exited or were killed do not occupy a slot. |
+| `cancelled` | Native Ctrl+C while the command was still waiting for its turn. The command never ran, so it has no UI side effects. Exit code **130**. |
+
+An npm `AbortSignal` is a different contract: Node force-terminates the child,
+so there is usually no envelope and no exit code 130 — the wrapper rejects with
+an `AbortError` instead, and UI side effects may already have happened if the
+abort landed after the command acquired the desktop.
+
+`cancelled` — and optionally the other coordination errors — carries an
+additive `coordination` object:
+
+```json
+{
+  "error": {
+    "code": "cancelled",
+    "message": "UI turn wait was cancelled.",
+    "coordination": {
+      "waitedMs": 1234,
+      "queuePosition": 2
+    }
+  }
+}
+```
+
+`waitedMs` is always present for a cancellation while queued.
+`queuePosition` is one-based among live waiters and is **omitted** when it
+cannot be computed reliably — including while a command waits behind its
+own workflow's earlier command. Workflow identities are never exposed, in
+raw or hashed form.
+
+Cancelling *after* the command acquired its turn keeps that command's
+existing behavior; for example Ctrl+C during `ui record` still finalizes
+the recording and returns its normal successful result.

@@ -75,6 +75,20 @@ Want to inspect or interact with a running app's UI?
 ├─ Inject pen/stylus ink stroke or tap → winapp ui pen <selector> -a <appname> --path "10,10 200,200"
 └─ List app windows → winapp ui list-windows -a <appname> [--show-hidden]
 
+Driving a UI while other workflows may be running?
+├─ Turn-taking is ALWAYS on — no setup needed, and two agents can never type into each other's
+│  windows
+├─ Set $env:WINAPP_UI_WORKFLOW_ID once per logical workflow and inject the SAME value into every
+│  cooperating call — that is what keeps the desktop across commands. Without it each call is a
+│  one-shot that releases the desktop immediately (each tool call usually gets a fresh shell, and
+│  there is no process-ancestry fallback)
+├─ A workflow with an id keeps the desktop for 4s after its last command; that covers a tight
+│  script but intentionally expires while you reason
+├─ `ui record` shares its turn only with the SAME workflow id — a no-id recording blocks everyone
+│  else for its whole duration
+└─ After a reasoning gap, reopen/re-navigate and re-resolve before acting — another workflow may
+   have used the desktop, so transient UI (menus, flyouts) is gone
+
 Building a WinUI 3 UI and need to find the right control or a working sample?
 └─ winapp find-ui "<what you want>"   (search WinUI 3 Gallery + Community Toolkit; Reactor is opt-in via --source reactor)
    ├─ Then fetch full code for a match → winapp find-ui --id <scenario-id>

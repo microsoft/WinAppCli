@@ -13,7 +13,7 @@ Uses Windows UI Automation (UIA). Works with any Windows app — WPF, WinForms, 
 Most commands drive the app through UIA patterns (no input injection). The exceptions inject real input: `ui click`/`ui hover`/`ui drag` use mouse simulation, `ui touch`/`ui pen` synthesize touch and pen/stylus input, and `ui send-keys` synthesizes keyboard input — for controls and scenarios that UIA patterns can't drive.
 
 > [!IMPORTANT]
-> **Interactive-desktop requirement (input-injecting verbs).** `click`, `hover`, `drag`, `touch`, `pen`, `scroll --wheel`, and `send-keys --via send-input` synthesize OS-level input, so they need an **unlocked, interactive desktop** with the target window in the foreground. On a **locked workstation or secure desktop** (LogonUI/UAC) they can't inject and fail fast with **`no_interactive_desktop`** (distinct from the elevation/`foreground_not_target` cases). `touch`/`pen` additionally refuse when no window resolves (**`no_target`**); a coordinate outside the target window is a **non-fatal warning** (a `warnings[]` entry under `--json`, or a warning line in text mode) and injection still proceeds — consistent with the mouse verbs. Everything else — `inspect`, `search`, `get-property`, `get-value`, `wait-for`, `set-value`, `invoke`, `scroll --direction/--to`, `screenshot` — drives the app through UIA patterns and is **headless/locked-session friendly**. Prefer the UIA-pattern verbs in CI; reserve the injection verbs for scenarios that genuinely need real input. Before injecting, the gesture verbs also **re-resolve the target element** and refuse with **`target_moved`** if it's still animating/relocating, rather than landing input on empty space.
+> **Interactive-desktop requirement (input-injecting verbs).** `click`, `hover`, `drag`, `touch`, `pen`, `scroll --wheel`, and `send-keys --via send-input` synthesize OS-level input, so they need an **unlocked, interactive desktop** with the target window in the foreground. On a **locked workstation or secure desktop** (LogonUI/UAC) they can't inject and fail fast with **`no_interactive_desktop`** (distinct from the elevation/`foreground_not_target` cases). `touch`/`pen` additionally refuse when no window resolves (**`no_target`**); a coordinate outside the target window is a **non-fatal warning** (a `warnings[]` entry under `--json`, or a warning line in text mode) and injection still proceeds — consistent with the mouse verbs. Everything else — `inspect`, `search`, `get-property`, `get-value`, `wait-for`, `set-value`, `invoke`, `scroll --direction/--to` — drives the app through UIA patterns and is **headless/locked-session friendly**. `screenshot` is the exception among the non-injecting verbs: it takes an exclusive turn and its capture can need a usable interactive desktop, because the engine restores a minimized target and falls back to foregrounding it when frame capture is unavailable or `--capture-screen` is used. Prefer the UIA-pattern verbs in CI; reserve the injection verbs for scenarios that genuinely need real input. Before injecting, the gesture verbs also **re-resolve the target element** and refuse with **`target_moved`** if it's still animating/relocating, rather than landing input on empty space.
 
 ## Quick Start
 
@@ -30,6 +30,94 @@ winapp ui invoke Close -a notepad
 # Take a screenshot
 winapp ui screenshot -a notepad
 ```
+
+## Coordinating concurrent UI workflows
+
+Windows has only one foreground window, one keyboard focus, one cursor, and one input stream. When
+two `winapp ui` workflows run on the same signed-in desktop at once, they can steal focus from each
+other, dismiss a menu the other just opened, or move a target out from under a pending click.
+
+**Arbitration is always on.** Every `winapp ui` command that touches the physical desktop takes a
+turn, with no setup and no way to switch it off, so two agents can never type into each other's
+windows. Read-only commands keep running concurrently.
+
+**Continuity between commands is opt-in.** By default each command is a self-contained one-shot: it
+waits its turn, does its work, and releases the desktop immediately. To keep the desktop across
+several commands, give them all the same workflow id:
+
+```powershell
+# Set once per logical UI workflow
+$env:WINAPP_UI_WORKFLOW_ID = [guid]::NewGuid().ToString()
+```
+
+What you need to know:
+
+- **A workflow id names one logical workflow** — not necessarily a whole agent, and not necessarily
+  one app. Use the *same* value for cooperating commands (a recording plus the clicks it should
+  capture); use *different* values for independent workflows, even when one agent launches both.
+- **With no id, every command is an independent one-shot.** It still arbitrates, but it banks no
+  grace and hands the desktop off the moment it finishes. Two no-id commands are separate workflows
+  even when launched from the same shell.
+- **Fresh-shell and adaptive hosts must inject the same value.** If each command runs in a new shell
+  — which is how most agent tool calls work — the only thing that can group them is an explicit
+  `WINAPP_UI_WORKFLOW_ID` passed into every cooperating call.
+- **The four-second grace protects tight bursts, not model reasoning.** A workflow with an id keeps
+  its turn as long as the next command starts within four seconds. That covers back-to-back commands
+  in one script; it intentionally expires while a model is thinking.
+- **Adaptive workflows must reacquire, revalidate, and replay.** After a reasoning gap another
+  workflow may have used the desktop, so reopen the menu, re-resolve the element, and then act.
+  Send known end-to-end sequences as one tight script rather than holding the desktop while you think.
+- **Ordering is owner affinity first, then FIFO among the others.** While a workflow is active or
+  inside its grace it may keep issuing commands, even if other workflows are already waiting. Once it
+  yields or its grace expires, waiting workflows are served in strict arrival order. Continuous
+  activity by one workflow can therefore delay others indefinitely.
+- **There is no hard cap.** A long script, an unbounded recording, or a failure loop can block other
+  mutating workflows.
+- **Cancellation or process termination is the recovery** for a stuck live workflow. Waiting commands
+  print a status after one second and can be stopped with `Ctrl+C`, which exits `130`.
+- **Only compatible updated binaries cooperate.** Older `winapp` builds predate this feature and are
+  not coordinated. Code calling the UI Automation NuGet packages directly is outside this guarantee
+  entirely — coordination lives in the CLI, not in the packages.
+
+Which commands wait for a turn:
+
+| Behavior | Commands |
+|---|---|
+| Runs concurrently (never waits) | `status`, `list-windows`, `inspect`, `search`, `get-property`, `get-value`, `get-focused`, `wait-for`, `set-value`, `scroll-into-view`, `scroll --direction`/`--to` |
+| Claims the turn, shares it with the same workflow | `record` |
+| Claims the turn and takes the desktop exclusively | `invoke`, `click`, `drag`, `hover`, `scroll --wheel`, `touch`, `pen`, `focus`, `send-keys`, `screenshot` |
+
+`screenshot` always queues for an exclusive turn. Not every capture disturbs the desktop — an
+ordinary visible window captured through Windows Graphics Capture does not — but the engine restores
+the target if it is minimized, and falls back to foregrounding it when frame capture is unavailable
+or `--capture-screen` reads the live screen. Those needs only surface once capture is under way, so
+the command takes the turn up front rather than guessing. When it composites several windows it
+captures them all under one exclusive turn, so the saved image is a single consistent moment rather
+than a mix of before and after. Encoding and writing the file happen after the desktop is released.
+
+`record` shares its turn, so same-workflow input can interleave with the capture — that is how you
+record a workflow driving an app. Two caveats:
+
+- A `record` with **no** workflow id is a one-shot owner, so it blocks every other workflow for its
+  whole duration. To record and click at the same time, give both commands the same
+  `WINAPP_UI_WORKFLOW_ID`.
+- On a host without frame-capture support, recording falls back to PrintWindow, whose blank-frame
+  recovery can foreground the window at any moment. There the desktop is held for the **entire**
+  recording and the command says so in its output; even same-workflow input will wait.
+
+Errors you may see: `invalid_ui_workflow_id` (the variable is set but empty or over 256 characters),
+`desktop_coordination_unavailable` (coordination state is unreadable and cannot be safely rebuilt, or
+was written by a newer `winapp`), `queue_capacity_exceeded` (64 commands from **other** workflows are
+already waiting — the limit counts live foreign waiters, not processes you have started, so entries
+belonging to commands that have exited or been killed do not occupy a slot, and your own workflow's
+commands queue behind each other rather than against this limit), and `cancelled` (Ctrl+C while
+waiting, exit code `130`).
+
+A waiting command is woken by whoever releases the desktop rather than by polling for it, so a queue
+costs almost nothing while it waits and handoff is immediate. Each waiter also rechecks on its own
+occasionally, which is what recovers the desktop when a process is killed and never publishes
+anything: the command at the head of the queue looks every half second, and commands behind it —
+which cannot run before the head does anyway — every few seconds.
 
 ## Targeting Apps
 
@@ -240,6 +328,8 @@ When dialogs or popups are open, all windows are composited into one PNG so you 
 The default capture path uses **Windows.Graphics.Capture (WGC)**, reading the actual DWM-composited surface — preserving rounded corners, transparency, and working even while the window is occluded by other windows. If WGC is unavailable (older Windows builds) the CLI falls back to **PrintWindow**.
 
 Use `--capture-screen` when you need to capture popup menus, dropdowns, flyouts, or tooltip overlays that aren't owned by the target window. `--capture-screen` reads from the screen DC and brings the window to the foreground first. Use `--focus` if you just want to foreground the window without switching capture modes (e.g., to ensure the screenshot matches what the user is currently looking at).
+
+> Because the screen DC captures whatever is actually in front, `--capture-screen` **verifies the target reached the foreground immediately before capturing** and fails with **`foreground_not_target`** if it didn't (focus-stealing prevention, a UAC prompt, or another window activating itself). No image is written in that case — previously the command exited 0 and handed back a picture of the wrong window. `ui record --capture-screen` applies the same check before the first frame.
 
 ### record
 Record a window or element region to an H.264 MP4. By default, recording continues until Ctrl+C or, for redirected stdin, a newline or EOF.
@@ -596,6 +686,7 @@ for example `MSTest.Windows.UIAutomation`, whose `WindowTest.MainWindow` is a UI
 | "No UIA window found" | UIA can't see the process | Use `list-windows` to find the HWND, then `-w` |
 | "Window has zero size" | Window is minimized | App will be auto-restored |
 | Popup/dropdown not in screenshot | Default capture is per-window and doesn't include unowned overlays | Use `--capture-screen` flag |
+| `foreground_not_target` from `--capture-screen` | Windows refused the activation, so a screen capture would have recorded whatever window is actually in front | Click the target window or close the focus-stealing window and retry, or drop `--capture-screen` |
 | `element_not_found` during record | Selector given but no matching element | Re-run `inspect` or `search` to get a fresh selector |
 | WGC unavailable during record | WGC capture init failed; no silent fallback | Check GPU/driver; use `--capture-screen` to consent to screen-DC capture |
 

@@ -3,6 +3,13 @@
 Inspect and drive any running Windows desktop app from code — the UI Automation engine behind the
 `winapp ui` commands, packaged as a library.
 
+> **This package does not coordinate with other automation on the desktop.** The `winapp` CLI layers
+> cooperative desktop turns on top of this engine so concurrent `winapp ui` workflows cannot steal
+> each other's focus or dismiss each other's menus. That arbitration lives in the CLI, not here.
+> Code calling these APIs directly does not participate in it: it drives the desktop immediately, so
+> if you run it alongside `winapp ui`, or alongside another copy of itself, you are responsible for
+> serializing the two — or for running on a dedicated interactive desktop, as described below.
+
 ```console
 dotnet add package Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation
 dotnet add package Microsoft.Extensions.DependencyInjection
