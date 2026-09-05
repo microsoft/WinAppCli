@@ -622,9 +622,18 @@ internal partial class MsixService
     /// list (or falls back to a cwd glob) and installs the Windows App Runtime framework packages for
     /// the given architecture. Callers gate on <c>WindowsAppSDKSelfContained</c> before calling.
     /// </summary>
-    public async Task<bool> EnsureWindowsAppRuntimeInstalledAsync(FileInfo? projectFile, string? architecture, string? framework, bool noRestore, TaskContext taskContext, CancellationToken cancellationToken = default)
+    public async Task<bool> EnsureWindowsAppRuntimeInstalledAsync(
+        FileInfo? projectFile,
+        FileInfo? projectAssetsFile,
+        string? architecture,
+        string? framework,
+        bool noRestore,
+        TaskContext taskContext,
+        CancellationToken cancellationToken = default)
     {
-        var packageList = await ResolveDotNetPackageListAsync(projectFile, framework, noRestore, cancellationToken);
+        var packageList = projectAssetsFile is not null
+            ? ReadPackageListFromAssetsFile(projectAssetsFile, framework, architecture)
+            : await ResolveDotNetPackageListAsync(projectFile, framework, noRestore, cancellationToken);
 
         // A framework-dependent app needs the Windows App Runtime only if it actually uses the Windows
         // App SDK. A plain console/desktop Exe doesn't — preparing the runtime for it is wasted work and

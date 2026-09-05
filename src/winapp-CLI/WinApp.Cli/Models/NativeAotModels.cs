@@ -31,6 +31,18 @@ internal sealed record NativeAotRuntimeVerification(
     string? Error = null,
     int? ExitCode = null);
 
+internal sealed record NativeAotToolchainInfo(
+    bool Ready,
+    string HostArchitecture,
+    string TargetArchitecture,
+    string? VsWherePath,
+    string? VisualStudioPath,
+    string? MsvcVersion,
+    string? LinkerPath,
+    string? WindowsSdkVersion,
+    string? WindowsSdkRoot,
+    string? Error = null);
+
 internal sealed class RunVerificationResult
 {
     public bool StaticPayload { get; set; }

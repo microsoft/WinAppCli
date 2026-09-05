@@ -161,4 +161,5 @@ internal sealed record ProjectPreparationOutcome(
     string? Reason = null,
     string? SuggestedCommand = null,
     string? ErrorCode = null,
-    string? Error = null);
+    string? Error = null,
+    NativeAotToolchainInfo? Toolchain = null);

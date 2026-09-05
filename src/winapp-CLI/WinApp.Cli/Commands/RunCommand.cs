@@ -1376,6 +1376,7 @@ internal sealed class ProjectRunCommandResult : RunCommandResult
     public string? MainWindowTitle { get; set; }
     public bool? NativeAotVerified { get; set; }
     public RunVerificationResult? Verification { get; set; }
+    public NativeAotToolchainInfo? Toolchain { get; set; }
     public string? DotnetSdk { get; set; }
     public string? ErrorCode { get; set; }
     public string? Details { get; set; }
@@ -1384,6 +1385,7 @@ internal sealed class ProjectRunCommandResult : RunCommandResult
 [JsonSerializable(typeof(RunCommandResult))]
 [JsonSerializable(typeof(ProjectRunCommandResult))]
 [JsonSerializable(typeof(RunVerificationResult))]
+[JsonSerializable(typeof(NativeAotToolchainInfo))]
 [JsonSourceGenerationOptions(
     WriteIndented = true,
     NewLine = "\n",

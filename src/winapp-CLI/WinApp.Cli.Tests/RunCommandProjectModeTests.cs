@@ -839,6 +839,44 @@ public class RunCommandProjectModeTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task ProjectMode_FrameworkDependentUnpackagedPublishUsesEvaluatedAssetsFile()
+    {
+       var csproj = CreateCsproj();
+       var publishDirectory = CreateTargetDir(withManifest: false);
+       var executable = ChildPath(publishDirectory.FullName, "App.exe");
+       var projectAssetsFile = ChildPath(publishDirectory.FullName, "project.assets.json");
+       File.WriteAllText(executable, "fixture");
+       File.WriteAllText(projectAssetsFile, "{}");
+       _fakeProjectRunService.PreparationOutcome = new ProjectPreparationOutcome(
+           new ProjectRunResolution(
+               csproj,
+               publishDirectory.FullName,
+               executable,
+               ProjectPackaging.Unpackaged,
+               SelfContained: false,
+               Architecture: "arm64",
+               Framework: "net10.0-windows10.0.26100.0",
+               Operation: ProjectPreparationOperation.Publish,
+               PublishDirectory: publishDirectory.FullName,
+               PublishAot: false,
+               RuntimeIdentifier: "win-arm64",
+               SourceExecutable: executable,
+               ProjectAssetsFile: projectAssetsFile),
+           0);
+       var command = GetRequiredService<RunCommand>();
+
+       var exitCode = await ParseAndInvokeWithCaptureAsync(
+           command,
+           [csproj.FullName, "--publish", "--detach"]);
+
+       Assert.AreEqual(0, exitCode);
+       var runtimeCall = _fakeMsixService.EnsureRuntimeInstalledCalls.Single();
+       Assert.AreEqual(projectAssetsFile, runtimeCall.ProjectAssetsFile);
+       Assert.AreEqual("arm64", runtimeCall.Architecture);
+       Assert.AreEqual("net10.0-windows10.0.26100.0", runtimeCall.Framework);
+    }
+
+    [TestMethod]
     public async Task ProjectMode_PublishNoBuild_ForwardsNoBuildWithoutSkippingPublishPreparation()
     {
        var csproj = CreateCsproj();

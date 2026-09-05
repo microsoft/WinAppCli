@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Text.Json;
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Spectre.Console;
@@ -121,6 +122,37 @@ public sealed class ProjectPublishServiceTests
         Assert.AreEqual("Custom", outcome.Resolution.PublishProfile);
         Assert.AreEqual(1, dotnet.ArgumentListInvocations.Count, "The publish pass should execute exactly once.");
         CollectionAssert.Contains(dotnet.ArgumentListInvocations[0].ToArray(), "-p:PublishProfile=Custom");
+    }
+
+    [TestMethod]
+    public async Task PreparePublish_WithoutAppHost_LaunchesManagedAssemblyWithDotnetExec()
+    {
+        var publishDirectory = _tempDirectory.CreateSubdirectory("publish");
+        var managedAssembly = ChildPath(publishDirectory.FullName, "App.dll");
+        File.WriteAllText(managedAssembly, "managed fixture");
+        var properties = UnpackagedProperties(publishDirectory.FullName, publishAot: false);
+        var (service, _) = CreateService(properties);
+        var options = new ProjectRunOptions(
+            "Release",
+            "x64",
+            null,
+            NoBuild: false,
+            NoRestore: true,
+            Properties: []);
+
+        var outcome = await service.PrepareAndResolveAsync(
+            _project,
+            options,
+            ProjectPreparationOperation.Publish,
+            CancellationToken.None);
+
+        Assert.AreEqual(0, outcome.ExitCode, outcome.Error);
+        Assert.IsNotNull(outcome.Resolution);
+        Assert.IsTrue(Path.IsPathRooted(outcome.Resolution.RunCommand));
+        Assert.AreEqual("dotnet.exe", Path.GetFileName(outcome.Resolution.RunCommand));
+        Assert.AreEqual(managedAssembly, outcome.Resolution.SourceExecutable);
+        StringAssert.Contains(outcome.Resolution.RunArguments, "exec");
+        StringAssert.Contains(outcome.Resolution.RunArguments, managedAssembly);
     }
 
     [TestMethod]
@@ -432,6 +464,28 @@ public sealed class ProjectPublishServiceTests
     }
 
     [TestMethod]
+    public void DryRunRestoreArguments_IncludeSelectedTargetFramework()
+    {
+        var options = new ProjectRunOptions(
+            "Release",
+            "arm64",
+            "net10.0-windows10.0.26100.0",
+            NoBuild: false,
+            NoRestore: false,
+            Properties: []);
+
+        var arguments = ProjectRunService.BuildDryRunRestoreArguments(
+            _project,
+            options,
+            publishAot: true);
+
+        StringAssert.Contains(
+            arguments,
+            "-p:TargetFramework=net10.0-windows10.0.26100.0");
+        StringAssert.Contains(arguments, "win-arm64");
+    }
+
+    [TestMethod]
     public async Task PrepareBuildDryRun_RedactsSecretPropertiesFromRestoreSuggestion()
     {
         var (service, dotnet) = CreateService(
@@ -456,6 +510,110 @@ public sealed class ProjectPublishServiceTests
         Assert.AreEqual("RestoreRequired", outcome.ErrorCode);
         StringAssert.Contains(outcome.SuggestedCommand, "-p:PackageCertificatePassword=***");
         Assert.IsFalse(outcome.SuggestedCommand.Contains("hunter2", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task PrepareBuildDryRun_NonAssetsEvaluationFailureIsDefinitePlanError()
+    {
+        var (service, dotnet) = CreateService(
+            UnpackagedProperties(TempPath("publish"), publishAot: false));
+        dotnet.RunDotnetCommandHandler = _ =>
+            (1, string.Empty, "MSB4019: The imported project 'missing.props' was not found.");
+        var options = new ProjectRunOptions(
+            "Release",
+            "x64",
+            null,
+            NoBuild: false,
+            NoRestore: false,
+            Properties: [],
+            DryRun: true);
+
+        var outcome = await service.PrepareAndResolveAsync(
+            _project,
+            options,
+            ProjectPreparationOperation.Build,
+            CancellationToken.None);
+
+        Assert.AreEqual(false, outcome.Ready);
+        Assert.AreEqual("BuildPlanInvalid", outcome.ErrorCode);
+        Assert.IsNull(outcome.SuggestedCommand);
+        StringAssert.Contains(outcome.Error, "missing.props");
+    }
+
+    [TestMethod]
+    public async Task PrepareNativeAotDryRun_NonAssetsEvaluationFailureIsDefinitePlanError()
+    {
+        var (service, dotnet) = CreateService(
+            UnpackagedProperties(TempPath("publish"), publishAot: true));
+        dotnet.RunDotnetCommandHandler = arguments =>
+            arguments == "--version"
+                ? (0, "10.0.303", string.Empty)
+                : (1, string.Empty, "MSB4019: The imported project 'missing.props' was not found.");
+        var options = new ProjectRunOptions(
+            "Release",
+            "x64",
+            null,
+            NoBuild: false,
+            NoRestore: false,
+            Properties: [],
+            DryRun: true,
+            VerifyNativeAot: true);
+
+        var outcome = await service.PrepareAndResolveAsync(
+            _project,
+            options,
+            ProjectPreparationOperation.Publish,
+            CancellationToken.None);
+
+        Assert.AreEqual(false, outcome.Ready);
+        Assert.AreEqual("PublishPlanInvalid", outcome.ErrorCode);
+        Assert.IsNull(outcome.SuggestedCommand);
+        StringAssert.Contains(outcome.Error, "missing.props");
+        Assert.IsNotNull(outcome.Toolchain);
+        Assert.IsTrue(outcome.Toolchain.Ready);
+    }
+
+    [TestMethod]
+    public async Task PrepareNativeAotDryRun_MissingTargetToolchainFailsBeforeReady()
+    {
+        var properties = UnpackagedProperties(TempPath("publish"), publishAot: true);
+        var (service, _) = CreateService(properties);
+        service.NativeAotToolchainSetupOverrideForTests = target =>
+            new ProjectRunService.NativeAotToolchainSetup(
+                Ready: false,
+                Error: $"The Hostarm64\\{target}\\link.exe linker is missing.",
+                HostArchitecture: "arm64",
+                TargetArchitecture: target,
+                VsWherePath: "vswhere.exe",
+                StandardVsWherePath: "vswhere.exe",
+                VisualStudioPath: @"C:\VS",
+                MsvcVersion: null,
+                LinkerPath: null,
+                WindowsSdkVersion: null,
+                WindowsSdkRoot: null,
+                AddedToPath: false,
+                EnvironmentOverrides: null);
+        var options = new ProjectRunOptions(
+            "Release",
+            "x64",
+            null,
+            NoBuild: false,
+            NoRestore: true,
+            Properties: [],
+            DryRun: true,
+            VerifyNativeAot: true);
+
+        var outcome = await service.PrepareAndResolveAsync(
+            _project,
+            options,
+            ProjectPreparationOperation.Publish,
+            CancellationToken.None);
+
+        Assert.AreEqual(false, outcome.Ready);
+        Assert.AreEqual("NativeAotToolchainMissing", outcome.ErrorCode);
+        StringAssert.Contains(outcome.Error, @"Hostarm64\x64\link.exe");
+        Assert.IsNotNull(outcome.Toolchain);
+        Assert.IsFalse(outcome.Toolchain.Ready);
     }
 
     [TestMethod]
@@ -645,12 +803,21 @@ public sealed class ProjectPublishServiceTests
         File.WriteAllText(ChildPath(publishDirectory.FullName, "App.exe"), "native fixture");
         var properties = UnpackagedProperties(publishDirectory.FullName, publishAot: true);
         var (service, dotnet) = CreateService(properties);
-        service.NativeAotToolchainSetupOverrideForTests = static () =>
+        service.NativeAotToolchainSetupOverrideForTests = static _ =>
             new ProjectRunService.NativeAotToolchainSetup(
+                Ready: true,
+                Error: null,
+                HostArchitecture: "arm64",
+                TargetArchitecture: "x64",
                 @"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe",
                 @"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe",
+                VisualStudioPath: @"C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools",
+                MsvcVersion: "14.51.36231",
+                LinkerPath: @"C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.51.36231\bin\Hostarm64\x64\link.exe",
+                WindowsSdkVersion: "10.0.26100.0",
+                WindowsSdkRoot: @"C:\Program Files (x86)\Windows Kits\10",
                 AddedToPath: true,
-                new Dictionary<string, string>
+                EnvironmentOverrides: new Dictionary<string, string>
                 {
                     ["PATH"] = @"C:\Program Files (x86)\Microsoft Visual Studio\Installer;C:\Windows",
                 });
@@ -685,14 +852,21 @@ public sealed class ProjectPublishServiceTests
             publishAot: true);
         var (service, dotnet) = CreateService(properties);
         var standardPath = @"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe";
-        service.NativeAotToolchainSetupOverrideForTests = () =>
+        service.NativeAotToolchainSetupOverrideForTests = _ =>
             new ProjectRunService.NativeAotToolchainSetup(
+                Ready: false,
+                Error: $"vswhere.exe was not found on PATH or at '{standardPath}'. Install Desktop development with C++.",
+                HostArchitecture: "arm64",
+                TargetArchitecture: "x64",
                 VsWherePath: null,
-                standardPath,
+                StandardVsWherePath: standardPath,
+                VisualStudioPath: null,
+                MsvcVersion: null,
+                LinkerPath: null,
+                WindowsSdkVersion: null,
+                WindowsSdkRoot: null,
                 AddedToPath: false,
                 EnvironmentOverrides: null);
-        dotnet.RunDotnetArgumentListHandler = _ =>
-            (123, string.Empty, "'vswhere.exe' is not recognized as an internal or external command.");
         var options = new ProjectRunOptions(
             "Release",
             "x64",
@@ -708,7 +882,7 @@ public sealed class ProjectPublishServiceTests
             ProjectPreparationOperation.Publish,
             CancellationToken.None);
 
-        Assert.AreEqual("PublishFailed", outcome.ErrorCode);
+        Assert.AreEqual("NativeAotToolchainMissing", outcome.ErrorCode);
         StringAssert.Contains(outcome.Error, "vswhere.exe was not found on PATH");
         StringAssert.Contains(outcome.Error, standardPath);
         StringAssert.Contains(outcome.Error, "Desktop development with C++");
@@ -721,9 +895,17 @@ public sealed class ProjectPublishServiceTests
         var vsWhere = Path.Join(installerDirectory.FullName, "vswhere.exe");
         File.WriteAllText(vsWhere, "fixture");
         var inheritedPath = Path.Join(_tempDirectory.FullName, "existing");
+        var (visualStudio, windowsKits) = CreateNativeToolchain("Hostx64", "x64");
 
-        var setup = ProjectRunService.ResolveNativeAotToolchainSetup(inheritedPath, vsWhere);
+        var setup = ProjectRunService.ResolveNativeAotToolchainSetup(
+            "x64",
+            inheritedPath,
+            vsWhere,
+            Architecture.X64,
+            [visualStudio.FullName],
+            windowsKits.FullName);
 
+        Assert.IsTrue(setup.Ready, setup.Error);
         Assert.IsTrue(setup.AddedToPath);
         Assert.AreEqual(vsWhere, setup.VsWherePath);
         Assert.IsNotNull(setup.EnvironmentOverrides);
@@ -738,11 +920,17 @@ public sealed class ProjectPublishServiceTests
         var pathDirectory = _tempDirectory.CreateSubdirectory("path");
         var vsWhere = Path.Join(pathDirectory.FullName, "vswhere.exe");
         File.WriteAllText(vsWhere, "fixture");
+        var (visualStudio, windowsKits) = CreateNativeToolchain("Hostarm64", "arm64");
 
         var setup = ProjectRunService.ResolveNativeAotToolchainSetup(
+            "arm64",
             pathDirectory.FullName,
-            TempPath("missing", "vswhere.exe"));
+            TempPath("missing", "vswhere.exe"),
+            Architecture.Arm64,
+            [visualStudio.FullName],
+            windowsKits.FullName);
 
+        Assert.IsTrue(setup.Ready, setup.Error);
         Assert.IsFalse(setup.AddedToPath);
         Assert.AreEqual(vsWhere, setup.VsWherePath);
         Assert.IsNull(setup.EnvironmentOverrides);
@@ -754,13 +942,78 @@ public sealed class ProjectPublishServiceTests
         var missing = TempPath("missing", "vswhere.exe");
 
         var setup = ProjectRunService.ResolveNativeAotToolchainSetup(
+            "x64",
             TempPath("empty-path"),
-            missing);
+            missing,
+            Architecture.X64,
+            visualStudioInstallations: [],
+            windowsKitsRoot: TempPath("missing-kits"));
 
+        Assert.IsFalse(setup.Ready);
         Assert.IsNull(setup.VsWherePath);
         Assert.AreEqual(missing, setup.StandardVsWherePath);
         Assert.IsFalse(setup.AddedToPath);
         Assert.IsNull(setup.EnvironmentOverrides);
+    }
+
+    [TestMethod]
+    [DataRow("x64", "x64", "Hostx64")]
+    [DataRow("x64", "arm64", "Hostx64")]
+    [DataRow("arm64", "x64", "Hostarm64")]
+    [DataRow("arm64", "arm64", "Hostarm64")]
+    public void ResolveNativeAotToolchainSetup_ValidatesHostTargetMatrix(
+        string host,
+        string target,
+        string hostFolder)
+    {
+        var (visualStudio, windowsKits) = CreateNativeToolchain(hostFolder, target);
+        var hostArchitecture = host == "arm64" ? Architecture.Arm64 : Architecture.X64;
+
+        var setup = ProjectRunService.ResolveNativeAotToolchainSetup(
+            target,
+            inheritedPath: string.Empty,
+            installedVsWherePath: TempPath("missing", "vswhere.exe"),
+            hostArchitecture: hostArchitecture,
+            visualStudioInstallations: [visualStudio.FullName],
+            windowsKitsRoot: windowsKits.FullName);
+
+        Assert.IsTrue(setup.Ready, setup.Error);
+        Assert.AreEqual(host, setup.HostArchitecture);
+        Assert.AreEqual(target, setup.TargetArchitecture);
+        StringAssert.Contains(setup.LinkerPath, $@"bin\{hostFolder}\{target}\link.exe");
+        Assert.AreEqual("14.51.36231", setup.MsvcVersion);
+        Assert.AreEqual("10.0.26100.0", setup.WindowsSdkVersion);
+    }
+
+    [TestMethod]
+    public void ResolveNativeAotToolchainSetup_DoesNotAcceptLinkerForWrongHost()
+    {
+        var (visualStudio, windowsKits) = CreateNativeToolchain("Hostarm64", "x64");
+
+        var setup = ProjectRunService.ResolveNativeAotToolchainSetup(
+            "x64",
+            inheritedPath: string.Empty,
+            installedVsWherePath: TempPath("missing", "vswhere.exe"),
+            hostArchitecture: Architecture.X64,
+            visualStudioInstallations: [visualStudio.FullName],
+            windowsKitsRoot: windowsKits.FullName);
+
+        Assert.IsFalse(setup.Ready);
+        StringAssert.Contains(setup.Error, @"Hostx64\x64\link.exe");
+    }
+
+    [TestMethod]
+    public void ResolveDotnetHostPath_IgnoresRelativePathEntries()
+    {
+        var trustedDirectory = _tempDirectory.CreateSubdirectory("trusted-dotnet");
+        var trustedDotnet = Path.Join(trustedDirectory.FullName, "dotnet.exe");
+        File.WriteAllText(trustedDotnet, "fixture");
+
+        var resolved = ProjectRunService.ResolveDotnetHostPath(
+            dotnetRoot: null,
+            inheritedPath: $".{Path.PathSeparator}{trustedDirectory.FullName}");
+
+        Assert.AreEqual(trustedDotnet, resolved);
     }
 
     [TestMethod]
@@ -968,13 +1221,49 @@ public sealed class ProjectPublishServiceTests
             logLevel is null
                 ? NullLogger<ProjectRunService>.Instance
                 : new LevelLogger<ProjectRunService>(logLevel.Value));
-        service.NativeAotToolchainSetupOverrideForTests = static () =>
+        service.NativeAotToolchainSetupOverrideForTests = static target =>
             new ProjectRunService.NativeAotToolchainSetup(
-                "vswhere.exe",
-                "vswhere.exe",
+                Ready: true,
+                Error: null,
+                HostArchitecture: "arm64",
+                TargetArchitecture: target,
+                VsWherePath: "vswhere.exe",
+                StandardVsWherePath: "vswhere.exe",
+                VisualStudioPath: @"C:\VS",
+                MsvcVersion: "14.51",
+                LinkerPath: @"C:\VS\link.exe",
+                WindowsSdkVersion: "10.0.26100.0",
+                WindowsSdkRoot: @"C:\Kits",
                 AddedToPath: false,
                 EnvironmentOverrides: null);
         return (service, dotnet);
+    }
+
+    private (DirectoryInfo VisualStudio, DirectoryInfo WindowsKits) CreateNativeToolchain(
+        string hostFolder,
+        string target)
+    {
+        var visualStudio = _tempDirectory.CreateSubdirectory(
+            $"vs-{hostFolder}-{target}-{Guid.NewGuid():N}");
+        var msvc = Directory.CreateDirectory(
+            Path.Join(visualStudio.FullName, "VC", "Tools", "MSVC", "14.51.36231"));
+        var linker = Path.Join(msvc.FullName, "bin", hostFolder, target, "link.exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(linker)!);
+        File.WriteAllText(linker, "linker");
+        var runtimeLibrary = Path.Join(msvc.FullName, "lib", target, "libcmt.lib");
+        Directory.CreateDirectory(Path.GetDirectoryName(runtimeLibrary)!);
+        File.WriteAllText(runtimeLibrary, "library");
+
+        var windowsKits = _tempDirectory.CreateSubdirectory(
+            $"kits-{target}-{Guid.NewGuid():N}");
+        var sdkLib = Path.Join(windowsKits.FullName, "Lib", "10.0.26100.0");
+        var ucrt = Path.Join(sdkLib, "ucrt", target, "ucrt.lib");
+        var kernel32 = Path.Join(sdkLib, "um", target, "kernel32.lib");
+        Directory.CreateDirectory(Path.GetDirectoryName(ucrt)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(kernel32)!);
+        File.WriteAllText(ucrt, "ucrt");
+        File.WriteAllText(kernel32, "kernel32");
+        return (visualStudio, windowsKits);
     }
 
     private void WriteRidSplitGraph()

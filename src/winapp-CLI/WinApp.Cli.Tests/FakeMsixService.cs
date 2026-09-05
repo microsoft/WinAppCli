@@ -17,7 +17,7 @@ internal class FakeMsixService : IMsixService
     public List<string> AddLooseLayoutInputDirectories { get; } = [];
     public List<(string? RuntimeArch, string? ProjectFile, string? ProjectAssetsFile, string? Framework, bool NoRestore)> AddLooseLayoutRuntimeCalls { get; } = [];
     public List<(bool SelfContained, bool RequireExactRuntimeDependency)> AddLooseLayoutDeploymentCalls { get; } = [];
-    public List<(string? ProjectFile, string? Architecture, string? Framework, bool NoRestore)> EnsureRuntimeInstalledCalls { get; } = [];
+    public List<(string? ProjectFile, string? ProjectAssetsFile, string? Architecture, string? Framework, bool NoRestore)> EnsureRuntimeInstalledCalls { get; } = [];
     public List<(string? EntryPoint, string? ManifestPath, bool NoInstall, bool KeepIdentity)> AddSparseIdentityCalls { get; } = [];
     public Exception? ExceptionToThrow { get; set; }
 
@@ -80,13 +80,14 @@ internal class FakeMsixService : IMsixService
 
     public Task<bool> EnsureWindowsAppRuntimeInstalledAsync(
         FileInfo? projectFile,
+        FileInfo? projectAssetsFile,
         string? architecture,
         string? framework,
         bool noRestore,
         TaskContext taskContext,
         CancellationToken cancellationToken = default)
     {
-        EnsureRuntimeInstalledCalls.Add((projectFile?.FullName, architecture, framework, noRestore));
+        EnsureRuntimeInstalledCalls.Add((projectFile?.FullName, projectAssetsFile?.FullName, architecture, framework, noRestore));
         if (EnsureRuntimeInstalledException != null)
         {
             throw EnsureRuntimeInstalledException;

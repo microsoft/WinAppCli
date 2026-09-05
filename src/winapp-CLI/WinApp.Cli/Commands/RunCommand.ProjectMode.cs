@@ -464,6 +464,7 @@ internal partial class RunCommand
                Architecture = options.Architecture,
                Platform = options.Platform ?? options.Architecture,
                ProjectPath = csproj.FullName,
+               Toolchain = outcome.Toolchain,
                ErrorCode = outcome.ErrorCode,
                Error = outcome.Error,
            };
@@ -486,6 +487,7 @@ internal partial class RunCommand
            report.SourceExecutable = resolution.SourceExecutable;
            report.Packaging = resolution.Packaging.ToString();
            report.DotnetSdk = resolution.DotnetSdk;
+           report.Toolchain = outcome.Toolchain;
            report.ErrorCode = outcome.ErrorCode;
            report.Error = outcome.Error;
         }
@@ -502,6 +504,23 @@ internal partial class RunCommand
            if (!string.IsNullOrWhiteSpace(report.PublishDirectory))
            {
                ansiConsole.MarkupLineInterpolated($"  PublishDir:    {report.PublishDirectory}");
+           }
+           if (report.Toolchain is { } toolchain)
+           {
+               ansiConsole.MarkupLineInterpolated($"  Host:          {toolchain.HostArchitecture}");
+               ansiConsole.MarkupLineInterpolated($"  Target:        {toolchain.TargetArchitecture}");
+               if (!string.IsNullOrWhiteSpace(toolchain.MsvcVersion))
+               {
+                   ansiConsole.MarkupLineInterpolated($"  MSVC:          {toolchain.MsvcVersion}");
+               }
+               if (!string.IsNullOrWhiteSpace(toolchain.LinkerPath))
+               {
+                   ansiConsole.MarkupLineInterpolated($"  Linker:        {toolchain.LinkerPath}");
+               }
+               if (!string.IsNullOrWhiteSpace(toolchain.WindowsSdkVersion))
+               {
+                   ansiConsole.MarkupLineInterpolated($"  Windows SDK:   {toolchain.WindowsSdkVersion}");
+               }
            }
 
            ansiConsole.WriteLine();
@@ -716,7 +735,16 @@ internal partial class RunCommand
                             // Report whether the runtime was actually prepared: a plain console/desktop app
                             // with no Windows App SDK reference is skipped inside, so claiming "ready" would
                             // be a lie. Surface the skip honestly instead.
-                            var prepared = await msixService.EnsureWindowsAppRuntimeInstalledAsync(csproj, resolution.Architecture, resolution.Framework, resolution.NoRestore, taskContext, ct);
+                            var prepared = await msixService.EnsureWindowsAppRuntimeInstalledAsync(
+                                csproj,
+                                string.IsNullOrWhiteSpace(resolution.ProjectAssetsFile)
+                                    ? null
+                                    : new FileInfo(resolution.ProjectAssetsFile),
+                                resolution.Architecture,
+                                resolution.Framework,
+                                resolution.NoRestore,
+                                taskContext,
+                                ct);
                             return (0, prepared ? "Windows App Runtime ready" : "No Windows App SDK reference — runtime not needed");
                         }
                         catch (OperationCanceledException) when (ct.IsCancellationRequested)

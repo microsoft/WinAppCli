@@ -80,23 +80,34 @@ internal sealed partial class ProjectRunService
         var evaluateArgs = BuildEvaluateArguments(csproj, options, shim);
 
         logger.LogDebug("{UISymbol} dotnet {Arguments}", UiSymbols.Note, RedactSecretsForDisplay(evaluateArgs));
-        var (exitCode, stdout, _) = await dotNetService.RunDotnetCommandAsync(
+        var (exitCode, stdout, stderr) = await dotNetService.RunDotnetCommandAsync(
             workingDir,
             evaluateArgs,
             cancellationToken);
 
         if (exitCode != 0)
         {
-            var restore = $"dotnet {RedactSecretsForDisplay(BuildDryRunRestoreArguments(csproj, options, publishAot: false))}";
-            return new ProjectPreparationOutcome(
-                null,
-                exitCode,
-                Executed: false,
-                Ready: null,
-                Reason: "RestoreRequired",
-                SuggestedCommand: restore,
-                ErrorCode: "RestoreRequired",
-                Error: "Project evaluation is incomplete because restored assets are unavailable.");
+            if (IsRestoreRequiredDiagnostic(stderr))
+            {
+                var restore = $"dotnet {RedactSecretsForDisplay(BuildDryRunRestoreArguments(csproj, options, publishAot: false))}";
+                return new ProjectPreparationOutcome(
+                    null,
+                    exitCode,
+                    Executed: false,
+                    Ready: null,
+                    Reason: "RestoreRequired",
+                    SuggestedCommand: restore,
+                    ErrorCode: "RestoreRequired",
+                    Error: "Project evaluation is incomplete because restored assets are unavailable.");
+            }
+
+            return FailedPreparation(
+                "BuildPlanInvalid",
+                string.IsNullOrWhiteSpace(stderr)
+                    ? "The build plan could not be evaluated."
+                    : $"The build plan could not be evaluated: {stderr.Trim()}",
+                executed: false,
+                exitCode: exitCode);
         }
 
         var props = MsBuildPropertyReader.Parse(stdout, RequestedProperties);
@@ -212,17 +223,49 @@ internal sealed partial class ProjectRunService
         }
 
         var dotnetSdk = await ResolveDotnetSdkVersionAsync(workingDir, cancellationToken);
+        NativeAotToolchainSetup? nativeAotToolchain = null;
+        if (publishAot || options.VerifyNativeAot)
+        {
+            nativeAotToolchain = NativeAotToolchainSetupOverrideForTests?.Invoke(options.Architecture)
+                ?? ResolveNativeAotToolchainSetup(options.Architecture);
+            if (!nativeAotToolchain.Ready)
+            {
+                return FailedPreparation(
+                    "NativeAotToolchainMissing",
+                    nativeAotToolchain.Error ?? "The Native AOT toolchain is not ready.",
+                    executed: false,
+                    toolchain: nativeAotToolchain.ToInfo());
+            }
+
+            if (!options.Json && logger.IsEnabled(LogLevel.Information))
+            {
+                ansiConsole.MarkupLineInterpolated(
+                    $"{UiSymbols.Check} Native AOT toolchain ready ({nativeAotToolchain.HostArchitecture} host → win-{nativeAotToolchain.TargetArchitecture})");
+                ansiConsole.MarkupLineInterpolated(
+                    $"  MSVC: {nativeAotToolchain.MsvcVersion}");
+                ansiConsole.MarkupLineInterpolated(
+                    $"  Windows SDK: {nativeAotToolchain.WindowsSdkVersion}");
+            }
+        }
 
         if (options.DryRun)
         {
             if (initialProperties is null)
             {
-               return RestoreRequiredOutcome(
-                   csproj,
-                   options,
-                   publishAot || options.VerifyNativeAot,
-                   initialExit,
-                   initialStderr);
+               return IsRestoreRequiredDiagnostic(initialStderr)
+                   ? RestoreRequiredOutcome(
+                       csproj,
+                       options,
+                       publishAot || options.VerifyNativeAot,
+                       initialExit,
+                       initialStderr,
+                       toolchain: nativeAotToolchain?.ToInfo())
+                   : FailedPreparation(
+                       "PublishPlanInvalid",
+                       EvaluationFailureMessage(initialStderr),
+                       executed: false,
+                       exitCode: initialExit,
+                       toolchain: nativeAotToolchain?.ToInfo());
             }
 
             ProjectRunResolution resolution;
@@ -243,14 +286,22 @@ internal sealed partial class ProjectRunService
 
             if (publishAot && !NativeAotRuntimePacksAreAvailable(resolution))
             {
-                return RestoreRequiredOutcome(csproj, options, publishAot, 1, null, resolution);
+                return RestoreRequiredOutcome(
+                    csproj,
+                    options,
+                    publishAot,
+                    1,
+                    null,
+                    resolution,
+                    nativeAotToolchain?.ToInfo());
             }
 
             return new ProjectPreparationOutcome(
                 resolution,
                 0,
                 Executed: false,
-                Ready: true);
+                Ready: true,
+                Toolchain: nativeAotToolchain?.ToInfo());
         }
 
         var (resolvedOptions, publishOptions, csWinRTMetadata) = await PrepareBuildInputsAsync(
@@ -261,12 +312,8 @@ internal sealed partial class ProjectRunService
             cancellationToken,
             requireConcreteRid: publishAot || options.VerifyNativeAot);
 
-        NativeAotToolchainSetup? nativeAotToolchain = null;
-        if (publishAot || options.VerifyNativeAot)
+        if (nativeAotToolchain is not null)
         {
-            nativeAotToolchain = NativeAotToolchainSetupOverrideForTests?.Invoke()
-                ?? ResolveNativeAotToolchainSetup();
-
             if (nativeAotToolchain.AddedToPath &&
                 nativeAotToolchain.VsWherePath is { } vsWherePath &&
                 !options.Json &&
@@ -294,8 +341,7 @@ internal sealed partial class ProjectRunService
             var error = BuildPublishFailureMessage(
                 csproj,
                 publishOptions,
-                publishResult,
-                nativeAotToolchain);
+                publishResult);
             return FailedPreparation(
                 "PublishFailed",
                 error,
@@ -380,7 +426,8 @@ internal sealed partial class ProjectRunService
             finalResolution,
             0,
             Executed: true,
-            Ready: true);
+            Ready: true,
+            Toolchain: nativeAotToolchain?.ToInfo());
     }
 
     private async Task<(int ExitCode, string Output, string Error)> RunPublishPassAsync(
@@ -437,93 +484,13 @@ internal sealed partial class ProjectRunService
             cancellationToken);
     }
 
-    internal sealed record NativeAotToolchainSetup(
-        string? VsWherePath,
-        string StandardVsWherePath,
-        bool AddedToPath,
-        IReadOnlyDictionary<string, string>? EnvironmentOverrides);
-
-    internal static NativeAotToolchainSetup ResolveNativeAotToolchainSetup(
-        string? inheritedPath = null,
-        string? installedVsWherePath = null)
-    {
-        inheritedPath ??= Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
-        var pathVsWhere = FindExecutableOnPath("vswhere.exe", inheritedPath);
-        var installerDirectory = Path.Join(
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
-            "Microsoft Visual Studio",
-            "Installer");
-        installedVsWherePath ??= Path.Join(installerDirectory, "vswhere.exe");
-        if (pathVsWhere is not null)
-        {
-            return new NativeAotToolchainSetup(
-                pathVsWhere,
-                installedVsWherePath,
-                AddedToPath: false,
-                EnvironmentOverrides: null);
-        }
-
-        if (File.Exists(installedVsWherePath))
-        {
-            installerDirectory = Path.GetDirectoryName(installedVsWherePath)!;
-            var updatedPath = string.IsNullOrWhiteSpace(inheritedPath)
-                ? installerDirectory
-                : $"{installerDirectory}{Path.PathSeparator}{inheritedPath}";
-            return new NativeAotToolchainSetup(
-                installedVsWherePath,
-                installedVsWherePath,
-                AddedToPath: true,
-                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["PATH"] = updatedPath,
-                });
-        }
-
-        return new NativeAotToolchainSetup(
-                VsWherePath: null,
-                installedVsWherePath,
-                AddedToPath: false,
-                EnvironmentOverrides: null);
-    }
-
-    private static string? FindExecutableOnPath(string executableName, string path)
-    {
-        if (string.IsNullOrWhiteSpace(executableName) ||
-            Path.IsPathRooted(executableName) ||
-            !string.Equals(Path.GetFileName(executableName), executableName, StringComparison.Ordinal))
-        {
-            return null;
-        }
-
-        return path
-            .Split(
-                Path.PathSeparator,
-                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(directory => Path.Join(directory.Trim('"'), executableName))
-            .Where(File.Exists)
-            .Select(Path.GetFullPath)
-            .FirstOrDefault();
-    }
-
     private static string BuildPublishFailureMessage(
         FileInfo csproj,
         ProjectRunOptions options,
-        (int ExitCode, string Output, string Error) publishResult,
-        NativeAotToolchainSetup? nativeAotToolchain)
+        (int ExitCode, string Output, string Error) publishResult)
     {
         var message = $"Publish failed for '{csproj.Name}' (exit code {publishResult.ExitCode}).";
         var diagnostics = $"{publishResult.Output}{Environment.NewLine}{publishResult.Error}";
-        if (nativeAotToolchain is not null &&
-            nativeAotToolchain.VsWherePath is null &&
-            diagnostics.Contains("vswhere.exe", StringComparison.OrdinalIgnoreCase) &&
-            diagnostics.Contains("not recognized", StringComparison.OrdinalIgnoreCase))
-        {
-            message +=
-                " Native AOT could not locate the MSVC linker because vswhere.exe was not found on PATH " +
-                $"or at the standard Visual Studio Installer path '{nativeAotToolchain.StandardVsWherePath}'. " +
-                "Install Visual Studio or Visual Studio Build Tools with the Desktop development with C++ workload.";
-        }
-
         if (UserEnabledPublishAotGlobally(options) &&
             diagnostics.Contains("NETSDK1207", StringComparison.OrdinalIgnoreCase))
         {
@@ -582,6 +549,7 @@ internal sealed partial class ProjectRunService
 
         string? runCommand = sourceExecutable;
         string? runArguments = null;
+        string? sourceArtifact = sourceExecutable;
         if (!File.Exists(sourceExecutable) && !publishAot)
         {
             var targetFileName = GetProp(properties, "TargetFileName");
@@ -596,9 +564,22 @@ internal sealed partial class ProjectRunService
                     : Path.GetFullPath(managedAssemblyFileName, publishDirectory);
             if (managedAssembly is not null && File.Exists(managedAssembly))
             {
-                runCommand = "dotnet";
-                runArguments = WindowsCommandLine.JoinArguments(["exec", managedAssembly]);
+                var dotnetHost = ResolveDotnetHostPath();
+                if (dotnetHost is not null)
+                {
+                    runCommand = dotnetHost;
+                    runArguments = WindowsCommandLine.JoinArguments(["exec", managedAssembly]);
+                    sourceArtifact = managedAssembly;
+                }
             }
+        }
+
+        if (requireArtifacts &&
+            packaging == ProjectPackaging.Packaged &&
+            !File.Exists(sourceExecutable))
+        {
+            throw new ProjectRunException(
+                $"The published executable '{sourceExecutable}' was not found. PublishDir was resolved from the same publish invocation; stale build output was not selected.");
         }
 
         if (requireArtifacts && packaging == ProjectPackaging.Unpackaged &&
@@ -623,7 +604,7 @@ internal sealed partial class ProjectRunService
             PublishAot: publishAot,
             RuntimeIdentifier: NullIfEmpty(GetProp(properties, "RuntimeIdentifier"))
                 ?? RunArchHelper.ToRuntimeIdentifier(options.Architecture),
-            SourceExecutable: sourceExecutable,
+            SourceExecutable: sourceArtifact,
             FinalAppxManifestPath: finalManifest,
             ProjectAssetsFile: ResolveAbsolutePath(GetProp(properties, "ProjectAssetsFile"), workingDir),
             DotnetSdk: dotnetSdk,
@@ -675,11 +656,6 @@ internal sealed partial class ProjectRunService
 
         var executableName = safeTargetName + ".exe";
         var executable = Path.GetFullPath(executableName, publishDirectory);
-        if (requireArtifacts && !File.Exists(executable))
-        {
-            throw new ProjectRunException(
-                $"The published executable '{executable}' was not found. PublishDir was resolved from the same publish invocation; stale build output was not selected.");
-        }
         return executable;
     }
 
@@ -898,7 +874,8 @@ internal sealed partial class ProjectRunService
         bool publishAot,
         int exitCode,
         string? evaluationError,
-        ProjectRunResolution? resolution = null)
+        ProjectRunResolution? resolution = null,
+        NativeAotToolchainInfo? toolchain = null)
     {
         var restore = $"dotnet {RedactSecretsForDisplay(BuildDryRunRestoreArguments(csproj, options, publishAot))}";
         var detail = string.IsNullOrWhiteSpace(evaluationError)
@@ -912,21 +889,43 @@ internal sealed partial class ProjectRunService
             Reason: "RestoreRequired",
             SuggestedCommand: restore,
             ErrorCode: "RestoreRequired",
-            Error: $"{detail} Run the suggested restore command, then repeat the dry run.");
+            Error: $"{detail} Run the suggested restore command, then repeat the dry run.",
+            Toolchain: toolchain);
     }
 
     private static ProjectPreparationOutcome FailedPreparation(
         string errorCode,
         string error,
         bool executed,
-        int exitCode = 1) =>
+        int exitCode = 1,
+        NativeAotToolchainInfo? toolchain = null) =>
         new(
             null,
             exitCode == 0 ? 1 : exitCode,
             Executed: executed,
             Ready: false,
             ErrorCode: errorCode,
-            Error: error);
+            Error: error,
+            Toolchain: toolchain);
+
+    private static bool IsRestoreRequiredDiagnostic(string? diagnostic)
+    {
+        if (string.IsNullOrWhiteSpace(diagnostic))
+        {
+            return false;
+        }
+
+        return diagnostic.Contains("NETSDK1004", StringComparison.OrdinalIgnoreCase) ||
+            diagnostic.Contains("project.assets.json", StringComparison.OrdinalIgnoreCase) &&
+            diagnostic.Contains("not found", StringComparison.OrdinalIgnoreCase) ||
+            diagnostic.Contains("NETSDK1047", StringComparison.OrdinalIgnoreCase) ||
+            diagnostic.Contains("doesn't have a target for", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string EvaluationFailureMessage(string? diagnostic) =>
+        string.IsNullOrWhiteSpace(diagnostic)
+            ? "The publish plan could not be evaluated."
+            : $"The publish plan could not be evaluated: {diagnostic.Trim()}";
 
     private static string ClassifyPublishedArtifactError(string error)
     {

@@ -1171,12 +1171,12 @@ public class MsixServiceIdentityTests : BaseCommandTests
         var csproj = new FileInfo(Path.Combine(_tempDirectory.FullName, "App.csproj"));
 
         await _msixService.EnsureWindowsAppRuntimeInstalledAsync(
-            csproj, "x64", framework: null, noRestore: true, TestTaskContext, TestContext.CancellationToken);
+            csproj, null, "x64", framework: null, noRestore: true, TestTaskContext, TestContext.CancellationToken);
         Assert.AreEqual(true, _fakeDotNet.LastGetPackageListNoRestore,
             "--no-restore must be forwarded to dotnet list package during runtime discovery");
 
         await _msixService.EnsureWindowsAppRuntimeInstalledAsync(
-            csproj, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken);
+            csproj, null, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken);
         Assert.AreEqual(false, _fakeDotNet.LastGetPackageListNoRestore,
             "runtime discovery must restore normally when --no-restore was not requested");
     }
@@ -1194,7 +1194,7 @@ public class MsixServiceIdentityTests : BaseCommandTests
 
         var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
             _msixService.EnsureWindowsAppRuntimeInstalledAsync(
-                csproj, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken));
+                csproj, null, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken));
 
         StringAssert.Contains(ex.Message, "could not be located");
     }
@@ -1215,7 +1215,7 @@ public class MsixServiceIdentityTests : BaseCommandTests
 
         var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
             _msixService.EnsureWindowsAppRuntimeInstalledAsync(
-                csproj, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken));
+                csproj, null, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken));
 
         StringAssert.Contains(ex.Message, "not registered");
     }
@@ -1233,7 +1233,7 @@ public class MsixServiceIdentityTests : BaseCommandTests
         var csproj = new FileInfo(Path.Combine(_tempDirectory.FullName, "App.csproj"));
 
         await _msixService.EnsureWindowsAppRuntimeInstalledAsync(
-            csproj, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken);
+            csproj, null, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken);
 
         Assert.HasCount(1, _fakeWindowsAppRuntime.InstallRuntimeCalls);
     }
@@ -1250,7 +1250,7 @@ public class MsixServiceIdentityTests : BaseCommandTests
         var csproj = new FileInfo(Path.Combine(_tempDirectory.FullName, "App.csproj"));
 
         await _msixService.EnsureWindowsAppRuntimeInstalledAsync(
-            csproj, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken);
+            csproj, null, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken);
 
         var messages = TestTask.SubTasks.OfType<StatusMessageTask>().Select(t => t.CompletedMessage ?? string.Empty).ToList();
         Assert.IsTrue(

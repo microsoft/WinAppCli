@@ -222,6 +222,11 @@ internal sealed partial class ProjectRunService
         }
         tokens.Add($"-p:Configuration={options.Configuration}");
 
+        if (!string.IsNullOrWhiteSpace(options.Framework))
+        {
+            tokens.Add($"-p:TargetFramework={options.Framework}");
+        }
+
         if (!string.IsNullOrWhiteSpace(options.Platform))
         {
             tokens.Add($"-p:Platform={options.Platform}");

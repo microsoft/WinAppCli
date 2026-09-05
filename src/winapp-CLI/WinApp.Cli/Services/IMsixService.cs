@@ -117,6 +117,7 @@ internal interface IMsixService
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<bool> EnsureWindowsAppRuntimeInstalledAsync(
         FileInfo? projectFile,
+        FileInfo? projectAssetsFile,
         string? architecture,
         string? framework,
         bool noRestore,
