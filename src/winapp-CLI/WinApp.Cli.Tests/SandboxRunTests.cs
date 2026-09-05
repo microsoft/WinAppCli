@@ -584,7 +584,7 @@ public class SandboxRunTests
     [TestMethod]
     public async Task UnregisterOwnedPackage_LiteralV1ClaimPreservesPackagedHistoryWithoutReconcile()
     {
-        const string Layout = @"C:\WinAppGuest\deployments\legacy-layout";
+        const string Layout = @"C:\WinAppGuest\deployments\legacy-owner-layout";
         await using var harness = new Harness(_guestManaged, _stateRoot);
         await WriteLegacyStateAsync(
             "legacy-owner",
@@ -600,7 +600,7 @@ public class SandboxRunTests
                 "packageName": "Contoso.MyApp",
                 "publisher": "CN=Contoso",
                 "packageFamilyName": "Contoso.MyApp_abc",
-                "registeredLocation": "C:\\WinAppGuest\\deployments\\legacy-layout"
+                "registeredLocation": "C:\\WinAppGuest\\deployments\\legacy-owner-layout"
               }
             }
             """);
