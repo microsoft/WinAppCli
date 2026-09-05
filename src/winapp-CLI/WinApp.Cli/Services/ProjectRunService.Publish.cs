@@ -169,9 +169,11 @@ internal sealed partial class ProjectRunService
             initialProperties = MsBuildPropertyReader.Parse(initialStdout, RequestedProperties);
         }
 
-        var publishAot = initialProperties is not null
-            ? IsTrue(GetProp(initialProperties, "PublishAot"))
-            : TryReadBooleanProjectProperty(csproj, options.Properties, "PublishAot");
+        // A failed evaluation leaves the effective value unknown. Do not infer it from raw project XML:
+        // imports, conditions, and later assignments can all change the value. Verification still forces
+        // the AOT path; an ordinary publish defers AOT-only decisions until post-publish evaluation.
+        var publishAot = initialProperties is not null &&
+            IsTrue(GetProp(initialProperties, "PublishAot"));
 
         if (options.VerifyNativeAot && initialProperties is not null && !publishAot)
         {

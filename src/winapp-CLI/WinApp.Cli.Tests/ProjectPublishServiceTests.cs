@@ -845,6 +845,60 @@ public sealed class ProjectPublishServiceTests
     }
 
     [TestMethod]
+    public async Task PreparePublish_IndeterminateConditionalPublishAotDoesNotTriggerAotRestrictions()
+    {
+       File.WriteAllText(
+           _project.FullName,
+           """
+           <Project Sdk="Microsoft.NET.Sdk">
+             <PropertyGroup>
+               <OutputType>WinExe</OutputType>
+               <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+             </PropertyGroup>
+             <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+               <PublishAot>true</PublishAot>
+             </PropertyGroup>
+           </Project>
+           """);
+       var publishDirectory = _tempDirectory.CreateSubdirectory("publish");
+       File.WriteAllText(ChildPath(publishDirectory.FullName, "App.exe"), "managed fixture");
+       var properties = UnpackagedProperties(publishDirectory.FullName, publishAot: false)
+           .Replace("\"win-x64\"", "\"win-x86\"", StringComparison.Ordinal);
+       var (service, dotnet) = CreateService(properties);
+       var evaluateCount = 0;
+       dotnet.RunDotnetCommandHandler = arguments =>
+       {
+           if (arguments == "--version")
+           {
+               return (0, "10.0.303", string.Empty);
+           }
+
+           evaluateCount++;
+           return evaluateCount == 1
+               ? (1, string.Empty, "NETSDK1004: project.assets.json was not found")
+               : (0, properties, string.Empty);
+       };
+       var options = new ProjectRunOptions(
+           "Debug",
+           "x86",
+           null,
+           NoBuild: false,
+           NoRestore: false,
+           Properties: []);
+
+       var outcome = await service.PrepareAndResolveAsync(
+           _project,
+           options,
+           ProjectPreparationOperation.Publish,
+           CancellationToken.None);
+
+       Assert.AreEqual(0, outcome.ExitCode, outcome.Error);
+       Assert.IsNotNull(outcome.Resolution);
+       Assert.IsFalse(outcome.Resolution.PublishAot);
+       Assert.AreEqual(1, dotnet.ArgumentListInvocations.Count);
+    }
+
+    [TestMethod]
     public async Task PreparePackagedPublish_UsesEvaluatedGeneratedManifestNotPublishSourceManifest()
     {
         var targetDirectory = _tempDirectory.CreateSubdirectory("target");
