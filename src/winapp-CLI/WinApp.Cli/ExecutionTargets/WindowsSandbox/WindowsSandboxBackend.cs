@@ -98,6 +98,9 @@ internal sealed class WindowsSandboxBackend(
     /// <summary>Port allocator seam, so a loopback test can reserve the port its agent will bind.</summary>
     internal Func<int> AgentPortProvider { get; set; } = NextAgentPort;
 
+    /// <summary>Most times a concurrent target-state commit is retried before it is reported.</summary>
+    internal const int ConnectionStateCommitAttempts = 3;
+
     /// <summary>
     /// How long to spend deciding whether an agent that closed a handshake is still listening.
     /// </summary>
@@ -138,6 +141,11 @@ internal sealed class WindowsSandboxBackend(
         PreserveNewerGuest,
         Repair,
     }
+
+    /// <summary>The warm-reconnect decision and a verified identity that still needs persistence.</summary>
+    private readonly record struct WarmAgentDecision(
+        WarmAgentDisposition Disposition,
+        GuestAgentIdentity? IdentityToPersist);
 
     /// <summary>The host and guest paths one generation's bootstrap share is mapped through.</summary>
     /// <param name="HostBootstrap">Host folder published read-only into the guest.</param>
@@ -240,10 +248,12 @@ internal sealed class WindowsSandboxBackend(
         // Sandbox: it costs one TCP connect instead of a client reconnect, an agent relaunch, and a
         // runtime re-verification. It is attempted before anything else touches the instance.
         //
-        // Only a genuinely warm lease qualifies. A recovered or adopted instance is running, but
-        // nothing in it was prepared under the epoch that now identifies it, so its "persisted"
-        // material describes a generation that no longer exists.
-        if (lease.IsWarm &&
+        // A reused lease can recover from a crash after the agent was launched but before target state
+        // was committed. Material is scoped to this exact epoch, and TryReconnectAsync only reuses a
+        // peer when the staged binary proves its identity; otherwise it falls through to bootstrap.
+        // Adopted and recovered-start leases have a fresh epoch and cannot reuse another manager's
+        // material.
+        if (lease.Origin == SandboxInstanceOrigin.Reused &&
             await TryReconnectAsync(lease, cancellationToken).ConfigureAwait(false) is { } reused)
         {
             _progress.Report("Reusing the running Windows Sandbox agent...");
@@ -381,9 +391,24 @@ internal sealed class WindowsSandboxBackend(
             _guestAddress,
             material,
             cancellationToken).ConfigureAwait(false);
-        _activeMaterial = material;
 
-        RememberConnection(lease, _guestAddress, heartbeat);
+        var agentIdentity = new GuestAgentIdentity(
+            heartbeat.Version,
+            heartbeat.BinaryHash,
+            heartbeat.Architecture,
+            heartbeat.ProtocolMinimum,
+            heartbeat.ProtocolMaximum);
+        try
+        {
+            RememberConnection(lease, _guestAddress, agentIdentity);
+        }
+        catch
+        {
+            await transport.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+
+        _activeMaterial = material;
 
         // The result folder has served its purpose and is guest-writable, so it does not survive the
         // handshake it was created for.
@@ -404,10 +429,10 @@ internal sealed class WindowsSandboxBackend(
     /// material from a previous boot is never used against a new one.
     /// </para>
     /// <para>
-    /// Returning null means "reconnect was not possible", never "the Sandbox is unusable": the
-    /// caller falls through to a full bootstrap, which repairs the agent without recreating the
-    /// instance. A failure here must not be reported as an error, because a stopped agent is an
-    /// ordinary state after the guest reboots or the agent is killed.
+    /// Returning null means the agent was not reachable and can be repaired without recreating the
+    /// instance. A known identity mismatch or an inability to persist the identity is reported
+    /// instead: replacing a live unproven agent or returning a connection whose later reuse is
+    /// unsafe would both be worse than a retryable failure.
     /// </para>
     /// </remarks>
     private async Task<TargetConnection?> TryReconnectAsync(
@@ -440,24 +465,19 @@ internal sealed class WindowsSandboxBackend(
             }
         }
 
-        var disposition = await ClassifyWarmAgentAsync(lease, address, material, cancellationToken)
+        var decision = await ClassifyWarmAgentAsync(lease, address, material, cancellationToken)
             .ConfigureAwait(false);
-        if (disposition == WarmAgentDisposition.Repair)
+        if (decision.Disposition == WarmAgentDisposition.Repair)
         {
             return null;
         }
 
+        IGuestTransport transport;
         try
         {
-            var transport = await GuestTcpTransport
+            transport = await GuestTcpTransport
                 .ConnectAsync(address, material, cancellationToken)
                 .ConfigureAwait(false);
-
-            _guestAddress = address;
-            _activeMaterial = material;
-            RememberConnection(lease, address);
-
-            return new TargetConnection(lease.Epoch, transport, Reused: true);
         }
         catch (ExecutionTargetException ex)
         {
@@ -479,7 +499,7 @@ internal sealed class WindowsSandboxBackend(
                     innerException: ex);
             }
 
-            if (disposition == WarmAgentDisposition.PreserveNewerGuest)
+            if (decision.Disposition == WarmAgentDisposition.PreserveNewerGuest)
             {
                 throw ex.Error.Code == ExecutionTargetErrorCodes.AgentIncompatible
                     ? ex
@@ -490,13 +510,28 @@ internal sealed class WindowsSandboxBackend(
             // unchanged epoch keeps deployment and runtime state valid across the repair.
             return null;
         }
+
+        try
+        {
+            RememberConnection(lease, address, decision.IdentityToPersist);
+        }
+        catch
+        {
+            await transport.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+
+        _guestAddress = address;
+        _activeMaterial = material;
+
+        return new TargetConnection(lease.Epoch, transport, Reused: true);
     }
 
     /// <summary>
     /// Decides whether persisted identity permits a warm reconnect, while never replacing a live
     /// agent whose binary does not match the current host.
     /// </summary>
-    private async Task<WarmAgentDisposition> ClassifyWarmAgentAsync(
+    private async Task<WarmAgentDecision> ClassifyWarmAgentAsync(
         SandboxInstanceLease lease,
         string address,
         GuestBootstrapMaterial material,
@@ -507,7 +542,14 @@ internal sealed class WindowsSandboxBackend(
 
         if (string.Equals(state?.AgentBinaryHash, host.BinaryHash, StringComparison.OrdinalIgnoreCase))
         {
-            return WarmAgentDisposition.Reuse;
+            // Hash equality proves the binary even when an interrupted state write left its version
+            // blank or stale. Refreshing the complete identity after the authenticated reconnect keeps
+            // later hosts from having to guess from a partial record.
+            return new WarmAgentDecision(
+                WarmAgentDisposition.Reuse,
+                string.Equals(state?.AgentVersion, host.Version, StringComparison.OrdinalIgnoreCase)
+                    ? null
+                    : host);
         }
 
         // A newer agent is intentionally reusable when its protocol still negotiates. Its protocol
@@ -516,7 +558,23 @@ internal sealed class WindowsSandboxBackend(
         if (state?.AgentVersion is { Length: > 0 } guestVersion &&
             NuGetVersionHelper.Compare(host.Version, guestVersion) is < 0)
         {
-            return WarmAgentDisposition.PreserveNewerGuest;
+            return new WarmAgentDecision(WarmAgentDisposition.PreserveNewerGuest, IdentityToPersist: null);
+        }
+
+        // A crash can leave an otherwise warm state with neither identity field. The bootstrap binary
+        // was staged by the host into a guest-read-only, epoch-scoped folder, and its hash was checked
+        // against the heartbeat before the first authenticated connection. When it still exactly matches
+        // this host, a new authenticated connection can safely restore the missing state without
+        // replacing the live agent. Any claimed identity that differs or cannot be proven stays refused.
+        if (state is not null &&
+            string.IsNullOrWhiteSpace(state.AgentBinaryHash) &&
+            string.IsNullOrWhiteSpace(state.AgentVersion) &&
+            string.Equals(
+                await TryReadPersistedAgentHashAsync(lease.Epoch, cancellationToken).ConfigureAwait(false),
+                host.BinaryHash,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return new WarmAgentDecision(WarmAgentDisposition.Reuse, host);
         }
 
         // A stopped agent can be re-bootstrapped in the same epoch. A listener means it might be
@@ -525,7 +583,7 @@ internal sealed class WindowsSandboxBackend(
                 .IsListeningAsync(address, material.Port, AgentLivenessProbeTimeout, cancellationToken)
                 .ConfigureAwait(false))
         {
-            return WarmAgentDisposition.Repair;
+            return new WarmAgentDecision(WarmAgentDisposition.Repair, IdentityToPersist: null);
         }
 
         throw AgentIdentityMismatch(host, state, lease);
@@ -538,6 +596,33 @@ internal sealed class WindowsSandboxBackend(
         return await GuestAgentIdentity
             .ForBinaryAsync(binary.FullName, VersionHelper.GetVersionString(), cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Gets the hash of the host-owned agent binary staged with the persisted material for one epoch.
+    /// </summary>
+    private async Task<string?> TryReadPersistedAgentHashAsync(
+        ExecutionTargetEpoch epoch,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var path = Path.Join(
+                directoryProvider.GetTargetRoot(Target, create: false).FullName,
+                BootstrapFolderPrefix + EpochToken(epoch),
+                GuestAgentInstaller.BinaryName);
+
+            return File.Exists(path)
+                ? await GuestAgentIdentity.ComputeBinaryHashAsync(path, cancellationToken).ConfigureAwait(false)
+                : null;
+        }
+        catch (Exception ex) when (
+            ex is IOException or UnauthorizedAccessException or ExecutionTargetException)
+        {
+            // This is only a recovery proof. If it cannot be read, normal liveness handling below
+            // repairs a stopped agent and otherwise reports the live agent as incompatible.
+            return null;
+        }
     }
 
     private static ExecutionTargetException AgentIdentityMismatch(
@@ -603,69 +688,114 @@ internal sealed class WindowsSandboxBackend(
             : null;
     }
 
-    /// <summary>
-    /// Records the guest address so the next process can reconnect without re-querying it.
-    /// </summary>
+    /// <summary>Records a completed connection and, when known, the exact running agent identity.</summary>
     /// <remarks>
-    /// Best effort and never fatal. The address is a cache, not a source of truth — losing it costs
-    /// one <c>wsb</c> call on the next command, while failing the command over it would trade a
-    /// working Sandbox for an error.
+    /// The address is a cache, but the bootstrap marker and identity are load-bearing: a later host
+    /// cannot safely warm-reuse a live agent it cannot identify. The state is consequently committed
+    /// before the connection is handed to the caller. A revision race is retried against a fresh state;
+    /// an I/O or access failure is surfaced instead of leaving an apparently successful connection that
+    /// strands a later invocation.
     /// </remarks>
     private void RememberConnection(
         SandboxInstanceLease lease,
         string address,
-        GuestAgentHeartbeat? heartbeat = null)
+        GuestAgentIdentity? identity = null)
     {
         if (stateStore is null)
         {
+            if (identity is not null)
+            {
+                throw ConnectionStateUnavailable(lease);
+            }
+
             return;
         }
 
-        try
+        for (var attempt = 0; attempt < ConnectionStateCommitAttempts; attempt++)
         {
-            var state = stateStore.Read(Target);
+            var state = RequireStateForLease(stateStore.Read(Target), lease);
 
-            if (state is null ||
-                !string.Equals(state.InstanceId, lease.InstanceId, StringComparison.OrdinalIgnoreCase))
+            var updated = state with
+            {
+                GuestAddress = string.IsNullOrWhiteSpace(address) ? state.GuestAddress : address,
+                BootstrappedEpoch = lease.Epoch.Value,
+                AgentVersion = identity?.Version ?? state.AgentVersion,
+                AgentBinaryHash = identity?.BinaryHash ?? state.AgentBinaryHash,
+            };
+
+            if (updated == state)
             {
                 return;
             }
 
-            var addressChanged = !string.IsNullOrWhiteSpace(address) &&
-                !string.Equals(state.GuestAddress, address, StringComparison.OrdinalIgnoreCase);
-
-            // The bootstrap marker is written here, and only here, because reaching this point is
-            // what proves the guest is actually talkable-to: the client is connected, the agent
-            // published a matching heartbeat, and the authenticated channel is open. Recording it
-            // when ownership was claimed instead would let a command killed mid-bootstrap leave an
-            // instance the next command treats as warm.
-            var bootstrapChanged = !string.Equals(
-                state.BootstrappedEpoch, lease.Epoch.Value, StringComparison.Ordinal);
-            var identityChanged = heartbeat is not null &&
-                (!string.Equals(state.AgentVersion, heartbeat.Version, StringComparison.OrdinalIgnoreCase)
-                    || !string.Equals(state.AgentBinaryHash, heartbeat.BinaryHash, StringComparison.OrdinalIgnoreCase));
-
-            if (!addressChanged && !bootstrapChanged && !identityChanged)
+            try
             {
+                stateStore.Commit(Target, updated, state.Revision);
                 return;
             }
-
-            stateStore.Commit(
-                Target,
-                state with
-                {
-                    GuestAddress = addressChanged ? address : state.GuestAddress,
-                    BootstrappedEpoch = lease.Epoch.Value,
-                    AgentVersion = identityChanged ? heartbeat!.Version : state.AgentVersion,
-                    AgentBinaryHash = identityChanged ? heartbeat!.BinaryHash : state.AgentBinaryHash,
-                },
-                state.Revision);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ExecutionTargetException)
-        {
-            // A stale or contended state file costs a re-bootstrap next time, nothing more.
+            catch (ExecutionTargetException ex) when (
+                attempt < ConnectionStateCommitAttempts - 1 &&
+                IsRevisionConflict(ex))
+            {
+                // Another host finished a state update first. Re-read it before retrying so this
+                // connection never overwrites a newer instance, boot nonce, or epoch.
+            }
+            catch (IOException ex)
+            {
+                throw ConnectionStateWriteFailed(lease, ex);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                throw ConnectionStateWriteFailed(lease, ex);
+            }
         }
     }
+
+    /// <summary>Returns a re-read target record only when it still describes the connection that succeeded.</summary>
+    private static TargetState RequireStateForLease(TargetState? state, SandboxInstanceLease lease)
+    {
+        if (state is { InstanceId: { } instanceId, BootNonce: { } bootNonce } &&
+            string.Equals(instanceId, lease.InstanceId, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(
+                ExecutionTargetEpoch.Create(instanceId, bootNonce).Value,
+                lease.Epoch.Value,
+                StringComparison.Ordinal) &&
+            (string.IsNullOrWhiteSpace(state.BootstrappedEpoch) ||
+                string.Equals(state.BootstrappedEpoch, lease.Epoch.Value, StringComparison.Ordinal)))
+        {
+            return state;
+        }
+
+        throw ExecutionTargetException.Create(
+            ExecutionTargetErrorCodes.TargetStale,
+            "Windows Sandbox ownership changed while winapp was recording the agent identity.",
+            userAction: "Retry the command so winapp reconnects to the current Windows Sandbox.",
+            context: new Dictionary<string, string> { ["targetEpoch"] = lease.Epoch.Value });
+    }
+
+    /// <summary>Whether a target-state failure was an optimistic-concurrency revision race.</summary>
+    private static bool IsRevisionConflict(ExecutionTargetException exception) =>
+        exception.Error.Code == ExecutionTargetErrorCodes.TargetAmbiguous &&
+        exception.Error.Context is { } context &&
+        context.ContainsKey("expectedRevision") &&
+        context.ContainsKey("actualRevision");
+
+    private static ExecutionTargetException ConnectionStateUnavailable(SandboxInstanceLease lease) =>
+        ExecutionTargetException.Create(
+            ExecutionTargetErrorCodes.TargetAmbiguous,
+            "winapp could not save the Windows Sandbox agent identity.",
+            userAction: "Retry the command. If it keeps failing, check access to winapp's target state directory.",
+            context: new Dictionary<string, string> { ["targetEpoch"] = lease.Epoch.Value });
+
+    private static ExecutionTargetException ConnectionStateWriteFailed(
+        SandboxInstanceLease lease,
+        Exception innerException) =>
+        ExecutionTargetException.Create(
+            ExecutionTargetErrorCodes.TargetAmbiguous,
+            "winapp could not save the Windows Sandbox agent identity.",
+            userAction: "Retry the command. If it keeps failing, check access to winapp's target state directory.",
+            context: new Dictionary<string, string> { ["targetEpoch"] = lease.Epoch.Value },
+            innerException: innerException);
 
     /// <inheritdoc/>
     public IReadOnlyDictionary<string, string> DescribeForDiagnostics()

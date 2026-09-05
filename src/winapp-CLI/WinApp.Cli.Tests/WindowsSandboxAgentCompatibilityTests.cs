@@ -234,7 +234,53 @@ public class WindowsSandboxAgentCompatibilityTests
     }
 
     [TestMethod]
-    public async Task WarmReconnect_MissingPersistedIdentity_RefusesTheLiveAgent()
+    public async Task WarmReconnect_MissingPersistedIdentityForTheStagedHost_HealsWithoutRelaunching()
+    {
+        await using var agent = new LocalAgent();
+        var host = await HostIdentityAsync();
+        var material = agent.StartNew(
+            Target,
+            Epoch,
+            host);
+        PersistWarmState(material, agentVersion: null, agentHash: null);
+
+        await using var channel = IntoCommandChannel(
+            await CreateBackend().EnsureConnectedAsync(
+                new EnsureTargetOptions(true),
+                TestContext.CancellationToken));
+
+        Assert.AreEqual("x64", (await channel.GetCapabilitiesAsync(TestContext.CancellationToken)).Architecture);
+        var state = _stateStore.Read(Target);
+        Assert.IsNotNull(state);
+        Assert.AreEqual(host.Version, state.AgentVersion);
+        Assert.AreEqual(host.BinaryHash, state.AgentBinaryHash);
+        Assert.AreEqual(0, _cli.LaunchAgentCount, "A matching staged binary must heal missing state without relaunching.");
+    }
+
+    [TestMethod]
+    public async Task ReusedInstance_AfterCrashBeforeTheBootstrapMarker_SelfHealsWithoutRelaunching()
+    {
+        await using var agent = new LocalAgent();
+        var host = await HostIdentityAsync();
+        var material = agent.StartNew(Target, Epoch, host);
+        PersistWarmState(material, agentVersion: null, agentHash: null, bootstrapped: false);
+
+        await using var channel = IntoCommandChannel(
+            await CreateBackend().EnsureConnectedAsync(
+                new EnsureTargetOptions(true),
+                TestContext.CancellationToken));
+
+        var state = _stateStore.Read(Target);
+        Assert.IsNotNull(state);
+        Assert.AreEqual(Epoch.Value, state.BootstrappedEpoch);
+        Assert.AreEqual(host.Version, state.AgentVersion);
+        Assert.AreEqual(host.BinaryHash, state.AgentBinaryHash);
+        Assert.AreEqual(0, _cli.LaunchAgentCount, "A crash before state commit must not start another agent.");
+        Assert.AreEqual("x64", (await channel.GetCapabilitiesAsync(TestContext.CancellationToken)).Architecture);
+    }
+
+    [TestMethod]
+    public async Task WarmReconnect_MissingIdentityWithDifferentStagedBinary_RefusesTheLiveAgent()
     {
         await using var agent = new LocalAgent();
         var material = agent.StartNew(
@@ -242,11 +288,12 @@ public class WindowsSandboxAgentCompatibilityTests
             Epoch,
             new GuestAgentIdentity(
                 VersionHelper.GetVersionString(),
-                "unknown-guest-hash",
+                "different-guest-hash",
                 "x64",
                 GuestProtocol.MinimumVersion,
                 GuestProtocol.CurrentVersion));
         PersistWarmState(material, agentVersion: null, agentHash: null);
+        File.WriteAllText(PersistedAgentPath(Epoch), "different-staged-agent");
 
         var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() =>
             CreateBackend().EnsureConnectedAsync(
@@ -254,8 +301,7 @@ public class WindowsSandboxAgentCompatibilityTests
                 TestContext.CancellationToken));
 
         Assert.AreEqual(ExecutionTargetErrorCodes.AgentIncompatible, failure.Error.Code);
-        Assert.AreEqual("unknown", failure.Error.Context!["guestVersion"]);
-        Assert.AreEqual(0, _cli.LaunchAgentCount, "An old state record must not silently reuse or replace a live agent.");
+        Assert.AreEqual(0, _cli.LaunchAgentCount, "An unproven live agent must never be replaced.");
     }
 
     [TestMethod]
@@ -284,7 +330,152 @@ public class WindowsSandboxAgentCompatibilityTests
         Assert.AreEqual(1, _cli.LaunchAgentCount, "A stopped agent is safe to repair in the current epoch.");
     }
 
-    private WindowsSandboxBackend CreateBackend(Func<int>? agentPortProvider = null)
+    [TestMethod]
+    [DataRow(1)]
+    [DataRow(2)]
+    public async Task BootstrapIdentityPersistence_RetriesConcurrentRevisionConflicts(int conflicts)
+    {
+        await using var agent = new LocalAgent();
+        var contended = new RevisionConflictStateStore(_stateStore, conflicts);
+        _cli.LaunchAgentHandler = (_, _, cancellationToken) =>
+            agent.StartFromBootstrapAsync(TargetRoot, CurrentEpoch, cancellationToken);
+
+        var connection = await CreateBackend(
+            agent.ReservePort,
+            connectionStateStore: contended).EnsureConnectedAsync(
+                new EnsureTargetOptions(true),
+                TestContext.CancellationToken);
+        await connection.Transport.DisposeAsync();
+
+        var state = _stateStore.Read(Target);
+        Assert.IsNotNull(state);
+        Assert.AreEqual(conflicts, contended.InjectedConflicts);
+        Assert.AreEqual(EpochFor(state).Value, state.BootstrappedEpoch);
+        Assert.AreEqual(VersionHelper.GetVersionString(), state.AgentVersion);
+        Assert.AreEqual(
+            await GuestAgentIdentity.ComputeBinaryHashAsync(_hostBinary.FullName, TestContext.CancellationToken),
+            state.AgentBinaryHash);
+        Assert.AreEqual(Loopback, state.GuestAddress);
+    }
+
+    [TestMethod]
+    public async Task BootstrapIdentityPersistence_AllRevisionConflictsLeaveARecoverableWarmAgent()
+    {
+        await using var agent = new LocalAgent();
+        var contended = new RevisionConflictStateStore(
+            _stateStore,
+            WindowsSandboxBackend.ConnectionStateCommitAttempts);
+        _cli.LaunchAgentHandler = (_, _, cancellationToken) =>
+            agent.StartFromBootstrapAsync(TargetRoot, CurrentEpoch, cancellationToken);
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() =>
+            CreateBackend(
+                agent.ReservePort,
+                connectionStateStore: contended).EnsureConnectedAsync(
+                    new EnsureTargetOptions(true),
+                    TestContext.CancellationToken));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.TargetAmbiguous, failure.Error.Code);
+        Assert.AreEqual(WindowsSandboxBackend.ConnectionStateCommitAttempts, contended.InjectedConflicts);
+
+        var afterFailure = _stateStore.Read(Target);
+        Assert.IsNotNull(afterFailure);
+        Assert.AreEqual(EpochFor(afterFailure).Value, afterFailure.BootstrappedEpoch);
+        Assert.IsNull(afterFailure.AgentVersion);
+        Assert.IsNull(afterFailure.AgentBinaryHash);
+
+        await using var channel = IntoCommandChannel(
+            await CreateBackend().EnsureConnectedAsync(
+                new EnsureTargetOptions(true),
+                TestContext.CancellationToken));
+
+        var healed = _stateStore.Read(Target);
+        Assert.IsNotNull(healed);
+        Assert.AreEqual(VersionHelper.GetVersionString(), healed.AgentVersion);
+        Assert.AreEqual(
+            await GuestAgentIdentity.ComputeBinaryHashAsync(_hostBinary.FullName, TestContext.CancellationToken),
+            healed.AgentBinaryHash);
+        Assert.AreEqual(1, _cli.LaunchAgentCount, "A later host must heal state instead of relaunching the agent.");
+        Assert.AreEqual("x64", (await channel.GetCapabilitiesAsync(TestContext.CancellationToken)).Architecture);
+    }
+
+    [TestMethod]
+    public async Task BootstrapIdentityPersistence_IoFailureIsSurfacedAndTheNextHostCanHeal()
+    {
+        await using var agent = new LocalAgent();
+        var unavailable = new IoFailingStateStore(_stateStore);
+        _cli.LaunchAgentHandler = (_, _, cancellationToken) =>
+            agent.StartFromBootstrapAsync(TargetRoot, CurrentEpoch, cancellationToken);
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() =>
+            CreateBackend(
+                agent.ReservePort,
+                connectionStateStore: unavailable).EnsureConnectedAsync(
+                    new EnsureTargetOptions(true),
+                    TestContext.CancellationToken));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.TargetAmbiguous, failure.Error.Code);
+        Assert.IsInstanceOfType<IOException>(failure.InnerException);
+        Assert.AreEqual(1, unavailable.CommitAttempts, "I/O failures are not optimistic-concurrency retries.");
+
+        var afterFailure = _stateStore.Read(Target);
+        Assert.IsNotNull(afterFailure);
+        Assert.IsNull(afterFailure.BootstrappedEpoch);
+        Assert.IsNull(afterFailure.AgentBinaryHash);
+
+        await using var channel = IntoCommandChannel(
+            await CreateBackend().EnsureConnectedAsync(
+                new EnsureTargetOptions(true),
+                TestContext.CancellationToken));
+
+        var healed = _stateStore.Read(Target);
+        Assert.IsNotNull(healed);
+        Assert.AreEqual(EpochFor(healed).Value, healed.BootstrappedEpoch);
+        Assert.AreEqual(
+            await GuestAgentIdentity.ComputeBinaryHashAsync(_hostBinary.FullName, TestContext.CancellationToken),
+            healed.AgentBinaryHash);
+        Assert.AreEqual(1, _cli.LaunchAgentCount, "A failed identity write must not permanently wedge the agent.");
+        Assert.AreEqual("x64", (await channel.GetCapabilitiesAsync(TestContext.CancellationToken)).Architecture);
+    }
+
+    [TestMethod]
+    public async Task BootstrapIdentityPersistence_EpochChangeDuringRetryIsNotOverwritten()
+    {
+        const string NewerNonce = "newer-nonce";
+        var changed = new RevisionConflictStateStore(_stateStore, 1)
+        {
+            MutateBeforeConflict = state => state with
+            {
+                BootNonce = NewerNonce,
+                BootstrappedEpoch = ExecutionTargetEpoch.Create(state.InstanceId!, NewerNonce).Value,
+                AgentVersion = "999.0.0",
+                AgentBinaryHash = "newer-agent-hash",
+            },
+        };
+
+        await using var agent = new LocalAgent();
+        _cli.LaunchAgentHandler = (_, _, cancellationToken) =>
+            agent.StartFromBootstrapAsync(TargetRoot, CurrentEpoch, cancellationToken);
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() =>
+            CreateBackend(
+                agent.ReservePort,
+                connectionStateStore: changed).EnsureConnectedAsync(
+                    new EnsureTargetOptions(true),
+                    TestContext.CancellationToken));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.TargetStale, failure.Error.Code);
+        var state = _stateStore.Read(Target);
+        Assert.IsNotNull(state);
+        Assert.AreEqual(NewerNonce, state.BootNonce);
+        Assert.AreEqual(ExecutionTargetEpoch.Create(state.InstanceId!, NewerNonce).Value, state.BootstrappedEpoch);
+        Assert.AreEqual("999.0.0", state.AgentVersion);
+        Assert.AreEqual("newer-agent-hash", state.AgentBinaryHash);
+    }
+
+    private WindowsSandboxBackend CreateBackend(
+        Func<int>? agentPortProvider = null,
+        ITargetStateStore? connectionStateStore = null)
     {
         var backend = new WindowsSandboxBackend(
             _cli,
@@ -293,7 +484,7 @@ public class WindowsSandboxAgentCompatibilityTests
             new StaticBinaryProvider(_hostBinary),
             new NoOpWindowController(),
             setup: null,
-            _stateStore,
+            connectionStateStore ?? _stateStore,
             NullTargetProgress.Instance);
 
         if (agentPortProvider is not null)
@@ -307,7 +498,8 @@ public class WindowsSandboxAgentCompatibilityTests
     private void PersistWarmState(
         GuestBootstrapMaterial material,
         string? agentVersion,
-        string? agentHash)
+        string? agentHash,
+        bool bootstrapped = true)
     {
         _cli.SetRunning(InstanceId);
         _stateStore.Commit(
@@ -320,17 +512,44 @@ public class WindowsSandboxAgentCompatibilityTests
                 TargetId = Target.Id,
                 InstanceId = InstanceId,
                 BootNonce = BootNonce,
-                BootstrappedEpoch = Epoch.Value,
+                BootstrappedEpoch = bootstrapped ? Epoch.Value : null,
                 AgentVersion = agentVersion,
                 AgentBinaryHash = agentHash,
                 GuestAddress = Loopback,
             },
             expectedRevision: 0);
 
-        var bootstrap = Path.Join(TargetRoot, "bootstrap-" + WindowsSandboxBackend.EpochToken(Epoch));
+        WriteBootstrapMaterial(Epoch, material);
+    }
+
+    private async Task<GuestAgentIdentity> HostIdentityAsync() =>
+        new(
+            VersionHelper.GetVersionString(),
+            await GuestAgentIdentity
+                .ComputeBinaryHashAsync(_hostBinary.FullName, TestContext.CancellationToken)
+                .ConfigureAwait(false),
+            "x64",
+            GuestProtocol.MinimumVersion,
+            GuestProtocol.CurrentVersion);
+
+    private void WriteBootstrapMaterial(ExecutionTargetEpoch epoch, GuestBootstrapMaterial material)
+    {
+        var bootstrap = Path.Join(TargetRoot, "bootstrap-" + WindowsSandboxBackend.EpochToken(epoch));
         Directory.CreateDirectory(bootstrap);
+        File.Copy(_hostBinary.FullName, Path.Join(bootstrap, GuestAgentInstaller.BinaryName), overwrite: true);
         File.WriteAllText(Path.Join(bootstrap, GuestBootstrapMaterial.FileName), material.ToJson());
     }
+
+    private string PersistedAgentPath(ExecutionTargetEpoch epoch) =>
+        Path.Join(
+            TargetRoot,
+            "bootstrap-" + WindowsSandboxBackend.EpochToken(epoch),
+            GuestAgentInstaller.BinaryName);
+
+    private static ExecutionTargetEpoch EpochFor(TargetState state) =>
+        ExecutionTargetEpoch.Create(
+            state.InstanceId ?? throw new InvalidOperationException("Test state has no instance ID."),
+            state.BootNonce ?? throw new InvalidOperationException("Test state has no boot nonce."));
 
     private static GuestCommandChannel IntoCommandChannel(TargetConnection connection)
     {
@@ -494,6 +713,65 @@ public class WindowsSandboxAgentCompatibilityTests
         public Task PlaceConnectedClientAsync(
             WindowsSandboxWindowSnapshot snapshot,
             CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Injects a state revision committed by another host between this host's read and write.
+    /// </summary>
+    private sealed class RevisionConflictStateStore(ITargetStateStore inner, int conflicts) : ITargetStateStore
+    {
+        private int _remainingConflicts = conflicts;
+
+        public int InjectedConflicts { get; private set; }
+
+        public Func<TargetState, TargetState>? MutateBeforeConflict { get; init; }
+
+        public TargetState? Read(ExecutionTargetRef target) => inner.Read(target);
+
+        public TargetState Commit(ExecutionTargetRef target, TargetState state, long expectedRevision)
+        {
+            if (_remainingConflicts-- <= 0)
+            {
+                return inner.Commit(target, state, expectedRevision);
+            }
+
+            var current = inner.Read(target)
+                ?? throw new InvalidOperationException("The test expected a target state before injecting a conflict.");
+            var concurrent = MutateBeforeConflict?.Invoke(current) ?? current with
+            {
+                BootstrappedEpoch = EpochFor(current).Value,
+            };
+            var committed = inner.Commit(target, concurrent, current.Revision);
+            InjectedConflicts++;
+
+            throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.TargetAmbiguous,
+                "Windows Sandbox state changed while this command was running.",
+                userAction: "Retry the command.",
+                context: new Dictionary<string, string>
+                {
+                    ["expectedRevision"] = expectedRevision.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["actualRevision"] = committed.Revision.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
+        public void Clear(ExecutionTargetRef target) => inner.Clear(target);
+    }
+
+    /// <summary>Fails persistence without presenting it as an optimistic-concurrency retry.</summary>
+    private sealed class IoFailingStateStore(ITargetStateStore inner) : ITargetStateStore
+    {
+        public int CommitAttempts { get; private set; }
+
+        public TargetState? Read(ExecutionTargetRef target) => inner.Read(target);
+
+        public TargetState Commit(ExecutionTargetRef target, TargetState state, long expectedRevision)
+        {
+            CommitAttempts++;
+            throw new IOException("The target-state file is unavailable.");
+        }
+
+        public void Clear(ExecutionTargetRef target) => inner.Clear(target);
     }
 
     private sealed class CompatibilitySandboxCli : IWindowsSandboxCli
