@@ -436,7 +436,19 @@ internal sealed partial class UiRecordingService(
                         if (closedLatest is not null)
                         {
                             var (closedSrc, closedSw, closedSh, closedVersion) = closedLatest.Value;
-                            if (ShouldEncodeClosedDrainFrame(closedVersion, lastEncodedVersion))
+
+                            // The last frame a closing capture session leaves behind gets the same
+                            // scrutiny as any other. Without this, a window that only ever produced
+                            // blank warm-up frames and then closed publishes a one-frame black MP4 --
+                            // the same false success the frame loop refuses, arriving by the one door
+                            // that skipped the check.
+                            var closedFrameIsBlank = options.NoActivation && CapturedFrame.IsBlank(closedSrc);
+
+                            if (closedFrameIsBlank)
+                            {
+                                sawBlankFrame = true;
+                            }
+                            else if (ShouldEncodeClosedDrainFrame(closedVersion, lastEncodedVersion))
                             {
                                 var closedCropW = isWholeWindowWgc ? closedSw : cropW;
                                 var closedCropH = isWholeWindowWgc ? closedSh : cropH;
@@ -601,9 +613,10 @@ internal sealed partial class UiRecordingService(
 
             if (frameIndex == 0 && sawBlankFrame)
             {
-                // The take ran its full length and frame capture never produced anything but black.
-                // Treated as the window not being capturable at all, because that is what it means:
-                // the alternative is publishing a video of nothing and calling it a recording.
+                // The take ended -- on its own deadline, or because the window closed -- and frame
+                // capture never produced anything but black. Treated as the window not being
+                // capturable at all, because that is what it means: the alternative is publishing a
+                // video of nothing and calling it a recording.
                 captureUnavailable = true;
             }
 

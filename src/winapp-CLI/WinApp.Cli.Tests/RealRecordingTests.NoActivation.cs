@@ -393,15 +393,124 @@ public partial class RealRecordingTests
         Assert.AreEqual("duration_elapsed", result.StopReason);
     }
 
-    /// <summary>Frame capture that stops producing content after the first few frames.</summary>
-    private sealed class ScriptedFrameGrabber(int usableFrames) : IFrameGrabber
+    /// <summary>
+    /// The one door that skipped the check. When a capture session ends, the recorder drains the last
+    /// frame it cached so a window that closed mid-take still contributes what it had. A window that
+    /// only ever produced blank warm-up frames and then closed reached that drain with nothing worth
+    /// keeping, and published a one-frame black MP4 for it.
+    /// </summary>
+    [TestMethod]
+    public async Task RecordAsync_NoActivation_SessionClosesWithOnlyBlankCached_RecordsNothing()
+    {
+        using var fx = new UiaTestFixture();
+        var capture = new FakeWindowCapture
+        {
+            Supported = true,
+            StartGrabberCallback = (_, _) => new ScriptedFrameGrabber(usableFrames: 0, closesAfter: 0),
+            CaptureWithoutActivationOverride = _ => Frame(),
+        };
+        var recording = NewRecordingService(NewAutomation(), capture);
+        var output = ScratchOutput("closed-all-blank.mp4");
+        var framesDirectory = Path.Combine(Path.GetDirectoryName(output)!, "closed-all-blank.frames");
+        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) =>
+            new FakeVideoEncoder(path, width, height);
+
+        var exception = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => recording.RecordAsync(SessionFor(fx), null, new RecordOptions
+            {
+                OutputPath = output,
+                DurationSec = 4,
+                Fps = 2,
+                MaxEdge = 64,
+                NoActivation = true,
+                FramesDirectory = framesDirectory,
+            }, CancellationToken.None));
+
+        StringAssert.Contains(exception.Message, "could not be captured");
+        Assert.IsFalse(File.Exists(output), "A single black drain frame is not a recording.");
+        Assert.IsFalse(Directory.Exists(framesDirectory), "Nothing usable was captured, so no frames are published.");
+    }
+
+    /// <summary>
+    /// The same drain when there is something worth keeping. The frames with content in them are
+    /// published, the black one the closing session left behind is not, and the take reports that the
+    /// window closed — which is what actually happened.
+    /// </summary>
+    [TestMethod]
+    public async Task RecordAsync_NoActivation_SessionClosesAfterRealFrames_KeepsThemAndDropsTheBlank()
+    {
+        using var fx = new UiaTestFixture();
+        var capture = new FakeWindowCapture
+        {
+            Supported = true,
+
+            // Two usable: the first is consumed reading the frame size before the take. The session
+            // then reports itself closed, with only a blank frame left cached.
+            StartGrabberCallback = (_, _) => new ScriptedFrameGrabber(usableFrames: 2, closesAfter: 2),
+            CaptureWithoutActivationOverride = _ => Frame(),
+        };
+        var recording = NewRecordingService(NewAutomation(), capture);
+        var output = ScratchOutput("closed-after-real.mp4");
+        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) =>
+            new FakeVideoEncoder(path, width, height);
+
+        var result = await recording.RecordAsync(SessionFor(fx), null, new RecordOptions
+        {
+            OutputPath = output,
+            DurationSec = 4,
+            Fps = 2,
+            MaxEdge = 64,
+            NoActivation = true,
+        }, CancellationToken.None);
+
+        Assert.AreEqual(1, result.Frames, "The blank drain frame must not pad the take.");
+        Assert.AreEqual("target_closed", result.StopReason);
+    }
+
+    /// <summary>
+    /// Ordinary <c>ui record</c> still drains whatever the closing session cached, black or not.
+    /// </summary>
+    [TestMethod]
+    public async Task RecordAsync_OrdinaryRecording_SessionClosesWithBlankCached_StillDrainsIt()
+    {
+        using var fx = new UiaTestFixture();
+        var capture = new FakeWindowCapture
+        {
+            Supported = true,
+            StartGrabberCallback = (_, _) => new ScriptedFrameGrabber(usableFrames: 0, closesAfter: 0),
+        };
+        var recording = NewRecordingService(NewAutomation(), capture);
+        var output = ScratchOutput("closed-blank-ordinary.mp4");
+        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) =>
+            new FakeVideoEncoder(path, width, height);
+
+        var result = await recording.RecordAsync(SessionFor(fx), null, new RecordOptions
+        {
+            OutputPath = output,
+            DurationSec = 4,
+            Fps = 2,
+            MaxEdge = 64,
+        }, CancellationToken.None);
+
+        Assert.AreEqual(1, result.Frames);
+        Assert.AreEqual("target_closed", result.StopReason);
+    }
+
+    /// <summary>
+    /// Frame capture that stops producing content, and optionally ends the session, part way through.
+    /// </summary>
+    /// <param name="usableFrames">How many frames come back with content on them.</param>
+    /// <param name="closesAfter">
+    /// How many frames are served before the session reports itself closed. The default never closes.
+    /// </param>
+    private sealed class ScriptedFrameGrabber(int usableFrames, int closesAfter = int.MaxValue) : IFrameGrabber
     {
         private readonly byte[] _painted = Enumerable.Repeat((byte)0x5A, 64 * 64 * 4).ToArray();
         private readonly byte[] _blank = new byte[64 * 64 * 4];
         private long _version;
         private int _served;
 
-        public bool IsClosed => false;
+        public bool IsClosed => _served >= closesAfter;
 
         public (byte[] Pixels, int Width, int Height, long Version)? TryGetLatest()
             => (_served++ < usableFrames ? _painted : _blank, 64, 64, Interlocked.Increment(ref _version));
