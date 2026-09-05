@@ -447,7 +447,7 @@ internal sealed partial class ProjectRunService
     {
         inheritedPath ??= Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
         var pathVsWhere = FindExecutableOnPath("vswhere.exe", inheritedPath);
-        var installerDirectory = Path.Combine(
+        var installerDirectory = Path.Join(
             Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
             "Microsoft Visual Studio",
             "Installer");
@@ -493,20 +493,14 @@ internal sealed partial class ProjectRunService
             return null;
         }
 
-        var candidates = path
+        return path
             .Split(
                 Path.PathSeparator,
                 StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(directory => Path.Join(directory.Trim('"'), executableName));
-        foreach (var candidate in candidates)
-        {
-            if (File.Exists(candidate))
-            {
-                return Path.GetFullPath(candidate);
-            }
-        }
-
-        return null;
+            .Select(directory => Path.Join(directory.Trim('"'), executableName))
+            .Where(File.Exists)
+            .Select(Path.GetFullPath)
+            .FirstOrDefault();
     }
 
     private static string BuildPublishFailureMessage(
