@@ -268,8 +268,8 @@ public class SandboxRunTests
         await run;
 
         var state = harness.States.Read(WindowsSandboxTarget.Default, "dep-1");
-        Assert.AreEqual(process.ProcessId, state!.ProcessId);
-        Assert.AreEqual(process.StartTicksUtc, state.ProcessStartTicksUtc);
+        Assert.AreEqual(process.ProcessId, state!.TrackedOperationProcessId);
+        Assert.AreEqual(process.StartTicksUtc, state.TrackedOperationProcessStartTicksUtc);
 
         // Recording the process advances the stored revision, so the caller has to be handed
         // the record back. A caller that kept its pre-launch state and committed against it
@@ -543,6 +543,18 @@ public class SandboxRunTests
         await using var harness = new Harness(_guestManaged, _stateRoot);
         var owner = await CreateOwnedDeploymentAsync(harness, "dep-owner");
         await CreateOwnedDeploymentAsync(harness, "dep-stale");
+        foreach (var deploymentId in new[] { "dep-owner", "dep-stale" })
+        {
+            var state = harness.States.Read(WindowsSandboxTarget.Default, deploymentId)!;
+            harness.States.Commit(
+                WindowsSandboxTarget.Default,
+                state with
+                {
+                    TrackedOperationProcessId = 4000,
+                    TrackedOperationProcessStartTicksUtc = 5000,
+                },
+                state.Revision);
+        }
         harness.AppLauncher.FakeRegisteredLocation = owner.LayoutPath;
         var fullName = harness.AppLauncher.FakePackageFullName!;
         harness.PackageRegistration.OnUnregisterByFullName = (_, _) =>
@@ -563,6 +575,10 @@ public class SandboxRunTests
             harness.PackageRegistration.UnregisterByFullNameCalls.Single());
         Assert.IsNull(harness.States.Read(WindowsSandboxTarget.Default, "dep-owner")!.Package);
         Assert.IsNull(harness.States.Read(WindowsSandboxTarget.Default, "dep-stale")!.Package);
+        Assert.IsNull(
+            harness.States.Read(WindowsSandboxTarget.Default, "dep-owner")!.TrackedOperationProcessId);
+        Assert.IsNull(
+            harness.States.Read(WindowsSandboxTarget.Default, "dep-stale")!.TrackedOperationProcessId);
     }
 
     [TestMethod]

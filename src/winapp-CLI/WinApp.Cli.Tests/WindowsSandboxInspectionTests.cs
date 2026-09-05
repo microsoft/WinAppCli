@@ -117,7 +117,7 @@ public class WindowsSandboxInspectionTests
         await backend.TryAttachAsync(TestContext.CancellationToken);
         var before = _stateStore.Read(WindowsSandboxTarget.Default)!.Revision;
 
-        backend.ResolveDesktopSurface();
+        backend.ResolveDesktopSurface(TargetDesktopUse.PixelCapture);
 
         var after = _stateStore.Read(WindowsSandboxTarget.Default)!;
         Assert.IsTrue(after.Revision > before, "The adopted client must survive into the next command.");

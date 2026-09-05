@@ -15,7 +15,12 @@ namespace WinApp.Cli.ExecutionTargets.WindowsSandbox;
 /// <param name="ForegroundWindow">
 /// What the user was working in, so parking the client can hand focus straight back.
 /// </param>
-internal sealed record WindowsSandboxWindowSnapshot(HWND ForegroundWindow);
+internal sealed class WindowsSandboxWindowSnapshot(HWND foregroundWindow)
+{
+    public HWND ForegroundWindow { get; } = foregroundWindow;
+
+    internal Task<SandboxClientWindow?>? EarlyPlacement { get; set; }
+}
 
 /// <summary>
 /// One live Sandbox client window on the host, identified by more than its handle.
@@ -43,10 +48,23 @@ internal sealed record SandboxClientWindow(nint Handle, int ProcessId, long Star
 /// </param>
 internal sealed record SandboxClientCandidate(SandboxClientWindow Window, int? ParentProcessId);
 
+/// <summary>A resolved client window and its current host-side state.</summary>
+internal sealed record SandboxClientStatus(SandboxClientWindow Window, bool IsMinimized);
+
 /// <summary>Keeps the connected Sandbox client non-minimized, off-screen, and non-activating.</summary>
 internal interface IWindowsSandboxWindowController
 {
     WindowsSandboxWindowSnapshot Capture();
+
+    /// <summary>
+    /// Starts exact-owner placement as soon as the <c>wsb connect</c> launcher is known.
+    /// </summary>
+    void ObserveConnect(
+        WindowsSandboxWindowSnapshot snapshot,
+        SandboxConnectOwnership? ownership,
+        CancellationToken cancellationToken)
+    {
+    }
 
     /// <summary>
     /// Places the client that <paramref name="ownership"/> created, and reports which window it was.
@@ -77,6 +95,17 @@ internal interface IWindowsSandboxWindowController
     /// No client window is open, or several are and <paramref name="remembered"/> is not among them.
     /// </exception>
     SandboxClientWindow ResolveClient(SandboxClientWindow? remembered);
+
+    /// <summary>Reads the exact client's current state without moving or activating it.</summary>
+    SandboxClientStatus InspectClient(SandboxClientWindow? remembered) =>
+        new(ResolveClient(remembered), IsMinimized: false);
+
+    /// <summary>
+    /// Restores the exact client without activation when necessary, then verifies its identity,
+    /// non-minimized state, and foreground preservation.
+    /// </summary>
+    SandboxClientStatus EnsureClientReady(SandboxClientWindow? remembered, TargetDesktopUse use) =>
+        InspectClient(remembered);
 }
 
 /// <summary>Controls only the remote-session window the current connect actually created.</summary>
@@ -102,23 +131,34 @@ internal sealed class WindowsSandboxWindowController : IWindowsSandboxWindowCont
     internal const string RemoteSessionProcessName = "WindowsSandboxRemoteSession";
     private static readonly TimeSpan WindowTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan EarlyPollInterval = TimeSpan.FromMilliseconds(10);
 
     private readonly Func<IReadOnlyList<SandboxClientCandidate>> _listClients;
     private readonly Action<SandboxClientWindow, HWND> _park;
+    private readonly Func<nint, bool> _isIconic;
+    private readonly Func<HWND> _getForeground;
 
     /// <summary>Creates a controller that reads the real desktop.</summary>
     public WindowsSandboxWindowController()
-        : this(ListLiveClients, (client, foreground) => PlaceOffScreen(new HWND(client.Handle), foreground))
+        : this(
+            ListLiveClients,
+            (client, foreground) => PlaceOffScreen(new HWND(client.Handle), foreground),
+            handle => PInvoke.IsIconic(new HWND(handle)),
+            PInvoke.GetForegroundWindow)
     {
     }
 
     /// <summary>Creates a controller over scripted windows and placement, for tests.</summary>
     internal WindowsSandboxWindowController(
         Func<IReadOnlyList<SandboxClientCandidate>> listClients,
-        Action<SandboxClientWindow, HWND>? park = null)
+        Action<SandboxClientWindow, HWND>? park = null,
+        Func<nint, bool>? isIconic = null,
+        Func<HWND>? getForeground = null)
     {
         _listClients = listClients;
         _park = park ?? ((client, foreground) => PlaceOffScreen(new HWND(client.Handle), foreground));
+        _isIconic = isIconic ?? (handle => PInvoke.IsIconic(new HWND(handle)));
+        _getForeground = getForeground ?? PInvoke.GetForegroundWindow;
     }
 
     /// <summary>Delay seam, so waiting for the client is exercised without real waiting.</summary>
@@ -127,7 +167,31 @@ internal sealed class WindowsSandboxWindowController : IWindowsSandboxWindowCont
     /// <summary>Clock seam, so timeouts are exercised without real time passing.</summary>
     internal Func<DateTimeOffset> UtcNow { get; set; } = () => DateTimeOffset.UtcNow;
 
-    public WindowsSandboxWindowSnapshot Capture() => new(PInvoke.GetForegroundWindow());
+    public WindowsSandboxWindowSnapshot Capture() => new(_getForeground());
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Installed before <c>ConnectAsync</c> waits for its fast-failure window. A live WinEvent probe
+    /// showed Windows can assign foreground before the remote-session process publishes an
+    /// interceptable top-level CREATE/SHOW event, so this does not claim to eliminate first paint.
+    /// It is the earliest safe mitigation available: poll only after the exact launcher identity is
+    /// known, and park only the direct child whose start time proves it belongs to that launcher.
+    /// </remarks>
+    public void ObserveConnect(
+        WindowsSandboxWindowSnapshot snapshot,
+        SandboxConnectOwnership? ownership,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        snapshot.EarlyPlacement = ownership is null
+            ? Task.FromResult<SandboxClientWindow?>(null)
+            : WaitAndPlaceAsync(
+                snapshot,
+                ownership,
+                EarlyPollInterval,
+                cancellationToken);
+    }
 
     public async Task<SandboxClientWindow?> PlaceConnectedClientAsync(
         WindowsSandboxWindowSnapshot snapshot,
@@ -135,6 +199,11 @@ internal sealed class WindowsSandboxWindowController : IWindowsSandboxWindowCont
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
+
+        if (snapshot.EarlyPlacement is { } earlyPlacement)
+        {
+            return await earlyPlacement.ConfigureAwait(false);
+        }
 
         if (ownership is null)
         {
@@ -146,8 +215,17 @@ internal sealed class WindowsSandboxWindowController : IWindowsSandboxWindowCont
             return null;
         }
 
-        var deadline = UtcNow() + WindowTimeout;
+        return await WaitAndPlaceAsync(snapshot, ownership, PollInterval, cancellationToken)
+            .ConfigureAwait(false);
+    }
 
+    private async Task<SandboxClientWindow?> WaitAndPlaceAsync(
+        WindowsSandboxWindowSnapshot snapshot,
+        SandboxConnectOwnership ownership,
+        TimeSpan pollInterval,
+        CancellationToken cancellationToken)
+    {
+        var deadline = UtcNow() + WindowTimeout;
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -173,7 +251,7 @@ internal sealed class WindowsSandboxWindowController : IWindowsSandboxWindowCont
                 break;
             }
 
-            await Delay(PollInterval, cancellationToken).ConfigureAwait(false);
+            await Delay(pollInterval, cancellationToken).ConfigureAwait(false);
         }
 
         Trace.TraceWarning(
@@ -234,6 +312,65 @@ internal sealed class WindowsSandboxWindowController : IWindowsSandboxWindowCont
     /// <inheritdoc/>
     public SandboxClientWindow ResolveClient(SandboxClientWindow? remembered) =>
         ResolveClient(remembered, [.. _listClients().Select(candidate => candidate.Window)]);
+
+    /// <inheritdoc/>
+    public SandboxClientStatus InspectClient(SandboxClientWindow? remembered)
+    {
+        var client = ResolveClient(remembered);
+        return new SandboxClientStatus(client, _isIconic(client.Handle));
+    }
+
+    /// <inheritdoc/>
+    public SandboxClientStatus EnsureClientReady(
+        SandboxClientWindow? remembered,
+        TargetDesktopUse use)
+    {
+        var previousForeground = _getForeground();
+        var client = ResolveClient(remembered);
+
+        if (!_isIconic(client.Handle))
+        {
+            return new SandboxClientStatus(client, IsMinimized: false);
+        }
+
+        _park(client, previousForeground);
+
+        var stillLive = _listClients()
+            .Select(candidate => candidate.Window)
+            .Any(candidate => candidate == client);
+        var restored = stillLive && !_isIconic(client.Handle);
+        var foregroundPreserved =
+            previousForeground.IsNull ||
+            _getForeground() == previousForeground;
+
+        if (!restored || !foregroundPreserved)
+        {
+            throw NotReady(use, client, restored, foregroundPreserved);
+        }
+
+        return new SandboxClientStatus(client, IsMinimized: false);
+    }
+
+    private static ExecutionTargetException NotReady(
+        TargetDesktopUse use,
+        SandboxClientWindow client,
+        bool restored,
+        bool foregroundPreserved) =>
+        ExecutionTargetException.Create(
+            use == TargetDesktopUse.RealInput
+                ? ExecutionTargetErrorCodes.InputNotReady
+                : ExecutionTargetErrorCodes.ArtifactFailed,
+            use == TargetDesktopUse.RealInput
+                ? "The Windows Sandbox client is minimized and could not be restored without taking focus."
+                : "The Windows Sandbox client is minimized and could not be restored for capture without taking focus.",
+            userAction: "Restore the Windows Sandbox window, then retry.",
+            context: new Dictionary<string, string>
+            {
+                ["clientProcessId"] = client.ProcessId.ToString(CultureInfo.InvariantCulture),
+                ["clientWindowHandle"] = client.Handle.ToString(CultureInfo.InvariantCulture),
+                ["restored"] = restored.ToString(),
+                ["foregroundPreserved"] = foregroundPreserved.ToString(),
+            });
 
     /// <summary>
     /// Decides which live client window a capture may use.

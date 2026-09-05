@@ -323,10 +323,10 @@ window itself, and returns the entire rendered guest desktop — shell, dialogs,
 appeared before it could be named. Nothing is staged in the guest and nothing is transferred back,
 because the pixels were on your machine the whole time.
 
-The client window winapp parked off-screen is captured where it is. No window is activated and no
-focus is taken, so a Sandbox capture cannot interrupt what you are doing, exactly like every other
-Sandbox workflow — and if a frame cannot be obtained without activating the window, the capture fails
-rather than pulling the Sandbox onto your screen.
+The client window winapp parked off-screen is captured where it is. If that exact client is minimized,
+winapp restores it with `SW_SHOWNOACTIVATE`, parks it off-screen again with `SWP_NOACTIVATE`, and verifies
+that its process identity is unchanged and the previous foreground window remained foreground. If any
+check fails, capture fails without publishing a misleading minimized thumbnail.
 
 `winapp target snapshot` goes further: it never starts a Sandbox, never connects or reconnects the
 client, and never repairs an unresponsive agent, so asking what the Sandbox is doing can never be what
@@ -336,10 +336,10 @@ makes it do something. With no Sandbox running it reports that and exits 0. Star
 `winapp target record` resolves the client window and then releases the guest connection before the
 take begins, because the recording runs entirely on the host. A recording that lasts hours does not
 occupy the Sandbox's single guest connection for hours. It holds the same promise as a screenshot for
-its whole length: the client window is never restored, brought to the front, or activated to rescue a
-frame. A minimized client fails the recording up front, before any file is written, rather than
-reappearing on your screen; a client that stops being capturable mid-take ends the recording and
-publishes what it captured with the stop reason `capture_unavailable`. A window that capture only
+its whole length: the client window is never brought to the front or activated to rescue a frame. A
+minimized client is restored and parked without activation before the take; a client that stops being
+capturable mid-take ends the recording and publishes what it captured with the stop reason
+`capture_unavailable`. A window that capture only
 ever returns black for counts as not capturable, so a Sandbox recording is never an all-black video
 reported as a successful take. Recording an app you are watching with `winapp ui record` is
 unchanged.
@@ -463,6 +463,12 @@ Real input and screen recording require the Sandbox's remote-session client to b
 not minimized. winapp keeps the window it owns off-screen and at the bottom of the window order,
 without activating it, so it never takes your foreground.
 
+If the client is minimized before a real-input or capture command, winapp restores only the exact
+managed or adopted client, immediately before the operation. The restore is nonactivating and is
+accepted only when the same handle, process ID, and process start time remain live, the window is no
+longer minimized, and the previous foreground window is unchanged. Read-only UI inspection does not
+restore or move a minimized client.
+
 winapp connects a client only when the guest does not already have an interactive session. If you
 already had the Sandbox open, that window keeps being the one you see: connecting again would start
 a **second** client rather than reuse yours, and the extra one outlives `wsb stop`.
@@ -472,6 +478,12 @@ session alone that the window is gone. It finds out when the guest agent reports
 desktop, and at that point it reconnects for you, **once**, placing the new window off-screen and
 without taking your foreground. If the guest still has no input desktop after that, winapp stops and
 reports `sandbox_input_not_ready` with a `wsb connect` command rather than reconnecting again.
+
+On a cold connection, Windows can assign foreground and paint the client before its top-level
+CREATE/SHOW accessibility event is delivered. winapp begins exact-parent polling as soon as its own
+`wsb connect` launcher starts and parks the client at the first provable opportunity, then restores
+the previous foreground if Windows took it. This minimizes the visible interval, but Windows exposes
+no background-connect option and does not provide a hook early enough to guarantee zero first paint.
 
 Closing that window has a specific and initially surprising effect, established by measurement on
 Windows 11 ARM64:

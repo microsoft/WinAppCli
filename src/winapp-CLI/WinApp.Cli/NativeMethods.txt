@@ -51,6 +51,7 @@ AttachThreadInput
 BringWindowToTop
 IsWindow
 ShowWindow
+IsIconic
 GetSystemMetrics
 GetWindowThreadProcessId
 MiniDumpWriteDump

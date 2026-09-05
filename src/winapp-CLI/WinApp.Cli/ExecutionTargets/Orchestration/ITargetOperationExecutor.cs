@@ -93,4 +93,12 @@ internal interface ITargetOperationExecutor
 
     /// <summary>Stops one process this host started, identified by ID and start time.</summary>
     Task StopTrackedProcessAsync(int processId, long startTicksUtc, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Reports whether the exact PID/start-time identity is alive in the current target epoch.
+    /// </summary>
+    Task<bool> IsTrackedProcessRunningAsync(
+        int processId,
+        long startTicksUtc,
+        CancellationToken cancellationToken);
 }

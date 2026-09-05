@@ -88,7 +88,7 @@ internal class TargetScreenshotCommand : Command, IShortDescription
                     .PrepareAsync(PrepareTargetOptions.Interactive, cancellationToken)
                     .ConfigureAwait(false);
 
-                var surface = orchestrator.ResolveDesktopSurface();
+                var surface = orchestrator.ResolveDesktopSurface(TargetDesktopUse.PixelCapture);
 
                 // Strictly no activation. The ordinary screenshot path recovers from a blank frame by
                 // foregrounding the window and trying again, which for a parked Sandbox client means
@@ -281,7 +281,7 @@ internal class TargetRecordCommand : Command, IShortDescription
                     .PrepareAsync(PrepareTargetOptions.Interactive, cancellationToken)
                     .ConfigureAwait(false))
                 {
-                    surface = orchestrator.ResolveDesktopSurface();
+                    surface = orchestrator.ResolveDesktopSurface(TargetDesktopUse.PixelCapture);
                     epoch = target.Epoch;
                 }
 

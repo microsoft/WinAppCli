@@ -176,8 +176,8 @@ internal sealed class ExecutionTargetOrchestrator(
     /// <exception cref="ExecutionTargetException">
     /// This target does not render on this machine, or its client window cannot be identified.
     /// </exception>
-    public TargetDesktopSurface ResolveDesktopSurface() =>
-        HostRendered().ResolveDesktopSurface();
+    public TargetDesktopSurface ResolveDesktopSurface(TargetDesktopUse use) =>
+        HostRendered().ResolveDesktopSurface(use);
 
     /// <summary>
     /// Answers the same question as <see cref="ResolveDesktopSurface"/>, writing nothing.

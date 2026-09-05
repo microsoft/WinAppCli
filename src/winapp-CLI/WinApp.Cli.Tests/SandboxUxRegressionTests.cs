@@ -713,10 +713,15 @@ public class SandboxUxRegressionTests
             return Task.CompletedTask;
         }
 
-        public Task<SandboxConnectAttempt> ConnectAsync(string id, CancellationToken cancellationToken)
+        public Task<SandboxConnectAttempt> ConnectAsync(
+            string id,
+            Action<SandboxConnectOwnership?> onLaunched,
+            CancellationToken cancellationToken)
         {
             Operations.Add($"connect:{id}");
-            return Task.FromResult(SandboxConnectAttempt.ForLauncher(4242, 1_000_000));
+            var attempt = SandboxConnectAttempt.ForLauncher(4242, 1_000_000);
+            onLaunched(attempt.Ownership);
+            return Task.FromResult(attempt);
         }
 
         public Task<int> ExecuteAsync(

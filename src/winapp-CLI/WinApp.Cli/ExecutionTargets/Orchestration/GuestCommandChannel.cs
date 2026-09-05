@@ -554,6 +554,36 @@ internal sealed class GuestCommandChannel : IAsyncDisposable, ITargetOperationEx
     }
 
     /// <inheritdoc/>
+    public async Task<bool> IsTrackedProcessRunningAsync(
+        int processId,
+        long startTicksUtc,
+        CancellationToken cancellationToken)
+    {
+        var operationId = Guid.NewGuid();
+        var state = Register(operationId);
+
+        try
+        {
+            await SendAsync(
+                new GuestMessage
+                {
+                    Type = GuestMessageTypes.QueryProcessRequest,
+                    OperationId = operationId.ToString(),
+                    TargetEpoch = _targetEpoch,
+                    ProcessId = processId,
+                    ProcessStartTicksUtc = startTicksUtc,
+                },
+                cancellationToken).ConfigureAwait(false);
+
+            return await state.ProcessRunning.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _operations.TryRemove(operationId, out _);
+        }
+    }
+
+    /// <inheritdoc/>
     public async ValueTask DisposeAsync()
     {
         if (_shutdown.IsCancellationRequested)
@@ -743,6 +773,10 @@ internal sealed class GuestCommandChannel : IAsyncDisposable, ITargetOperationEx
                     });
                 break;
 
+            case GuestMessageTypes.QueryProcessResponse when message.ProcessRunning is { } running:
+                state.ProcessRunning.TrySetResult(running);
+                break;
+
             case GuestMessageTypes.FileCompleted:
                 state.FileCompletion.TrySetResult(true);
                 break;
@@ -796,6 +830,7 @@ internal sealed class GuestCommandChannel : IAsyncDisposable, ITargetOperationEx
         state.Files.TrySetException(exception);
         state.FileCompletion.TrySetException(exception);
         state.RegisteredPackage.TrySetException(exception);
+        state.ProcessRunning.TrySetException(exception);
     }
 
     /// <summary>Per-operation state owned by the receive pump.</summary>
@@ -813,6 +848,9 @@ internal sealed class GuestCommandChannel : IAsyncDisposable, ITargetOperationEx
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public TaskCompletionSource<GuestPackageRegistration?> RegisteredPackage { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<bool> ProcessRunning { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public GuestExecCallbacks? Callbacks { get; set; }

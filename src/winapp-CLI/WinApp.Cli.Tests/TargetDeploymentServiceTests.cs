@@ -268,7 +268,7 @@ public class TargetDeploymentServiceTests
         var second = await recreated.ReconcileAsync(_hostSource, clean: false, TestContext.CancellationToken);
 
         Assert.IsNull(second.State.Package);
-        Assert.IsNull(second.State.ProcessId);
+        Assert.IsNull(second.State.TrackedOperationProcessId);
     }
 
     [TestMethod]

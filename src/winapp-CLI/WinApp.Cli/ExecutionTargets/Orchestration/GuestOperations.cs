@@ -99,6 +99,12 @@ internal static class GuestMessageTypes
     /// before a redeploy mutates the files it may still have open.
     /// </summary>
     public const string StopProcessRequest = "stop-process-request";
+
+    /// <summary>Host asks whether one PID/start-time identity is alive right now.</summary>
+    public const string QueryProcessRequest = "query-process-request";
+
+    /// <summary>Guest reports whether the exact process identity is alive right now.</summary>
+    public const string QueryProcessResponse = "query-process-response";
 }
 
 /// <summary>Managed guest roots a file operation may address.</summary>
@@ -258,6 +264,9 @@ internal sealed class GuestMessage
 
     /// <summary>Present on <see cref="GuestMessageTypes.ExecStarted"/>, for liveness checks.</summary>
     public long? ProcessStartTicksUtc { get; init; }
+
+    /// <summary>Present on <see cref="GuestMessageTypes.QueryProcessResponse"/>.</summary>
+    public bool? ProcessRunning { get; init; }
 
     /// <summary>Present on <see cref="GuestMessageTypes.ExecCompleted"/>.</summary>
     public int? ExitCode { get; init; }

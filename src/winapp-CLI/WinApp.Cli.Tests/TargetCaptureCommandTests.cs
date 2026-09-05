@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.CommandLine;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -13,6 +14,7 @@ using WinApp.Cli.ExecutionTargets.GuestAgent;
 using WinApp.Cli.ExecutionTargets.Orchestration;
 using WinApp.Cli.ExecutionTargets.WindowsSandbox;
 using WinApp.Cli.Helpers;
+using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
 
@@ -233,6 +235,172 @@ public class TargetCaptureCommandTests
 
         // The window the user is actually looking at leads, because it is the one a caller acts on.
         Assert.AreEqual("Settings", output.Windows![0].Title);
+    }
+
+    [TestMethod]
+    public async Task Snapshot_MinimizedClient_SeparatesGuestSupportFromEffectiveReadiness()
+    {
+        await using var harness = new Harness(GuestWindows());
+        harness.Rendering.Minimized = true;
+        var console = new TestConsole();
+
+        Assert.AreEqual(0, await RunSnapshotAsync(harness, console, "sandbox", "--json"));
+
+        var output = Deserialize(console.Output);
+        Assert.IsTrue(output.Capabilities!.SupportsRealInput, "Guest capability remains true.");
+        Assert.IsTrue(output.Capabilities.SupportsScreenCapture, "Guest capability remains true.");
+        Assert.IsTrue(output.Desktop.Minimized);
+        Assert.IsFalse(output.Desktop.EffectiveInputReady);
+        Assert.IsFalse(output.Desktop.EffectiveCaptureReady);
+    }
+
+    [TestMethod]
+    public async Task Snapshot_PackagedLaunchReportsValidatedLauncherRatherThanAppPid()
+    {
+        var appLauncher = new FakeAppLauncherService
+        {
+            FakePackageFullName = "Contoso.MyApp_1.0.0.0_x64__abc",
+            FakeRegisteredLocation = @"C:\WinApp\layouts\packaged",
+        };
+        await using var harness = new Harness(GuestWindows(), appLauncher: appLauncher);
+        using var process = Process.GetCurrentProcess();
+        var store = new MutableDeploymentStateStore(State(
+            "packaged",
+            process.Id,
+            process.StartTime.ToUniversalTime().Ticks,
+            packaged: true));
+        var console = new TestConsole();
+
+        Assert.AreEqual(
+            0,
+            await RunSnapshotAsync(harness, console, store, "sandbox", "--json"));
+
+        var deployment = Deserialize(console.Output).Deployments.Single();
+        Assert.AreEqual("package-launcher", deployment.TrackedOperationKind);
+        Assert.AreEqual("running", deployment.TrackedOperationStatus);
+        Assert.AreEqual(process.Id, deployment.TrackedOperationProcessId);
+        Assert.AreEqual("registered", deployment.RegistrationStatus);
+
+        using var json = JsonDocument.Parse(console.Output);
+        var raw = json.RootElement.GetProperty("deployments")[0];
+        Assert.IsFalse(raw.TryGetProperty("processId", out _), "No field may imply this is the UI process.");
+        Assert.AreEqual(
+            process.Id,
+            raw.GetProperty("trackedOperationProcessId").GetInt32());
+    }
+
+    [TestMethod]
+    public async Task Snapshot_ExitedOrReusedTrackedOperationOmitsTheStalePid()
+    {
+        await using var harness = new Harness(GuestWindows());
+        using var process = Process.GetCurrentProcess();
+        var store = new MutableDeploymentStateStore(State(
+            "unpackaged",
+            process.Id,
+            process.StartTime.ToUniversalTime().Ticks - 1,
+            packaged: false));
+        var console = new TestConsole();
+
+        Assert.AreEqual(
+            0,
+            await RunSnapshotAsync(harness, console, store, "sandbox", "--json"));
+
+        var deployment = Deserialize(console.Output).Deployments.Single();
+        Assert.AreEqual("application", deployment.TrackedOperationKind);
+        Assert.AreEqual("exited", deployment.TrackedOperationStatus);
+        Assert.IsNull(deployment.TrackedOperationProcessId);
+        Assert.IsTrue(deployment.RetainedLayout);
+    }
+
+    [TestMethod]
+    public async Task Snapshot_UnavailableGuestDoesNotCallUnknownStateRetainedLayout()
+    {
+        await using var harness = new Harness(GuestWindows());
+        harness.Backend.AgentAnswers = false;
+        using var process = Process.GetCurrentProcess();
+        var store = new MutableDeploymentStateStore(State(
+            "unknown",
+            process.Id,
+            process.StartTime.ToUniversalTime().Ticks,
+            packaged: true));
+        var console = new TestConsole();
+
+        Assert.AreEqual(0, await RunSnapshotAsync(harness, console, store, "sandbox", "--json"));
+
+        var deployment = Deserialize(console.Output).Deployments.Single();
+        Assert.AreEqual("unknown", deployment.RegistrationStatus);
+        Assert.AreEqual("unknown", deployment.TrackedOperationStatus);
+        Assert.IsFalse(deployment.RetainedLayout);
+    }
+
+    [TestMethod]
+    public async Task Snapshot_ConcurrentDeploymentChangeOmitsTheRacedRecord()
+    {
+        await using var harness = new Harness(GuestWindows());
+        using var process = Process.GetCurrentProcess();
+        var store = new MutableDeploymentStateStore(
+            State("changing", process.Id, process.StartTime.ToUniversalTime().Ticks, packaged: false))
+        {
+            AdvanceRevisionOnRead = true,
+        };
+
+        var console = new TestConsole();
+        Assert.AreEqual(0, await RunSnapshotAsync(harness, console, store, "sandbox", "--json"));
+
+        Assert.HasCount(0, Deserialize(console.Output).Deployments);
+    }
+
+    [TestMethod]
+    public async Task Snapshot_HumanOutputCallsCleanInactiveStateARetainedLayout()
+    {
+        await using var harness = new Harness(GuestWindows());
+        var store = new MutableDeploymentStateStore(State(
+            "history-only",
+            processId: null,
+            startTicksUtc: null,
+            packaged: false));
+        var console = new TestConsole();
+
+        Assert.AreEqual(0, await RunSnapshotAsync(harness, console, store, "sandbox"));
+
+        StringAssert.Contains(console.Output, "history-only (retained layout)");
+    }
+
+    [TestMethod]
+    public async Task RoutedReadOnlyVerb_DoesNotInspectOrRestoreTheHostClient()
+    {
+        await using var harness = new Harness(GuestWindows());
+        var router = new ExecutionTargetUiRouter(harness.Orchestrator, new TestConsole());
+
+        Assert.AreEqual(
+            0,
+            await router.RouteAsync(
+                ["ui", "status", "--on", "sandbox"],
+                TargetUiRequirements.ReadOnly,
+                isJson: false,
+                TestContext.CancellationToken));
+
+        Assert.AreEqual(0, harness.Rendering.ResolveSurfaceCalls);
+        Assert.AreEqual(0, harness.Rendering.InspectSurfaceCalls);
+    }
+
+    [TestMethod]
+    public async Task RoutedInputVerb_RechecksHostClientImmediatelyBeforeExecution()
+    {
+        await using var harness = new Harness(GuestWindows());
+        var router = new ExecutionTargetUiRouter(harness.Orchestrator, new TestConsole());
+
+        Assert.AreEqual(
+            0,
+            await router.RouteAsync(
+                ["ui", "send-keys", "--on", "sandbox", "-a", "App", "--", "hello"],
+                TargetUiRequirements.Interactive,
+                isJson: false,
+                TestContext.CancellationToken));
+
+        CollectionAssert.AreEqual(
+            new[] { TargetDesktopUse.RealInput },
+            harness.Rendering.ResolvedUses);
     }
 
     [TestMethod]
@@ -675,11 +843,18 @@ public class TargetCaptureCommandTests
 
     // ---- harness -------------------------------------------------------------------
 
-    private Task<int> RunSnapshotAsync(Harness harness, IAnsiConsole console, params string[] arguments)
+    private Task<int> RunSnapshotAsync(Harness harness, IAnsiConsole console, params string[] arguments) =>
+        RunSnapshotAsync(harness, console, new EmptyDeploymentStateStore(), arguments);
+
+    private Task<int> RunSnapshotAsync(
+        Harness harness,
+        IAnsiConsole console,
+        IDeploymentStateStore deployments,
+        params string[] arguments)
     {
         var command = new TargetSnapshotCommand();
         var handler = new TargetSnapshotCommand.Handler(
-            harness.Orchestrator, new EmptyDeploymentStateStore(), console);
+            harness.Orchestrator, deployments, console);
 
         return handler.InvokeAsync(Parse(command, arguments), TestContext.CancellationToken);
     }
@@ -766,18 +941,53 @@ public class TargetCaptureCommandTests
     private static string GuestWindows(params WindowInfo[] windows) =>
         JsonSerializer.Serialize(windows, UiJsonContext.Default.WindowInfoArray);
 
+    private static DeploymentState State(
+        string deploymentId,
+        int? processId,
+        long? startTicksUtc,
+        bool packaged) =>
+        new()
+        {
+            SchemaVersion = DeploymentStateStore.CurrentSchemaVersion,
+            Revision = 1,
+            DeploymentId = deploymentId,
+            TargetEpoch = Epoch.Value,
+            Dirty = false,
+            Desired = [],
+            Package = packaged
+                ? new PackageOwnership
+                {
+                    PackageName = "Contoso.MyApp",
+                    Publisher = "CN=Contoso",
+                    PackageFullName = "Contoso.MyApp_1.0.0.0_x64__abc",
+                    PackageFamilyName = "Contoso.MyApp_fakefamily",
+                    RegisteredLocation = @"C:\WinApp\layouts\packaged",
+                    Aumid = "Contoso.App_abc!App",
+                }
+                : null,
+            WasPackaged = packaged,
+            TrackedOperationProcessId = processId,
+            TrackedOperationProcessStartTicksUtc = startTicksUtc,
+        };
+
     /// <summary>A backend, guest agent, and orchestrator wired together over one in-memory transport.</summary>
     private sealed class Harness : IAsyncDisposable
     {
         private readonly CancellationTokenSource _cancellation = new(TimeSpan.FromSeconds(60));
         private readonly List<Task> _servers = [];
         private readonly List<IDisposable> _leases = [];
+        private readonly string _guestManaged = TestPaths.TempRoot("target-capture-guest");
 
-        public Harness(string stdout, int exitCode = 0, bool rendersDesktop = true)
+        public Harness(
+            string stdout,
+            int exitCode = 0,
+            bool rendersDesktop = true,
+            IAppLauncherService? appLauncher = null)
         {
+            Directory.CreateDirectory(_guestManaged);
             Backend = rendersDesktop
-                ? new RenderingBackend(this, stdout, exitCode)
-                : new FakeBackend(this, stdout, exitCode);
+                ? new RenderingBackend(this, stdout, exitCode, appLauncher)
+                : new FakeBackend(this, stdout, exitCode, appLauncher);
 
             Orchestrator = new ExecutionTargetOrchestrator(Backend, new FakeLock(this), new FakeLock(this));
         }
@@ -791,6 +1001,8 @@ public class TargetCaptureCommandTests
         public ExecutionTargetOrchestrator Orchestrator { get; }
 
         public CancellationToken ServerToken => _cancellation.Token;
+
+        public string GuestManaged => _guestManaged;
 
         public void Track(Task server) => _servers.Add(server);
 
@@ -818,11 +1030,24 @@ public class TargetCaptureCommandTests
             }
 
             _cancellation.Dispose();
+
+            try
+            {
+                Directory.Delete(_guestManaged, recursive: true);
+            }
+            catch (IOException)
+            {
+                // A leftover temp directory is not worth failing a test over.
+            }
         }
     }
 
     /// <summary>A target that runs commands but draws nothing on this machine.</summary>
-    private class FakeBackend(Harness harness, string stdout, int exitCode)
+    private class FakeBackend(
+        Harness harness,
+        string stdout,
+        int exitCode,
+        IAppLauncherService? appLauncher)
         : IExecutionTargetBackend, IInspectableTarget
     {
         public ExecutionTargetRef Target => WindowsSandboxTarget.Default;
@@ -884,7 +1109,9 @@ public class TargetCaptureCommandTests
                 new ScriptedGuestWinapp(stdout, exitCode),
                 new StaticGuestSessionProbe(new GuestSessionInfo(1, "WinSta0", HasInputDesktop: true)),
                 new GuestAgentIdentity("1.0.0", "hash", "arm64", 1, 1),
-                guestWinapp: @"C:\WinAppGuest\winapp.exe");
+                files: new GuestFileService(harness.GuestManaged),
+                guestWinapp: @"C:\WinAppGuest\winapp.exe",
+                appLauncher: appLauncher);
 
             harness.Track(server.RunAsync(harness.ServerToken));
 
@@ -894,8 +1121,12 @@ public class TargetCaptureCommandTests
     }
 
     /// <summary>The same target, but one whose desktop this machine draws in a window.</summary>
-    private sealed class RenderingBackend(Harness harness, string stdout, int exitCode)
-        : FakeBackend(harness, stdout, exitCode), IHostRenderedTarget
+    private sealed class RenderingBackend(
+        Harness harness,
+        string stdout,
+        int exitCode,
+        IAppLauncherService? appLauncher)
+        : FakeBackend(harness, stdout, exitCode, appLauncher), IHostRenderedTarget
     {
         /// <summary>How many times a caller asked for the surface on the persisting path.</summary>
         public int ResolveSurfaceCalls { get; private set; }
@@ -903,9 +1134,14 @@ public class TargetCaptureCommandTests
         /// <summary>How many times a caller asked for the surface on the inspect-only path.</summary>
         public int InspectSurfaceCalls { get; private set; }
 
-        public TargetDesktopSurface ResolveDesktopSurface()
+        public bool Minimized { get; set; }
+
+        public List<TargetDesktopUse> ResolvedUses { get; } = [];
+
+        public TargetDesktopSurface ResolveDesktopSurface(TargetDesktopUse use)
         {
             ResolveSurfaceCalls++;
+            ResolvedUses.Add(use);
             return Surface();
         }
 
@@ -915,8 +1151,13 @@ public class TargetCaptureCommandTests
             return Surface();
         }
 
-        private static TargetDesktopSurface Surface() =>
-            new(DesktopHwnd, DesktopProcessId, "WindowsSandboxRemoteSession", Adopted: false);
+        private TargetDesktopSurface Surface() =>
+            new(
+                DesktopHwnd,
+                DesktopProcessId,
+                "WindowsSandboxRemoteSession",
+                Adopted: false,
+                IsMinimized: Minimized);
     }
 
     /// <summary>A guest winapp whose answer is scripted rather than run.</summary>
@@ -980,5 +1221,32 @@ public class TargetCaptureCommandTests
             throw new NotSupportedException("A snapshot never clears deployment state.");
 
         public IReadOnlyList<DeploymentState> List(ExecutionTargetRef target) => [];
+    }
+
+    private sealed class MutableDeploymentStateStore(DeploymentState state) : IDeploymentStateStore
+    {
+        private DeploymentState _state = state;
+        private int _reads;
+
+        public bool AdvanceRevisionOnRead { get; init; }
+
+        public DeploymentState? Read(ExecutionTargetRef target, string deploymentId)
+        {
+            _reads++;
+            return AdvanceRevisionOnRead && _reads > 0
+                ? _state with { Revision = _state.Revision + 1 }
+                : _state;
+        }
+
+        public DeploymentState Commit(
+            ExecutionTargetRef target,
+            DeploymentState state,
+            long expectedRevision) =>
+            _state = state with { Revision = expectedRevision + 1 };
+
+        public void Clear(ExecutionTargetRef target, string deploymentId) =>
+            throw new NotSupportedException();
+
+        public IReadOnlyList<DeploymentState> List(ExecutionTargetRef target) => [_state];
     }
 }

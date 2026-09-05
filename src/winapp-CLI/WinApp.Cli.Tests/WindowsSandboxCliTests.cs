@@ -275,6 +275,67 @@ public class WindowsSandboxCliTests
     }
 
     [TestMethod]
+    public async Task ConnectAsync_ReportsOwnershipBeforeWatchingForImmediateFailure()
+    {
+        _cli.UseExecutable(Path.Join(Environment.SystemDirectory, "wsb.exe"));
+        System.Diagnostics.Process? launched = null;
+        _cli.ConnectLauncher = _ =>
+        {
+            launched = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = Environment.GetEnvironmentVariable("ComSpec")!,
+                Arguments = "/d /c ping 127.0.0.1 -n 6 >nul",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            });
+            return launched;
+        };
+
+        try
+        {
+            SandboxConnectOwnership? ownership = null;
+            var connect = _cli.ConnectAsync(
+                "sandbox-1",
+                observed => ownership = observed,
+                TestContext.CancellationTokenSource.Token);
+
+            Assert.IsNotNull(ownership);
+            Assert.AreEqual(launched!.Id, ownership.LauncherProcessId);
+            Assert.IsFalse(connect.IsCompleted);
+
+            var attempt = await connect;
+            if (!launched.HasExited)
+            {
+                launched.Kill(entireProcessTree: true);
+                await launched.WaitForExitAsync(TestContext.CancellationTokenSource.Token);
+            }
+
+            attempt.Dispose();
+            launched = null;
+        }
+        finally
+        {
+            if (launched is not null)
+            {
+                try
+                {
+                    if (!launched.HasExited)
+                    {
+                        launched.Kill(entireProcessTree: true);
+                        await launched.WaitForExitAsync(TestContext.CancellationTokenSource.Token);
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                    // The connect attempt already released the process handle.
+                }
+
+                launched.Dispose();
+            }
+        }
+    }
+
+    [TestMethod]
     public async Task ConnectAsync_StillDetectsAnImmediateNonzeroExit()
     {
         _cli.UseExecutable(Path.Join(Environment.SystemDirectory, "wsb.exe"));

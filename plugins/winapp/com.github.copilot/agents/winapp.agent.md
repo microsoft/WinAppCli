@@ -480,7 +480,8 @@ When the user encounters an error, check these common causes:
 | `sandbox_setup_incomplete` | Windows is still installing the Sandbox client | Wait, then run the command again — retrying resumes the installation rather than restarting it |
 | `sandbox_setup_failed` | Windows refused to enable the feature or start the client | Check edition, firmware virtualization, and whether policy allows optional features |
 | `sandbox_unmanaged_instance` | A running Sandbox could not be prepared, or more than one is running | Wait for it to finish starting and retry, or close the ones that are not needed. **Never stop one for the user** — it may hold work that matters |
-| `sandbox_input_not_ready` / `sandbox_no_interactive_session` | The Sandbox window is disconnected or minimized | Reconnect with `wsb connect --id <id>`; inspection still works, input and recording do not |
+| `sandbox_input_not_ready` | The exact Sandbox client could not accept input, including when winapp could not restore it without activation | Restore that existing window manually; inspection still works while it remains minimized |
+| `sandbox_no_interactive_session` | The Sandbox window is disconnected | Reconnect with `wsb connect --id <id>` |
 | `sandbox_runtime_provision_failed` | A runtime the app needs is missing in the guest | The error names it. Publish self-contained, or install it via `winapp target exec sandbox` |
 | Detached **unpackaged** Sandbox app vanished, no error reported | It was started by the guest agent and ended with it, usually because winapp repaired the agent automatically | Rerun `winapp run . --on sandbox --detach`; run in the foreground when the app must outlive a long sequence |
 | Copied-in script fails with `UnauthorizedAccess` | A fresh Sandbox starts with the PowerShell execution policy at `Restricted` | Invoke it as `powershell -ExecutionPolicy Bypass -File .\script.ps1` |

@@ -201,6 +201,14 @@ internal sealed class ExecutionTargetUiRouter(
             // the default so a long-running verb still shows progress as it happens.
             using var buffered = routed.Artifact is null ? null : new MemoryStream();
 
+            if (requirements.RequiresRealInput)
+            {
+                // Re-check immediately before the guest operation. The client can be minimized after
+                // preparation, and the guest cannot observe that host-side state.
+                _ = orchestrator.ResolveDesktopSurface(
+                    routed.Artifact is null ? TargetDesktopUse.RealInput : TargetDesktopUse.PixelCapture);
+            }
+
             var result = await target.Operations.ExecuteAsync(
                 new GuestExecRequest
                 {

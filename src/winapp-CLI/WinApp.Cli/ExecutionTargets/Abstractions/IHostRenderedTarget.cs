@@ -13,11 +13,23 @@ namespace WinApp.Cli.ExecutionTargets.Abstractions;
 /// True when winapp recognised the window rather than having recorded creating it. Reported so a
 /// result can say plainly which of the two it captured.
 /// </param>
+/// <param name="IsMinimized">Whether the host client is minimized right now.</param>
 internal sealed record TargetDesktopSurface(
     nint WindowHandle,
     int ProcessId,
     string ProcessName,
-    bool Adopted);
+    bool Adopted,
+    bool IsMinimized);
+
+/// <summary>Why a host-rendered target window must be ready.</summary>
+internal enum TargetDesktopUse
+{
+    /// <summary>The next operation injects real input.</summary>
+    RealInput,
+
+    /// <summary>The next operation captures pixels.</summary>
+    PixelCapture,
+}
 
 /// <summary>
 /// A backend whose guest desktop is rendered by a client window on the host.
@@ -49,7 +61,7 @@ internal interface IHostRenderedTarget
     /// one. Both fail rather than guessing: capturing the wrong desktop would produce a result that
     /// looks exactly like a correct one.
     /// </exception>
-    TargetDesktopSurface ResolveDesktopSurface();
+    TargetDesktopSurface ResolveDesktopSurface(TargetDesktopUse use);
 
     /// <summary>
     /// Answers the same question as <see cref="ResolveDesktopSurface"/>, writing nothing.

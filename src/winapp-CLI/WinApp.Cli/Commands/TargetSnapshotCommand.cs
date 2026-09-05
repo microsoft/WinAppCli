@@ -99,10 +99,23 @@ internal class TargetSnapshotCommand : Command, IShortDescription
                     Attached = target is not null,
                     Capabilities = target?.Capabilities,
                     Desktop = DescribeDesktop(inspection.Running),
-                    Deployments = inspection.Running
-                        ? DescribeDeployments(reference, inspection.Epoch)
-                        : [],
+                    Deployments = [],
                 };
+
+                output.Desktop.EffectiveInputReady =
+                    target?.Capabilities.SupportsRealInput == true &&
+                    output.Desktop.Rendered &&
+                    !output.Desktop.Minimized;
+                output.Desktop.EffectiveCaptureReady =
+                    target?.Capabilities.SupportsScreenCapture == true &&
+                    output.Desktop.Rendered &&
+                    !output.Desktop.Minimized;
+
+                if (inspection.Running)
+                {
+                    output.Deployments = await DescribeDeploymentsAsync(
+                        reference, inspection.Epoch, target, cancellationToken).ConfigureAwait(false);
+                }
 
                 if (target is not null)
                 {
@@ -167,6 +180,7 @@ internal class TargetSnapshotCommand : Command, IShortDescription
                     ProcessId = surface.ProcessId,
                     ProcessName = surface.ProcessName,
                     Adopted = surface.Adopted,
+                    Minimized = surface.IsMinimized,
                 };
             }
             catch (ExecutionTargetException ex)
@@ -181,24 +195,108 @@ internal class TargetSnapshotCommand : Command, IShortDescription
         /// registration that no longer exist, and reporting it as present would be worse than
         /// reporting nothing.
         /// </remarks>
-        private TargetSnapshotDeployment[] DescribeDeployments(
+        private async Task<TargetSnapshotDeployment[]> DescribeDeploymentsAsync(
             ExecutionTargetRef reference,
-            ExecutionTargetEpoch epoch)
+            ExecutionTargetEpoch epoch,
+            PreparedTarget? target,
+            CancellationToken cancellationToken)
         {
             try
             {
-                return [.. deployments.List(reference)
+                var reported = new List<TargetSnapshotDeployment>();
+
+                foreach (var state in deployments.List(reference)
                     .Where(state => state.IsForEpoch(epoch))
-                    .OrderBy(state => state.DeploymentId, StringComparer.Ordinal)
-                    .Select(state => new TargetSnapshotDeployment
+                    .OrderBy(state => state.DeploymentId, StringComparer.Ordinal))
+                {
+                    var registrationStatus = state.Package is null ? "none" : "unknown";
+                    var operationStatus =
+                        state.TrackedOperationProcessId is not null &&
+                        state.TrackedOperationProcessStartTicksUtc is not null
+                            ? "unknown"
+                            : "none";
+                    int? runningOperationProcessId = null;
+
+                    if (target is not null)
+                    {
+                        if (state.Package is { } package)
+                        {
+                            try
+                            {
+                                var actual = await target.Operations.GetRegisteredPackageAsync(
+                                    package.PackageName,
+                                    package.Publisher,
+                                    package.PackageFamilyName,
+                                    cancellationToken).ConfigureAwait(false);
+                                registrationStatus =
+                                    actual is not null &&
+                                    actual.IsDevelopmentMode &&
+                                    actual.RegisteredLocation is not null &&
+                                    package.Owns(actual.FullName, actual.RegisteredLocation)
+                                        ? "registered"
+                                        : "missing";
+                            }
+                            catch (ExecutionTargetException)
+                            {
+                                registrationStatus = "unknown";
+                            }
+                        }
+
+                        if (state.TrackedOperationProcessId is { } processId &&
+                            state.TrackedOperationProcessStartTicksUtc is { } startTicksUtc)
+                        {
+                            try
+                            {
+                                var running = await target.Operations.IsTrackedProcessRunningAsync(
+                                    processId, startTicksUtc, cancellationToken).ConfigureAwait(false);
+                                operationStatus = running ? "running" : "exited";
+                                runningOperationProcessId = running ? processId : null;
+                            }
+                            catch (ExecutionTargetException)
+                            {
+                                operationStatus = "unknown";
+                            }
+                        }
+                    }
+
+                    // Do not combine a guest answer with a record that changed while that answer was
+                    // in flight. Omitting the raced deployment is the only truthful read-only result.
+                    var current = deployments.Read(reference, state.DeploymentId);
+                    if (current is null ||
+                        current.Revision != state.Revision ||
+                        !current.IsForEpoch(epoch))
+                    {
+                        continue;
+                    }
+
+                    reported.Add(new TargetSnapshotDeployment
                     {
                         DeploymentId = state.DeploymentId,
                         Dirty = state.Dirty,
-                        PackageFullName = state.Package?.PackageFullName,
-                        PackageFamilyName = state.Package?.PackageFamilyName,
-                        Aumid = state.Package?.Aumid,
-                        ProcessId = state.ProcessId,
-                    })];
+                        Kind = state.WasPackaged || state.Package is not null ? "packaged" : "unpackaged",
+                        RegistrationStatus = registrationStatus,
+                        PackageFullName = registrationStatus == "registered"
+                            ? state.Package?.PackageFullName
+                            : null,
+                        PackageFamilyName = registrationStatus == "registered"
+                            ? state.Package?.PackageFamilyName
+                            : null,
+                        Aumid = registrationStatus == "registered" ? state.Package?.Aumid : null,
+                        TrackedOperationStatus = operationStatus,
+                        TrackedOperationProcessId = runningOperationProcessId,
+                        TrackedOperationKind = operationStatus == "none"
+                            ? null
+                            : state.WasPackaged || state.Package is not null
+                                ? "package-launcher"
+                                : "application",
+                        RetainedLayout =
+                            !state.Dirty &&
+                            registrationStatus is "none" or "missing" &&
+                            operationStatus is "none" or "exited",
+                    });
+                }
+
+                return [.. reported];
             }
             catch (ExecutionTargetException)
             {
@@ -284,7 +382,7 @@ internal class TargetSnapshotCommand : Command, IShortDescription
             {
                 console.MarkupLineInterpolated($"  Architecture: {TerminalText.Sanitize(capabilities.Architecture)}");
                 console.MarkupLineInterpolated(
-                    $"  Input: real input {Yes(capabilities.SupportsRealInput)}, screen capture {Yes(capabilities.SupportsScreenCapture)}, interactive desktop {Yes(capabilities.SupportsInteractiveDesktop)}");
+                    $"  Guest support: real input {Yes(capabilities.SupportsRealInput)}, screen capture {Yes(capabilities.SupportsScreenCapture)}, interactive desktop {Yes(capabilities.SupportsInteractiveDesktop)}");
             }
             else
             {
@@ -294,7 +392,9 @@ internal class TargetSnapshotCommand : Command, IShortDescription
             if (output.Desktop.Rendered)
             {
                 console.MarkupLineInterpolated(
-                    $"  Desktop: HWND {output.Desktop.WindowHandle} ({output.Desktop.ProcessName}, PID {output.Desktop.ProcessId}){(output.Desktop.Adopted ? ", adopted" : "")}");
+                    $"  Desktop: HWND {output.Desktop.WindowHandle} ({output.Desktop.ProcessName}, PID {output.Desktop.ProcessId}){(output.Desktop.Adopted ? ", adopted" : "")}{(output.Desktop.Minimized ? ", minimized" : "")}");
+                console.MarkupLineInterpolated(
+                    $"  Effective readiness: real input {Yes(output.Desktop.EffectiveInputReady)}, screen capture {Yes(output.Desktop.EffectiveCaptureReady)}");
             }
             else
             {
@@ -311,8 +411,9 @@ internal class TargetSnapshotCommand : Command, IShortDescription
                 console.MarkupLineInterpolated($"  Deployments: {output.Deployments.Length}");
                 foreach (var deployment in output.Deployments)
                 {
+                    var description = DescribeDeploymentState(deployment);
                     console.MarkupLineInterpolated(
-                        $"    {TerminalText.Sanitize(deployment.PackageFullName ?? deployment.DeploymentId)}{(deployment.Dirty ? " (dirty)" : "")}");
+                        $"    {TerminalText.Sanitize(deployment.PackageFullName ?? deployment.DeploymentId)} ({description})");
                 }
             }
 
@@ -337,6 +438,37 @@ internal class TargetSnapshotCommand : Command, IShortDescription
         }
 
         private static string Yes(bool value) => value ? "yes" : "no";
+
+        private static string DescribeDeploymentState(TargetSnapshotDeployment deployment)
+        {
+            if (deployment.Dirty)
+            {
+                return "dirty";
+            }
+
+            var states = new List<string>();
+            if (deployment.RegistrationStatus == "registered")
+            {
+                states.Add("registered");
+            }
+
+            if (deployment.TrackedOperationStatus == "running")
+            {
+                states.Add(
+                    $"{deployment.TrackedOperationKind} running, PID {deployment.TrackedOperationProcessId}");
+            }
+            else if (deployment.TrackedOperationStatus == "exited")
+            {
+                states.Add($"{deployment.TrackedOperationKind} exited");
+            }
+
+            if (deployment.RetainedLayout)
+            {
+                states.Add("retained layout");
+            }
+
+            return states.Count == 0 ? "state unknown" : string.Join(", ", states);
+        }
     }
 }
 
@@ -363,7 +495,7 @@ internal sealed class TargetSnapshotOutput
     public required TargetSnapshotDesktop Desktop { get; init; }
 
     /// <summary>What winapp has deployed to this generation of the target.</summary>
-    public required TargetSnapshotDeployment[] Deployments { get; init; }
+    public required TargetSnapshotDeployment[] Deployments { get; set; }
 
     /// <summary>
     /// Top-level guest windows, most useful first, or null when the guest did not answer.
@@ -395,6 +527,15 @@ internal sealed class TargetSnapshotDesktop
     /// <summary>True when winapp recognised the client rather than recording that it created it.</summary>
     public bool Adopted { get; init; }
 
+    /// <summary>True when the host client window is minimized right now.</summary>
+    public bool Minimized { get; init; }
+
+    /// <summary>Whether a routed real-input operation could start without restoring the client.</summary>
+    public bool EffectiveInputReady { get; set; }
+
+    /// <summary>Whether a pixel-capture operation could start without restoring the client.</summary>
+    public bool EffectiveCaptureReady { get; set; }
+
     /// <summary>Error code explaining why no client window is available, when there is none.</summary>
     public string? Unavailable { get; init; }
 }
@@ -417,6 +558,21 @@ internal sealed class TargetSnapshotDeployment
     /// <summary>Application user model ID, when the deployment registered one.</summary>
     public string? Aumid { get; init; }
 
-    /// <summary>Guest process this deployment last launched, when winapp recorded one.</summary>
-    public int? ProcessId { get; init; }
+    /// <summary>Whether this is a packaged or unpackaged deployment.</summary>
+    public required string Kind { get; init; }
+
+    /// <summary>Whether the recorded package registration is active, missing, absent, or unverified.</summary>
+    public required string RegistrationStatus { get; init; }
+
+    /// <summary>Whether the tracked operation is running, exited, absent, or unverified.</summary>
+    public required string TrackedOperationStatus { get; init; }
+
+    /// <summary>Live guest operation PID, present only after PID/start-time validation.</summary>
+    public int? TrackedOperationProcessId { get; init; }
+
+    /// <summary>Whether the tracked operation is the application or a package launcher.</summary>
+    public string? TrackedOperationKind { get; init; }
+
+    /// <summary>True when only a clean reusable layout remains.</summary>
+    public bool RetainedLayout { get; init; }
 }

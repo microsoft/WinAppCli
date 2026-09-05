@@ -1315,11 +1315,13 @@ Answers the question worth asking before deciding what to do next: is the target
 
 ```bash
 winapp target snapshot sandbox
-# sandbox: running, x64, epoch 3f2a...
-#   Input: real input yes, screen capture yes, interactive desktop yes
-#   Desktop: HWND 984156 (WindowsSandboxRemoteSession, PID 24160)
+# sandbox: running, epoch 3f2a...
+#   Architecture: x64
+#   Guest support: real input yes, screen capture yes, interactive desktop yes
+#   Desktop: HWND 984156 (WindowsSandboxRemoteSession, PID 24160), minimized
+#   Effective readiness: real input no, screen capture no
 #   Deployments: 1
-#     Contoso.App_1.0.0.0_x64__8wekyb3d8bbwe
+#     Contoso.App_1.0.0.0_x64__8wekyb3d8bbwe (registered, package-launcher running, PID 6200)
 #   Windows: 7
 #     HWND 197326 Contoso.App (PID 5104) 1280x720 [foreground] "Contoso"
 ```
@@ -1339,8 +1341,10 @@ winapp target snapshot sandbox
 - Writes only to stdout. It creates no files and embeds no image data.
 - Lists at most 50 top-level guest windows, foreground first then largest, and always reports the true total so a truncated list is never mistaken for the whole desktop.
 - Reports the host window the guest desktop is drawn into, which is what `target screenshot` and `target record` capture. A target that renders nowhere on this machine says so and the rest of the report still arrives.
+- Reports guest capability separately from effective host-client readiness. A minimized client does not erase what the guest supports, but effective real input and capture are `false` until winapp can restore that exact client without activation.
 - If the guest cannot report its windows, the readiness, capability, and deployment facts that explain why are still reported rather than the whole command failing. Under `--json` this is `attached: false` with `capabilities` omitted.
 - Deployments are filtered to the current epoch, because a record from a previous Sandbox describes files and a registration that no longer exist.
+- A deployment PID is reported only as `trackedOperationProcessId`, after its PID and start time are revalidated in the guest. For packaged runs it is explicitly a `package-launcher`, not the application UI PID; use the `windows` list for the actual UI process. Exited or reused PIDs are omitted, and clean files left after unregister are labeled `retained layout` rather than registered or running.
 
 `target screenshot` and `target record` are the other way round: they need a target to capture, so they prepare one the way every other `target` verb does.
 
@@ -1363,7 +1367,7 @@ The difference from `winapp ui screenshot --on <target>` is *what* is captured, 
 
 - Needs no application, window, or element selector. There is nothing to name and nothing to get wrong.
 - Writes the PNG to a path on **this machine**, not on the target.
-- Activates nothing and takes no focus, so it is safe to run while you are using your own desktop. The Sandbox's client window is captured where it stands — parked off-screen when winapp opened it, or exactly where you left it when winapp adopted a window you opened. If the window cannot be captured where it sits, the command fails and says so rather than bringing it to the front to get a picture.
+- Activates nothing and takes no focus, so it is safe to run while you are using your own desktop. If the exact managed or adopted client is minimized, winapp restores and parks it with no activation, verifies that its identity did not change and your foreground window stayed foreground, then captures it. If any proof fails, the command fails without publishing a thumbnail or bringing the Sandbox to the front.
 - Never truncates the destination. The PNG is published by rename, so an existing screenshot at that path survives a failed or interrupted capture intact.
 - `--json` reports the absolute host path, the pixel dimensions, and the target and epoch the image came from.
 
@@ -1386,7 +1390,7 @@ Same capture as `target screenshot`, over time. Options, cadence, frame artifact
 - Prefer `--duration-sec`. Without it the recording runs until Ctrl+C or a newline on redirected stdin, which is not something an unattended script or an agent can rely on. The npm wrapper requires it, because a spawned process has no Ctrl+C to press.
 - Options are checked before the target is touched. A bad `--duration-sec`, `--fps`, `--max-edge`, `--frames`, or `--output` fails immediately with `target_invalid_arguments`, so a request that could never have recorded never starts a Sandbox to find that out.
 - Records from this machine, reading the window the target's desktop is drawn into. The target's connection is resolved before the take starts and released immediately, so a recording that runs for hours does not hold the target's single guest connection for hours — other `winapp` commands keep working throughout.
-- Activates nothing for the whole take, exactly like `target screenshot`. The window is never restored, foregrounded, or brought forward to rescue a frame, so a recording running in the background cannot take your screen minutes after you started it. If the target's window is minimized, the command fails before writing anything rather than restoring it.
+- Activates nothing for the whole take, exactly like `target screenshot`. A minimized client is restored and parked without activation before recording starts, with the same identity and foreground-preservation checks. The window is never foregrounded or brought forward later to rescue a frame.
 - If the window stops being capturable where it stands mid-take, the recording ends there, publishes what it captured, and reports `"stopReason": "capture_unavailable"` — the alternative is minutes of black video reported as a success. A window that frame capture only ever returns black for counts as not capturable, and a take that never captured anything else fails without publishing a file.
 - If the target's desktop window closes mid-take, the recording ends there and publishes what it captured.
 - An interrupted recording still publishes what it captured, exactly as `ui record` does.

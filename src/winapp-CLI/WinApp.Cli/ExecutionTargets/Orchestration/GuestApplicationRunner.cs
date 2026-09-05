@@ -157,7 +157,8 @@ internal sealed class GuestApplicationRunner(TargetDeploymentService deployments
             return;
         }
 
-        if (existing.ProcessId is { } processId && existing.ProcessStartTicksUtc is { } startTicksUtc)
+        if (existing.TrackedOperationProcessId is { } processId &&
+            existing.TrackedOperationProcessStartTicksUtc is { } startTicksUtc)
         {
             await target.Operations.StopTrackedProcessAsync(processId, startTicksUtc, cancellationToken)
                 .ConfigureAwait(false);
@@ -447,16 +448,19 @@ internal sealed class GuestApplicationRunner(TargetDeploymentService deployments
 
     /// <summary>Forgets the package a deployment owned, after it has been unregistered.</summary>
     public DeploymentState ClearPackage(ExecutionTargetRef target, DeploymentState state) =>
-        deployments.CommitPackage(target, state, package: null);
+        ClearRegistrationClaim(target, state);
 
     /// <summary>Clears every current-generation claim for one identity after confirmed removal.</summary>
     public void ClearPackageClaims(ExecutionTargetRef target, IReadOnlyList<DeploymentState> claims)
     {
         foreach (var claim in claims)
         {
-            deployments.CommitPackage(target, claim, package: null);
+            ClearRegistrationClaim(target, claim);
         }
     }
+
+    private DeploymentState ClearRegistrationClaim(ExecutionTargetRef target, DeploymentState state) =>
+        deployments.ClearRegistration(target, state);
 
     private List<DeploymentState> FindPackageClaims(
         ExecutionTargetRef target,

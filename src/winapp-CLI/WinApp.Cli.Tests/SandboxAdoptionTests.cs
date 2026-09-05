@@ -653,15 +653,23 @@ public class SandboxAdoptionTests
             return Task.CompletedTask;
         }
 
-        public Task<SandboxConnectAttempt> ConnectAsync(string id, CancellationToken cancellationToken)
+        public Task<SandboxConnectAttempt> ConnectAsync(
+            string id,
+            Action<SandboxConnectOwnership?> onLaunched,
+            CancellationToken cancellationToken)
         {
             Operations.Add($"connect:{id}");
 
-            return FailConnect
-                ? throw ExecutionTargetException.Create(
+            if (FailConnect)
+            {
+                throw ExecutionTargetException.Create(
                     ExecutionTargetErrorCodes.NoInteractiveSession,
-                    "The Windows Sandbox client could not connect to the Sandbox.")
-                : Task.FromResult(SandboxConnectAttempt.ForLauncher(LauncherProcessId, LauncherStartTicks));
+                    "The Windows Sandbox client could not connect to the Sandbox.");
+            }
+
+            var attempt = SandboxConnectAttempt.ForLauncher(LauncherProcessId, LauncherStartTicks);
+            onLaunched(attempt.Ownership);
+            return Task.FromResult(attempt);
         }
 
         /// <summary>The 'wsb connect' this fake reports having launched.</summary>

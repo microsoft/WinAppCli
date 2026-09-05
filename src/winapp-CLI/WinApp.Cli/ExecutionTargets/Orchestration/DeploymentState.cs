@@ -98,11 +98,26 @@ internal sealed record DeploymentState
     /// <summary>Package this deployment registered, when it registered one.</summary>
     public PackageOwnership? Package { get; init; }
 
-    /// <summary>Process ID of the launch this deployment tracks, valid only within the epoch.</summary>
-    public int? ProcessId { get; init; }
+    /// <summary>
+    /// Whether this deployment has ever held a package registration in this target generation.
+    /// </summary>
+    /// <remarks>
+    /// Kept after unregister so diagnostics can describe the retained layout without retaining an
+    /// obsolete ownership claim.
+    /// </remarks>
+    public bool WasPackaged { get; init; }
 
-    /// <summary>UTC ticks when that process started, so a reused process ID is detected.</summary>
-    public long? ProcessStartTicksUtc { get; init; }
+    /// <summary>
+    /// Process ID of the guest operation winapp launched, valid only within the epoch.
+    /// </summary>
+    /// <remarks>
+    /// For an unpackaged direct launch this is the application. For a packaged launch this is the
+    /// guest winapp launcher that owns the operation, not necessarily the application's UI process.
+    /// </remarks>
+    public int? TrackedOperationProcessId { get; init; }
+
+    /// <summary>UTC ticks when the tracked operation started, so a reused PID is detected.</summary>
+    public long? TrackedOperationProcessStartTicksUtc { get; init; }
 
     /// <summary>UTC timestamp of the last commit, for diagnostics only.</summary>
     public DateTimeOffset? UpdatedUtc { get; init; }

@@ -614,10 +614,11 @@ internal sealed class WindowsSandboxBackend(
     /// Sandbox, or state written before this was recorded — the controller adopts the single open
     /// client and this remembers it, so the next command in this run agrees with this one.
     /// </remarks>
-    public TargetDesktopSurface ResolveDesktopSurface()
+    public TargetDesktopSurface ResolveDesktopSurface(TargetDesktopUse use)
     {
         var remembered = _client ?? TryReadPersistedClient();
-        var client = windowController.ResolveClient(remembered);
+        var status = windowController.EnsureClientReady(remembered, use);
+        var client = status.Window;
 
         if (client != _client)
         {
@@ -625,7 +626,7 @@ internal sealed class WindowsSandboxBackend(
             RememberClientWindow(client);
         }
 
-        return Describe(client, remembered);
+        return Describe(status, remembered);
     }
 
     /// <inheritdoc/>
@@ -642,18 +643,19 @@ internal sealed class WindowsSandboxBackend(
     {
         var remembered = _client ?? TryReadPersistedClient();
 
-        return Describe(windowController.ResolveClient(remembered), remembered);
+        return Describe(windowController.InspectClient(remembered), remembered);
     }
 
     /// <summary>Describes a resolved client for a caller.</summary>
     private static TargetDesktopSurface Describe(
-        SandboxClientWindow client,
+        SandboxClientStatus status,
         SandboxClientWindow? remembered) =>
         new(
-            client.Handle,
-            client.ProcessId,
+            status.Window.Handle,
+            status.Window.ProcessId,
             WindowsSandboxWindowController.RemoteSessionProcessName,
-            Adopted: client != remembered);
+            Adopted: status.Window != remembered,
+            IsMinimized: status.IsMinimized);
 
     /// <summary>The client window recorded for this instance, when it is still the same one.</summary>
     private SandboxClientWindow? TryReadPersistedClient()
@@ -1182,10 +1184,26 @@ internal sealed class WindowsSandboxBackend(
         CancellationToken cancellationToken)
     {
         var windowSnapshot = windowController.Capture();
-        using var attempt = await cli.ConnectAsync(instanceId, cancellationToken).ConfigureAwait(false);
-        _client = await windowController
-            .PlaceConnectedClientAsync(windowSnapshot, attempt.Ownership, cancellationToken)
-            .ConfigureAwait(false);
+        using var placementCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        SandboxConnectAttempt? attempt = null;
+
+        try
+        {
+            attempt = await cli.ConnectAsync(
+                instanceId,
+                ownership => windowController.ObserveConnect(
+                    windowSnapshot, ownership, placementCancellation.Token),
+                cancellationToken).ConfigureAwait(false);
+
+            _client = await windowController
+                .PlaceConnectedClientAsync(windowSnapshot, attempt.Ownership, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            placementCancellation.Cancel();
+            attempt?.Dispose();
+        }
     }
 
     /// <summary>

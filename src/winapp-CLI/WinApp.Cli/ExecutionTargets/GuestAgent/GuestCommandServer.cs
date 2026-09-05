@@ -278,6 +278,14 @@ internal sealed class GuestCommandServer : IAsyncDisposable
                     operationId, stopProcessId, message.ProcessStartTicksUtc ?? 0, cancellationToken).ConfigureAwait(false);
                 break;
 
+            case GuestMessageTypes.QueryProcessRequest when message.ProcessId is { } queryProcessId:
+                await HandleQueryProcessAsync(
+                    operationId,
+                    queryProcessId,
+                    message.ProcessStartTicksUtc ?? 0,
+                    cancellationToken).ConfigureAwait(false);
+                break;
+
             default:
                 // An unknown or malformed message is ignored rather than fatal: the host is
                 // authenticated, so this is a version skew, and one unusable message must not take
@@ -809,6 +817,42 @@ internal sealed class GuestCommandServer : IAsyncDisposable
         }
 
         await SendFileCompletedAsync(operationId, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Reports liveness only when both the PID and its start time still match.</summary>
+    private Task HandleQueryProcessAsync(
+        Guid operationId,
+        int processId,
+        long expectedStartTicksUtc,
+        CancellationToken cancellationToken) =>
+        SendAsync(
+            new GuestMessage
+            {
+                Type = GuestMessageTypes.QueryProcessResponse,
+                OperationId = operationId.ToString(),
+                TargetEpoch = _targetEpoch,
+                ProcessRunning = IsExactProcessRunning(processId, expectedStartTicksUtc),
+            },
+            cancellationToken);
+
+    internal static bool IsExactProcessRunning(int processId, long expectedStartTicksUtc)
+    {
+        if (processId <= 0 || expectedStartTicksUtc <= 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            return !process.HasExited &&
+                process.StartTime.ToUniversalTime().Ticks == expectedStartTicksUtc;
+        }
+        catch (Exception ex) when (
+            ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return false;
+        }
     }
 
     /// <summary>Outcome of attempting to stop one tracked process.</summary>

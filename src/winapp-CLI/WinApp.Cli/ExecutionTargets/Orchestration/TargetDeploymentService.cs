@@ -96,11 +96,12 @@ internal sealed class TargetDeploymentService(IDeploymentStateStore stateStore)
                 Dirty = true,
                 Desired = desired.Files,
                 Package = carried?.Package,
+                WasPackaged = carried?.WasPackaged ?? carried?.Package is not null,
 
                 // Whatever was running belonged to the previous layout. Keeping its ID would let a
                 // later command report a process that is no longer this deployment's.
-                ProcessId = null,
-                ProcessStartTicksUtc = null,
+                TrackedOperationProcessId = null,
+                TrackedOperationProcessStartTicksUtc = null,
             },
             revision);
 
@@ -156,7 +157,14 @@ internal sealed class TargetDeploymentService(IDeploymentStateStore stateStore)
         ExecutionTargetRef target,
         DeploymentState state,
         PackageOwnership? package) =>
-        stateStore.Commit(target, state with { Package = package }, state.Revision);
+        stateStore.Commit(
+            target,
+            state with
+            {
+                Package = package,
+                WasPackaged = state.WasPackaged || package is not null,
+            },
+            state.Revision);
 
     /// <summary>Every deployment recorded for a target.</summary>
     public IReadOnlyList<DeploymentState> List(ExecutionTargetRef target) => stateStore.List(target);
@@ -179,11 +187,27 @@ internal sealed class TargetDeploymentService(IDeploymentStateStore stateStore)
     public DeploymentState CommitProcess(
         ExecutionTargetRef target,
         DeploymentState state,
-        int processId,
-        long startTicksUtc) =>
+        int? processId,
+        long? startTicksUtc) =>
         stateStore.Commit(
             target,
-            state with { ProcessId = processId, ProcessStartTicksUtc = startTicksUtc },
+            state with
+            {
+                TrackedOperationProcessId = processId,
+                TrackedOperationProcessStartTicksUtc = startTicksUtc,
+            },
+            state.Revision);
+
+    /// <summary>Clears obsolete registration and tracked-operation claims in one revision.</summary>
+    public DeploymentState ClearRegistration(ExecutionTargetRef target, DeploymentState state) =>
+        stateStore.Commit(
+            target,
+            state with
+            {
+                Package = null,
+                TrackedOperationProcessId = null,
+                TrackedOperationProcessStartTicksUtc = null,
+            },
             state.Revision);
 
     /// <summary>

@@ -173,8 +173,17 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
     }
 
     /// <inheritdoc/>
-    public async Task<SandboxConnectAttempt> ConnectAsync(string id, CancellationToken cancellationToken)
+    public Task<SandboxConnectAttempt> ConnectAsync(string id, CancellationToken cancellationToken) =>
+        ConnectAsync(id, _ => { }, cancellationToken);
+
+    /// <inheritdoc/>
+    public async Task<SandboxConnectAttempt> ConnectAsync(
+        string id,
+        Action<SandboxConnectOwnership?> onLaunched,
+        CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(onLaunched);
+
         if (Executable is not { } executable)
         {
             throw NotInstalled();
@@ -217,6 +226,7 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
         // The handle stays open past this method so the caller can attribute client windows to this
         // exact launcher. Only a connect that turns out to have failed releases it here.
         var attempt = SandboxConnectAttempt.From(client);
+        onLaunched(attempt.Ownership);
         var identified = false;
 
         try

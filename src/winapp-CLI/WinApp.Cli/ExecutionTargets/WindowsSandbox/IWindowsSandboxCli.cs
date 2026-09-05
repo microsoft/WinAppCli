@@ -96,12 +96,18 @@ internal interface IWindowsSandboxCli
         bool allowWrite,
         CancellationToken cancellationToken);
 
-    /// <summary>Starts the interactive remote session for the Sandbox.</summary>
+    /// <summary>
+    /// Starts the interactive remote session and reports its launcher before observing the bounded
+    /// immediate-failure window.
+    /// </summary>
     /// <returns>
     /// The launched connect, which the caller must dispose once it has finished attributing client
     /// windows to it. The attempt is what proves which window this connect created.
     /// </returns>
-    Task<SandboxConnectAttempt> ConnectAsync(string id, CancellationToken cancellationToken);
+    Task<SandboxConnectAttempt> ConnectAsync(
+        string id,
+        Action<SandboxConnectOwnership?> onLaunched,
+        CancellationToken cancellationToken);
 
     /// <summary>
     /// Runs one fixed bootstrap command in the guest and returns the <em>guest</em> exit code.

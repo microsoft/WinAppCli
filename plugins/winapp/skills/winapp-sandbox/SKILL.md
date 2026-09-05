@@ -67,9 +67,12 @@ whole rendered desktop from the host, so the shell and any unnamed window are in
 Start with `winapp target snapshot sandbox`. It inspects only: it never starts a Sandbox, never
 connects or reconnects the client, never repairs an unresponsive agent, and never writes to winapp's
 own state, so running it can never be what creates or changes the thing it reports. It is stdout-only
-and writes no files. It reports readiness and capabilities, the deployments winapp made in this
-Sandbox generation, and the guest's top-level windows (foreground first, capped at 50, with the true
-total always shown). Guest window titles are printed inert — terminal escape sequences in a title are
+and writes no files. It reports guest capabilities separately from effective host-client readiness
+(including whether the client is minimized), the deployments winapp made in this Sandbox generation,
+and the guest's top-level windows (foreground first, capped at 50, with the true total always shown).
+Tracked operation PIDs are revalidated by PID plus start time and are never presented as UI PIDs;
+packaged runs identify theirs as package launchers. Guest window titles are printed inert — terminal
+escape sequences in a title are
 stripped for the human report and preserved verbatim under `--json`. With no Sandbox running it says
 so and exits 0 — start one with `winapp run . --on sandbox`.
 
@@ -78,8 +81,9 @@ redirected stdin, which an unattended script cannot supply. Bad options are reje
 `target_invalid_arguments` before any Sandbox is started. Nothing is ever activated or focused, so
 none of these interrupt what the user is doing; `target screenshot` fails rather than bringing the
 Sandbox window to the front to get a frame, and publishes by rename so an existing screenshot at the
-destination survives a failed capture. `target record` holds that promise for the whole take: a
-minimized client fails the recording up front instead of being restored, and a client that stops being
+destination survives a failed capture. A minimized exact client is restored and parked without
+activation only when its identity and the caller's foreground can both be re-proven. `target record`
+holds that promise for the whole take: a client that stops being
 capturable mid-take ends the recording with `"stopReason": "capture_unavailable"` and publishes the
 frames already captured; a window capture only ever returns black for counts as not capturable, so a
 take is never an all-black video reported as a success. `winapp ui record` is unaffected and still
@@ -238,7 +242,7 @@ off-screen and without stealing focus. If that still leaves no input desktop it 
 | `sandbox_setup_failed` | Windows refused to enable the feature or start the client | Check edition, firmware virtualization, and optional-feature policy |
 | `sandbox_unmanaged_instance` | A running Sandbox could not be prepared, or more than one is running | Wait for it to finish starting and retry, or close the ones you do not need |
 | `sandbox_no_interactive_session` | No interactive guest session | Reconnect the Sandbox window with `wsb connect` |
-| `sandbox_input_not_ready` | Input could not be delivered — and none was reported as delivered | Reconnect and un-minimize the Sandbox window |
+| `sandbox_input_not_ready` | Input could not be delivered — and none was reported as delivered | If the client is minimized, restore that existing window manually; if it is disconnected, reconnect it |
 | `sandbox_terminated` | The Sandbox went away mid-command | Retry; the next command recreates and redeploys |
 | `sandbox_deployment_dirty` | The guest copy is incomplete, so it will not launch | Run the command again to redeploy completely |
 | `sandbox_transfer_interrupted` | A transfer stopped; nothing was published | Retry. The error names the artifact, expected size, and what arrived |
@@ -246,7 +250,7 @@ off-screen and without stealing focus. If that still leaves no input desktop it 
 | `sandbox_agent_busy` | Eight winapp commands are already using this Sandbox | Wait for one to finish, then retry |
 | `sandbox_runtime_provision_failed` | A runtime the app requires is missing from the Sandbox | The error names it. Publish self-contained, or install it with `winapp target exec sandbox` |
 | `sandbox_target_ambiguous` | On a `target snapshot`/`screenshot`/`record`, more than one Sandbox client window is running and none is provably winapp's | The error names the candidate process IDs. Close the Sandbox windows you do not need, then retry |
-| `sandbox_artifact_failed` | An output could not be produced — on `target screenshot`, the Sandbox window returned no pixels where it sits, and winapp will not bring it to the front to get them | Un-minimize the Sandbox window, then retry |
+| `sandbox_artifact_failed` | An output could not be produced — for example, the exact minimized Sandbox client could not be restored without activation, or the window returned no usable pixels | Restore the Sandbox window manually, then retry |
 | `target_invalid_arguments` | The `target` command line was rejected before it ran, for example a mistyped option | The message says what was wrong. Under `--json` this arrives as the usual error envelope on stderr, not as help text |
 
 Infrastructure failures use codes distinct from your app's exit codes, so "winapp could not run your

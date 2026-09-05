@@ -208,6 +208,102 @@ public class WindowsSandboxWindowControllerTests
         Assert.AreEqual(ExecutionTargetErrorCodes.TargetAmbiguous, ex.Error.Code);
     }
 
+    [TestMethod]
+    public void InspectClient_Minimized_ReadsStateWithoutMovingTheWindow()
+    {
+        var parked = 0;
+        var controller = new WindowsSandboxWindowController(
+            () => [Candidate(12, 200, OurLauncher)],
+            (_, _) => parked++,
+            _ => true,
+            () => Snapshot(900).ForegroundWindow);
+
+        var status = controller.InspectClient(Client(12, 200, ClientStartTicks));
+
+        Assert.IsTrue(status.IsMinimized);
+        Assert.AreEqual(0, parked, "Read-only inspection must not restore or reposition the client.");
+    }
+
+    [TestMethod]
+    public void EnsureClientReady_Minimized_RestoresWithoutChangingForeground()
+    {
+        var minimized = true;
+        var foreground = Snapshot(900).ForegroundWindow;
+        var controller = new WindowsSandboxWindowController(
+            () => [Candidate(12, 200, OurLauncher)],
+            (_, _) => minimized = false,
+            _ => minimized,
+            () => foreground);
+
+        var status = controller.EnsureClientReady(
+            Client(12, 200, ClientStartTicks),
+            TargetDesktopUse.RealInput);
+
+        Assert.IsFalse(status.IsMinimized);
+        Assert.AreEqual(Snapshot(900).ForegroundWindow, foreground);
+    }
+
+    [TestMethod]
+    public void EnsureClientReady_RestoreRefused_FailsInsteadOfClaimingInputReadiness()
+    {
+        var controller = new WindowsSandboxWindowController(
+            () => [Candidate(12, 200, OurLauncher)],
+            (_, _) => { },
+            _ => true,
+            () => Snapshot(900).ForegroundWindow);
+
+        var failure = Assert.ThrowsExactly<ExecutionTargetException>(() =>
+            controller.EnsureClientReady(
+                Client(12, 200, ClientStartTicks),
+                TargetDesktopUse.RealInput));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.InputNotReady, failure.Error.Code);
+    }
+
+    [TestMethod]
+    public void EnsureClientReady_WindowReplacedDuringRestore_FailsCapture()
+    {
+        var replaced = false;
+        var controller = new WindowsSandboxWindowController(
+            () => replaced
+                ? [Candidate(12, 200, OurLauncher, ClientStartTicks + 1)]
+                : [Candidate(12, 200, OurLauncher)],
+            (_, _) => replaced = true,
+            _ => !replaced,
+            () => Snapshot(900).ForegroundWindow);
+
+        var failure = Assert.ThrowsExactly<ExecutionTargetException>(() =>
+            controller.EnsureClientReady(
+                Client(12, 200, ClientStartTicks),
+                TargetDesktopUse.PixelCapture));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.ArtifactFailed, failure.Error.Code);
+        Assert.AreEqual("False", failure.Error.Context!["restored"]);
+    }
+
+    [TestMethod]
+    public void EnsureClientReady_ForegroundChangedDuringRestore_FailsClosed()
+    {
+        var minimized = true;
+        var foreground = Snapshot(900).ForegroundWindow;
+        var controller = new WindowsSandboxWindowController(
+            () => [Candidate(12, 200, OurLauncher)],
+            (_, _) =>
+            {
+                minimized = false;
+                foreground = Snapshot(200).ForegroundWindow;
+            },
+            _ => minimized,
+            () => foreground);
+
+        var failure = Assert.ThrowsExactly<ExecutionTargetException>(() =>
+            controller.EnsureClientReady(
+                Client(12, 200, ClientStartTicks),
+                TargetDesktopUse.RealInput));
+
+        Assert.AreEqual("False", failure.Error.Context!["foregroundPreserved"]);
+    }
+
     // ---- claiming the window a connect created ---------------------------------------
 
     [TestMethod]
@@ -222,6 +318,21 @@ public class WindowsSandboxWindowControllerTests
 
         Assert.IsNotNull(placed);
         Assert.AreEqual((nint)200, placed.Handle);
+        CollectionAssert.AreEqual(new nint[] { 200 }, scripted.Parked);
+    }
+
+    [TestMethod]
+    public async Task ObserveConnect_StartsExactOwnerPlacementBeforeConnectReturns()
+    {
+        var scripted = new ScriptedDesktop([Candidate(12, 200, OurLauncher)]);
+        var controller = scripted.CreateController();
+        var snapshot = Snapshot();
+
+        controller.ObserveConnect(snapshot, Ownership(), TestContext.CancellationToken);
+
+        Assert.IsNotNull(snapshot.EarlyPlacement);
+        var placed = await snapshot.EarlyPlacement;
+        Assert.AreEqual((nint)200, placed!.Handle);
         CollectionAssert.AreEqual(new nint[] { 200 }, scripted.Parked);
     }
 
@@ -350,7 +461,7 @@ public class WindowsSandboxWindowControllerTests
 
     public TestContext TestContext { get; set; } = null!;
 
-    private static WindowsSandboxWindowSnapshot Snapshot() => new(default);
+    private static WindowsSandboxWindowSnapshot Snapshot(nint foreground = 0) => new(new(foreground));
 
     private static SandboxConnectOwnership Ownership() => new(OurLauncher, LauncherStartTicks);
 
