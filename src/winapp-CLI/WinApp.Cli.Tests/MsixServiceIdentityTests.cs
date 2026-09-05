@@ -143,15 +143,24 @@ public class MsixServiceIdentityTests : BaseCommandTests
         return recipePath;
     }
 
-    private Task InvokeCopyFilesFromRecipeAsync(FileInfo recipe, DirectoryInfo outputDir)
+    private Task InvokeCopyFilesFromRecipeAsync(
+        FileInfo recipe,
+        DirectoryInfo outputDir,
+        bool excludeSymbols = false)
     {
         return (Task)CopyFilesFromRecipeMethod.Invoke(
-            null, [recipe, outputDir, TestTaskContext, CancellationToken.None])!;
+            null, [recipe, outputDir, TestTaskContext, CancellationToken.None, excludeSymbols])!;
     }
 
-    private void InvokeSyncFilesToOutputDirectory(DirectoryInfo input, DirectoryInfo output, FileInfo manifest)
+    private void InvokeSyncFilesToOutputDirectory(
+        DirectoryInfo input,
+        DirectoryInfo output,
+        FileInfo manifest,
+        bool excludeSymbols = false)
     {
-        SyncFilesToOutputMethod.Invoke(null, [input, output, manifest, TestTaskContext]);
+        SyncFilesToOutputMethod.Invoke(
+            null,
+            [input, output, manifest, TestTaskContext, excludeSymbols]);
     }
 
     // ---- CopyFilesFromRecipeAsync -------------------------------------------------
@@ -249,11 +258,31 @@ public class MsixServiceIdentityTests : BaseCommandTests
             TestContext.CancellationToken);
         var recipe = new FileInfo(WriteRecipe(srcManifest, (pdb.FullName, "TestApp.pdb")));
 
-        await InvokeCopyFilesFromRecipeAsync(recipe, outputDir);
+        await InvokeCopyFilesFromRecipeAsync(recipe, outputDir, excludeSymbols: true);
 
         Assert.IsFalse(
             File.Exists(Path.Join(outputDir.FullName, "TestApp.pdb")),
             "PDBs stay in the publish directory and should not be duplicated into the runtime layout.");
+    }
+
+    [TestMethod]
+    public async Task CopyFilesFromRecipeAsync_DefaultFlowPreservesPdb()
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("recipe-src");
+        var srcManifest = new FileInfo(Path.Join(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        var pdb = new FileInfo(Path.Join(srcDir.FullName, "TestApp.pdb"));
+        await File.WriteAllTextAsync(pdb.FullName, "symbols", TestContext.CancellationToken);
+        var outputDir = _tempDirectory.CreateSubdirectory("layout");
+        var recipe = new FileInfo(WriteRecipe(srcManifest, (pdb.FullName, "TestApp.pdb")));
+
+        await InvokeCopyFilesFromRecipeAsync(recipe, outputDir);
+
+        Assert.AreEqual(
+            "symbols",
+            await File.ReadAllTextAsync(
+                Path.Join(outputDir.FullName, "TestApp.pdb"),
+                TestContext.CancellationToken));
     }
 
     [TestMethod]
@@ -270,7 +299,7 @@ public class MsixServiceIdentityTests : BaseCommandTests
         var recipe = new FileInfo(WriteRecipe(srcManifest, (pdb.FullName, @"..\victim.pdb")));
 
         var error = await Assert.ThrowsExactlyAsync<InvalidDataException>(() =>
-            InvokeCopyFilesFromRecipeAsync(recipe, outputDir));
+            InvokeCopyFilesFromRecipeAsync(recipe, outputDir, excludeSymbols: true));
 
         StringAssert.Contains(error.Message, "resolves outside the output directory");
         Assert.AreEqual(
@@ -333,12 +362,31 @@ public class MsixServiceIdentityTests : BaseCommandTests
         var outputDir = _tempDirectory.CreateSubdirectory("out");
         await File.WriteAllTextAsync(Path.Join(outputDir.FullName, "TestApp.pdb"), "stale symbols", TestContext.CancellationToken);
 
-        InvokeSyncFilesToOutputDirectory(inputDir, outputDir, manifest);
+        InvokeSyncFilesToOutputDirectory(inputDir, outputDir, manifest, excludeSymbols: true);
 
         Assert.IsTrue(File.Exists(Path.Join(outputDir.FullName, "TestApp.exe")));
         Assert.IsFalse(
             File.Exists(Path.Join(outputDir.FullName, "TestApp.pdb")),
             "PDBs stay beside the original build or publish output for diagnostics.");
+    }
+
+    [TestMethod]
+    public async Task SyncFilesToOutputDirectory_DefaultFlowPreservesPdb()
+    {
+        var inputDir = _tempDirectory.CreateSubdirectory("input");
+        await File.WriteAllTextAsync(Path.Join(inputDir.FullName, "TestApp.exe"), "exe", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Join(inputDir.FullName, "TestApp.pdb"), "symbols", TestContext.CancellationToken);
+        var manifest = new FileInfo(Path.Join(_tempDirectory.FullName, "appxmanifest.xml"));
+        await File.WriteAllTextAsync(manifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        var outputDir = _tempDirectory.CreateSubdirectory("out");
+
+        InvokeSyncFilesToOutputDirectory(inputDir, outputDir, manifest);
+
+        Assert.AreEqual(
+            "symbols",
+            await File.ReadAllTextAsync(
+                Path.Join(outputDir.FullName, "TestApp.pdb"),
+                TestContext.CancellationToken));
     }
 
     [TestMethod]

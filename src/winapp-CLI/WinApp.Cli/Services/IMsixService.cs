@@ -94,6 +94,7 @@ internal interface IMsixService
         bool noRestore = false,
         bool windowsAppSdkSelfContained = false,
         bool requireExactRuntimeDependency = false,
+        bool excludeSymbolsFromLayout = false,
         CancellationToken cancellationToken = default);
 
     /// <summary>

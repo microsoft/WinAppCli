@@ -130,7 +130,7 @@ internal sealed partial class ProjectRunService
             options.NoRestore,
             NullIfEmpty(GetProp(props, "RunArguments")),
             Operation: ProjectPreparationOperation.Build,
-            RuntimeIdentifier: RunArchHelper.ToRuntimeIdentifier(options.Architecture),
+            RuntimeIdentifier: NullIfEmpty(GetProp(props, "RuntimeIdentifier")),
             SourceExecutable: NullIfEmpty(GetProp(props, "RunCommand")),
             ProjectAssetsFile: ResolveAbsolutePath(GetProp(props, "ProjectAssetsFile"), workingDir),
             DotnetSdk: await ResolveDotnetSdkVersionAsync(workingDir, cancellationToken),
@@ -600,8 +600,7 @@ internal sealed partial class ProjectRunService
             Operation: ProjectPreparationOperation.Publish,
             PublishDirectory: publishDirectory,
             PublishAot: publishAot,
-            RuntimeIdentifier: NullIfEmpty(GetProp(properties, "RuntimeIdentifier"))
-                ?? RunArchHelper.ToRuntimeIdentifier(options.Architecture),
+            RuntimeIdentifier: NullIfEmpty(GetProp(properties, "RuntimeIdentifier")),
             SourceExecutable: sourceArtifact,
             FinalAppxManifestPath: finalManifest,
             ProjectAssetsFile: ResolveAbsolutePath(GetProp(properties, "ProjectAssetsFile"), workingDir),
@@ -727,9 +726,11 @@ internal sealed partial class ProjectRunService
                 return false;
             }
 
-            return packageFolders.EnumerateObject().Any(packageFolder =>
-                IsCompletePackage(packageFolder.Name, runtimePackId, version) &&
-                IsCompletePackage(packageFolder.Name, compilerPackId, version));
+            var roots = packageFolders.EnumerateObject()
+                .Select(packageFolder => packageFolder.Name)
+                .ToArray();
+            return roots.Any(root => IsCompletePackage(root, runtimePackId, version)) &&
+                roots.Any(root => IsCompletePackage(root, compilerPackId, version));
         }
         catch (Exception ex) when (
             ex is IOException or

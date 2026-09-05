@@ -966,6 +966,7 @@ public class RunCommandProjectModeTests : BaseCommandTests
        Assert.AreEqual(generatedManifest, _fakeMsixService.AddLooseLayoutCalls.Single().ManifestPath);
        Assert.AreEqual(projectAssetsFile, _fakeMsixService.AddLooseLayoutRuntimeCalls.Single().ProjectAssetsFile);
        Assert.IsTrue(_fakeMsixService.AddLooseLayoutDeploymentCalls.Single().RequireExactRuntimeDependency);
+       Assert.IsTrue(_fakeMsixService.AddLooseLayoutDeploymentCalls.Single().ExcludeSymbolsFromLayout);
        Assert.IsFalse(_fakeMsixService.AddLooseLayoutDeploymentCalls.Single().SelfContained);
     }
 

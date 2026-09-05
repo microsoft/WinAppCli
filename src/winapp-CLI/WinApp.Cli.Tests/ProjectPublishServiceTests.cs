@@ -660,6 +660,64 @@ public sealed class ProjectPublishServiceTests
     }
 
     [TestMethod]
+    public async Task PrepareNativeAotDryRun_AllowsPacksFromDifferentNugetRoots()
+    {
+        const string rid = "win-x64";
+        const string version = "10.0.0";
+        var assetsDirectory = _tempDirectory.CreateSubdirectory("obj-multi-root");
+        var assetsFile = ChildPath(assetsDirectory.FullName, "project.assets.json");
+        var runtimeRoot = _tempDirectory.CreateSubdirectory("runtime-packages").FullName;
+        var compilerRoot = _tempDirectory.CreateSubdirectory("compiler-packages").FullName;
+        var runtimeDirectory = Path.GetFullPath(
+            $"microsoft.netcore.app.runtime.nativeaot.{rid}{Path.DirectorySeparatorChar}{version}",
+            runtimeRoot);
+        var compilerDirectory = Path.GetFullPath(
+            $"runtime.{rid}.microsoft.dotnet.ilcompiler{Path.DirectorySeparatorChar}{version}",
+            compilerRoot);
+        Directory.CreateDirectory(runtimeDirectory);
+        Directory.CreateDirectory(compilerDirectory);
+        File.WriteAllText(Path.Join(runtimeDirectory, ".nupkg.metadata"), "{}");
+        File.WriteAllText(Path.Join(compilerDirectory, ".nupkg.metadata"), "{}");
+        File.WriteAllText(
+            assetsFile,
+            JsonSerializer.Serialize(new
+            {
+                libraries = new Dictionary<string, object>
+                {
+                    [$"Microsoft.NETCore.App.Runtime.NativeAOT.{rid}/{version}"] = new { },
+                    [$"runtime.{rid}.Microsoft.DotNet.ILCompiler/{version}"] = new { },
+                },
+                packageFolders = new Dictionary<string, object>
+                {
+                    [runtimeRoot + Path.DirectorySeparatorChar] = new { },
+                    [compilerRoot + Path.DirectorySeparatorChar] = new { },
+                },
+            }));
+        var properties = UnpackagedProperties(
+            TempPath("publish"),
+            publishAot: true,
+            projectAssetsFile: assetsFile);
+        var (service, _) = CreateService(properties);
+        var options = new ProjectRunOptions(
+            "Release",
+            "x64",
+            null,
+            NoBuild: false,
+            NoRestore: false,
+            Properties: [],
+            DryRun: true,
+            VerifyNativeAot: true);
+
+        var outcome = await service.PrepareAndResolveAsync(
+            _project,
+            options,
+            ProjectPreparationOperation.Publish,
+            CancellationToken.None);
+
+        Assert.AreEqual(true, outcome.Ready, outcome.Error);
+    }
+
+    [TestMethod]
     public async Task PrepareNativeAot_X86IsRejectedBeforePublish()
     {
         var properties = UnpackagedProperties(

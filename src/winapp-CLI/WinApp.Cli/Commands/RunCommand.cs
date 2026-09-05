@@ -652,6 +652,8 @@ internal partial class RunCommand : Command, IShortDescription
                         windowsAppSdkSelfContained: projectResolution?.SelfContained == true,
                         requireExactRuntimeDependency:
                            projectResolution?.Operation == ProjectPreparationOperation.Publish,
+                        excludeSymbolsFromLayout:
+                           projectResolution?.Operation == ProjectPreparationOperation.Publish,
                         cancellationToken);
 
                     packageFamilyName = appLauncherService.ComputePackageFamilyName(

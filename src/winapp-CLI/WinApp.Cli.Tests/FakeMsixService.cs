@@ -16,7 +16,7 @@ internal class FakeMsixService : IMsixService
     public List<(string ManifestPath, bool Clean)> AddLooseLayoutCalls { get; } = [];
     public List<string> AddLooseLayoutInputDirectories { get; } = [];
     public List<(string? RuntimeArch, string? ProjectFile, string? ProjectAssetsFile, string? Framework, bool NoRestore)> AddLooseLayoutRuntimeCalls { get; } = [];
-    public List<(bool SelfContained, bool RequireExactRuntimeDependency)> AddLooseLayoutDeploymentCalls { get; } = [];
+    public List<(bool SelfContained, bool RequireExactRuntimeDependency, bool ExcludeSymbolsFromLayout)> AddLooseLayoutDeploymentCalls { get; } = [];
     public List<(string? ProjectFile, string? ProjectAssetsFile, string? Architecture, string? Framework, bool NoRestore)> EnsureRuntimeInstalledCalls { get; } = [];
     public List<(string? EntryPoint, string? ManifestPath, bool NoInstall, bool KeepIdentity)> AddSparseIdentityCalls { get; } = [];
     public Exception? ExceptionToThrow { get; set; }
@@ -63,12 +63,13 @@ internal class FakeMsixService : IMsixService
         bool noRestore = false,
         bool windowsAppSdkSelfContained = false,
         bool requireExactRuntimeDependency = false,
+        bool excludeSymbolsFromLayout = false,
         CancellationToken cancellationToken = default)
     {
         AddLooseLayoutCalls.Add((appxManifestPath.FullName, clean));
         AddLooseLayoutInputDirectories.Add(inputDirectory.FullName);
         AddLooseLayoutRuntimeCalls.Add((runtimeArch, projectFile?.FullName, projectAssetsFile?.FullName, framework, noRestore));
-        AddLooseLayoutDeploymentCalls.Add((windowsAppSdkSelfContained, requireExactRuntimeDependency));
+        AddLooseLayoutDeploymentCalls.Add((windowsAppSdkSelfContained, requireExactRuntimeDependency, excludeSymbolsFromLayout));
         if (ExceptionToThrow != null)
         {
             throw ExceptionToThrow;
