@@ -487,28 +487,7 @@ internal sealed partial class UiAutomationService
         return pixelData;
     }
 
-    internal static bool IsBlankCapture(byte[] pixels)
-    {
-        // Check if all pixels are zero (black/unrendered frame).
-        // Use int-sized chunks for speed on large buffers.
-        var span = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, long>(pixels.AsSpan());
-        foreach (var chunk in span)
-        {
-            if (chunk != 0)
-            {
-                return false;
-            }
-        }
-        // Check remaining bytes
-        for (var i = span.Length * sizeof(long); i < pixels.Length; i++)
-        {
-            if (pixels[i] != 0)
-            {
-                return false;
-            }
-        }
-        return true;
-    }
+    internal static bool IsBlankCapture(byte[] pixels) => CapturedFrame.IsBlank(pixels);
 
     /// <remarks>
     /// Coverage ceiling (issue #630): real screenshot tests cover element cropping for normal controls.

@@ -330,8 +330,10 @@ occupy the Sandbox's single guest connection for hours. It holds the same promis
 its whole length: the client window is never restored, brought to the front, or activated to rescue a
 frame. A minimized client fails the recording up front, before any file is written, rather than
 reappearing on your screen; a client that stops being capturable mid-take ends the recording and
-publishes what it captured with the stop reason `capture_unavailable`. Recording an app you are
-watching with `winapp ui record` is unchanged.
+publishes what it captured with the stop reason `capture_unavailable`. A window that capture only
+ever returns black for counts as not capturable, so a Sandbox recording is never an all-black video
+reported as a successful take. Recording an app you are watching with `winapp ui record` is
+unchanged.
 
 winapp captures only the client window it knows it created or adopted, identified by handle, process
 ID, and process start time together, and remembers it across invocations. A window winapp creates is

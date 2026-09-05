@@ -372,6 +372,7 @@ internal sealed partial class UiRecordingService(
             var startedSignaled = false;
             var targetClosed = false;
             var captureUnavailable = false;
+            var sawBlankFrame = false;
             RecordFrameArtifactResult? frameArtifacts = null;
 
             if (options.FramesDirectory is not null)
@@ -464,6 +465,37 @@ internal sealed partial class UiRecordingService(
                             continue;
                         }
                         var (source, sw, sh, version) = latest.Value;
+
+                        // Frame capture reports success for a surface it produced nothing on, so a
+                        // window it cannot really see yields black frames that encode perfectly well.
+                        // The setup probe does not rule this out: it accepts a window that frame
+                        // capture could not see but a non-activating PrintWindow could, and the take
+                        // then runs on frame capture anyway. Unchecked, that is an all-black MP4
+                        // reported as a successful recording -- the exact failure a caller who cannot
+                        // watch the screen has no way to notice.
+                        if (options.NoActivation && CapturedFrame.IsBlank(source))
+                        {
+                            if (frameIndex == 0)
+                            {
+                                // Nothing usable yet. Keep polling rather than giving up on the first
+                                // frame: capture sessions can hand out an empty surface before the
+                                // first real one arrives. If none ever does, the take ends on its own
+                                // deadline and fails below, having published nothing.
+                                sawBlankFrame = true;
+                                await Task.Delay(5, ct).ConfigureAwait(false);
+                                continue;
+                            }
+
+                            // The window was rendering and stopped. Same as losing it outright: keep
+                            // the frames already captured and say why the take ended early.
+                            captureUnavailable = true;
+                            _logger.LogDebug(
+                                "Frame capture returned a blank frame and this recording cannot activate " +
+                                "the window to recover it; finalizing {Frames} frames captured so far",
+                                frameIndex);
+                            break;
+                        }
+
                         sourceVersion = version;
                         frame = ProcessFrame(
                             source, sw, sh, cropX, cropY,
@@ -565,6 +597,14 @@ internal sealed partial class UiRecordingService(
                     await frameOutput.AbortAsync().ConfigureAwait(false);
                 }
                 ct.ThrowIfCancellationRequested();
+            }
+
+            if (frameIndex == 0 && sawBlankFrame)
+            {
+                // The take ran its full length and frame capture never produced anything but black.
+                // Treated as the window not being capturable at all, because that is what it means:
+                // the alternative is publishing a video of nothing and calling it a recording.
+                captureUnavailable = true;
             }
 
             if (frameIndex == 0 && captureUnavailable)

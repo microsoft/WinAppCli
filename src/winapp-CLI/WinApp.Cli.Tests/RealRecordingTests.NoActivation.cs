@@ -286,8 +286,134 @@ public partial class RealRecordingTests
         Assert.AreEqual(0, screenCalls);
     }
 
-    private static RecordOptions NoActivationOptions(string outputPath) => new()
+    /// <summary>
+    /// The gap the setup probe leaves open. The probe accepts a window that frame capture cannot see
+    /// but a non-activating <c>PrintWindow</c> can — and the take then runs on frame capture anyway,
+    /// which hands back black surfaces it is perfectly happy with. Encoding those produces a playable
+    /// all-black MP4 reported as a successful recording, which is the worst possible outcome for a
+    /// caller who is not watching a screen and has nothing else to go on.
+    /// </summary>
+    [TestMethod]
+    public async Task RecordAsync_NoActivation_FrameCaptureOnlyEverReturnsBlank_RecordsNothing()
     {
+        using var fx = new UiaTestFixture();
+        var capture = new FakeWindowCapture
+        {
+            Supported = true,
+            StartGrabberCallback = (_, _) => new FakeFrameGrabber(new byte[64 * 64 * 4], 64, 64),
+
+            // The probe passes, exactly as it does on the real window that motivated this.
+            CaptureWithoutActivationOverride = _ => Frame(),
+        };
+        var recording = NewRecordingService(NewAutomation(), capture);
+        var output = ScratchOutput("wgc-all-blank.mp4");
+        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) =>
+            new FakeVideoEncoder(path, width, height);
+
+        var exception = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => recording.RecordAsync(SessionFor(fx), null, new RecordOptions
+            {
+                OutputPath = output,
+                DurationSec = 1,
+                Fps = 2,
+                MaxEdge = 64,
+                NoActivation = true,
+            }, CancellationToken.None));
+
+        StringAssert.Contains(exception.Message, "could not be captured");
+        Assert.IsFalse(File.Exists(output), "An all-black take must not be published as a recording.");
+        Assert.AreEqual(
+            0,
+            capture.CapturedWithBlankRetry.Count,
+            "Recovering the frame by foregrounding is exactly what this mode promised not to do.");
+    }
+
+    /// <summary>
+    /// The same blankness arriving partway through. What was already recorded is real and worth
+    /// keeping, so it is published — with the stop reason saying why the take is short.
+    /// </summary>
+    [TestMethod]
+    public async Task RecordAsync_NoActivation_FrameCaptureGoesBlankMidTake_PublishesWhatItCaptured()
+    {
+        using var fx = new UiaTestFixture();
+        var capture = new FakeWindowCapture
+        {
+            Supported = true,
+            // Two: the first is consumed when the recorder reads the frame size before the take.
+            StartGrabberCallback = (_, _) => new ScriptedFrameGrabber(usableFrames: 2),
+            CaptureWithoutActivationOverride = _ => Frame(),
+        };
+        var recording = NewRecordingService(NewAutomation(), capture);
+        var output = ScratchOutput("wgc-blank-mid-take.mp4");
+        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) =>
+            new FakeVideoEncoder(path, width, height);
+
+        var result = await recording.RecordAsync(SessionFor(fx), null, new RecordOptions
+        {
+            OutputPath = output,
+            DurationSec = 4,
+            Fps = 2,
+            MaxEdge = 64,
+            NoActivation = true,
+        }, CancellationToken.None);
+
+        Assert.AreEqual(1, result.Frames, "The frame that had real content in it is kept.");
+        Assert.AreEqual("capture_unavailable", result.StopReason);
+        Assert.AreEqual(0, capture.CapturedWithBlankRetry.Count);
+    }
+
+    /// <summary>
+    /// A blank frame is only a failure for a caller that cannot do anything about it. Ordinary
+    /// <c>ui record</c> records what capture gives it, black frames included — a window really can be
+    /// black — and is not changed by any of this.
+    /// </summary>
+    [TestMethod]
+    public async Task RecordAsync_OrdinaryRecording_BlankFrameCapture_IsRecordedAsBefore()
+    {
+        using var fx = new UiaTestFixture();
+        var capture = new FakeWindowCapture
+        {
+            Supported = true,
+            StartGrabberCallback = (_, _) => new FakeFrameGrabber(new byte[64 * 64 * 4], 64, 64),
+        };
+        var recording = NewRecordingService(NewAutomation(), capture);
+        var output = ScratchOutput("wgc-blank-ordinary.mp4");
+        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) =>
+            new FakeVideoEncoder(path, width, height);
+
+        var result = await recording.RecordAsync(SessionFor(fx), null, new RecordOptions
+        {
+            OutputPath = output,
+            DurationSec = 1,
+            Fps = 2,
+            MaxEdge = 64,
+        }, CancellationToken.None);
+
+        Assert.AreEqual(2, result.Frames);
+        Assert.AreEqual("duration_elapsed", result.StopReason);
+    }
+
+    /// <summary>Frame capture that stops producing content after the first few frames.</summary>
+    private sealed class ScriptedFrameGrabber(int usableFrames) : IFrameGrabber
+    {
+        private readonly byte[] _painted = Enumerable.Repeat((byte)0x5A, 64 * 64 * 4).ToArray();
+        private readonly byte[] _blank = new byte[64 * 64 * 4];
+        private long _version;
+        private int _served;
+
+        public bool IsClosed => false;
+
+        public (byte[] Pixels, int Width, int Height, long Version)? TryGetLatest()
+            => (_served++ < usableFrames ? _painted : _blank, 64, 64, Interlocked.Increment(ref _version));
+
+        public Task<bool> WaitForFirstFrameAsync(TimeSpan timeout, CancellationToken ct) => Task.FromResult(true);
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private static RecordOptions NoActivationOptions(string outputPath) => new()    {
         OutputPath = outputPath,
         DurationSec = 1,
         Fps = 1,
