@@ -310,7 +310,7 @@ internal sealed class NativeAotVerifier(IPackageRegistrationService packageRegis
         var exitDetail = exitCode is null ? string.Empty : $" with exit code {exitCode.Value}";
         return Failure(
             $"The app exited{exitDetail} before Native AOT verification completed. " +
-            "Re-run without --verify-native-aot or --detach and add --debug-output; add --symbols for native crash details.",
+            "Re-run without --verify-native-aot and --detach, then add --debug-output; add --symbols for native crash details.",
             exitCode);
     }
 

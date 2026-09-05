@@ -234,6 +234,28 @@ public class MsixServiceIdentityTests : BaseCommandTests
         Assert.IsFalse(File.Exists(Path.Combine(outputDir.FullName, "does-not-exist.dll")), "Missing source must not produce a dest file");
     }
 
+    [TestMethod]
+    public async Task CopyFilesFromRecipeAsync_ExcludesPdbFromRuntimeLayout()
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("recipe-src");
+        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        var pdb = new FileInfo(Path.Combine(srcDir.FullName, "TestApp.pdb"));
+        await File.WriteAllTextAsync(pdb.FullName, "large symbols", TestContext.CancellationToken);
+        var outputDir = _tempDirectory.CreateSubdirectory("layout");
+        await File.WriteAllTextAsync(
+            Path.Combine(outputDir.FullName, "TestApp.pdb"),
+            "stale symbols",
+            TestContext.CancellationToken);
+        var recipe = new FileInfo(WriteRecipe(srcManifest, (pdb.FullName, "TestApp.pdb")));
+
+        await InvokeCopyFilesFromRecipeAsync(recipe, outputDir);
+
+        Assert.IsFalse(
+            File.Exists(Path.Combine(outputDir.FullName, "TestApp.pdb")),
+            "PDBs stay in the publish directory and should not be duplicated into the runtime layout.");
+    }
+
     // ---- SyncFilesToOutputDirectory -----------------------------------------------
 
     [TestMethod]
@@ -250,6 +272,25 @@ public class MsixServiceIdentityTests : BaseCommandTests
 
         Assert.IsTrue(File.Exists(Path.Combine(outputDir.FullName, "TestApp.exe")), "Input files should be synced");
         Assert.IsTrue(File.Exists(Path.Combine(outputDir.FullName, "appxmanifest.xml")), "Manifest should be copied");
+    }
+
+    [TestMethod]
+    public async Task SyncFilesToOutputDirectory_ExcludesPdbFromRuntimeLayout()
+    {
+        var inputDir = _tempDirectory.CreateSubdirectory("input");
+        await File.WriteAllTextAsync(Path.Combine(inputDir.FullName, "TestApp.exe"), "exe", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(inputDir.FullName, "TestApp.pdb"), "symbols", TestContext.CancellationToken);
+        var manifest = new FileInfo(Path.Combine(_tempDirectory.FullName, "appxmanifest.xml"));
+        await File.WriteAllTextAsync(manifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        var outputDir = _tempDirectory.CreateSubdirectory("out");
+        await File.WriteAllTextAsync(Path.Combine(outputDir.FullName, "TestApp.pdb"), "stale symbols", TestContext.CancellationToken);
+
+        InvokeSyncFilesToOutputDirectory(inputDir, outputDir, manifest);
+
+        Assert.IsTrue(File.Exists(Path.Combine(outputDir.FullName, "TestApp.exe")));
+        Assert.IsFalse(
+            File.Exists(Path.Combine(outputDir.FullName, "TestApp.pdb")),
+            "PDBs stay beside the original build or publish output for diagnostics.");
     }
 
     [TestMethod]

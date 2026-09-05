@@ -176,7 +176,7 @@ internal sealed partial class ProjectRunService
         if (options.VerifyNativeAot && initialProperties is not null && !publishAot)
         {
             const string error =
-                "--verify-native-aot requires the evaluated publish to set PublishAot=true. Add '<PublishAot>true</PublishAot>' to the project or pass '-p PublishAot=true'.";
+                "--verify-native-aot requires the evaluated publish to set PublishAot=true. Add '<PublishAot>true</PublishAot>' to the runnable app project.";
             return FailedPreparation("PublishAotRequired", error, executed: false);
         }
 
@@ -261,11 +261,28 @@ internal sealed partial class ProjectRunService
             cancellationToken,
             requireConcreteRid: publishAot || options.VerifyNativeAot);
 
+        NativeAotToolchainSetup? nativeAotToolchain = null;
+        if (publishAot || options.VerifyNativeAot)
+        {
+            nativeAotToolchain = NativeAotToolchainSetupOverrideForTests?.Invoke()
+                ?? ResolveNativeAotToolchainSetup();
+
+            if (nativeAotToolchain.AddedToPath &&
+                nativeAotToolchain.VsWherePath is { } vsWherePath &&
+                !options.Json &&
+                logger.IsEnabled(LogLevel.Information))
+            {
+                ansiConsole.MarkupLineInterpolated(
+                    $"{UiSymbols.Note} Found vswhere.exe at [blue]{Markup.Escape(vsWherePath)}[/], but its directory was not on PATH. WinApp will add it to PATH for this publish.");
+            }
+        }
+
         var publishResult = await RunPublishPassAsync(
             csproj,
             publishOptions,
             workingDir,
             csWinRTMetadata,
+            nativeAotToolchain?.EnvironmentOverrides,
             cancellationToken);
         if (publishResult.ExitCode != 0)
         {
@@ -274,9 +291,14 @@ internal sealed partial class ProjectRunService
                 UiSymbols.Error,
                 csproj.Name,
                 publishResult.ExitCode);
+            var error = BuildPublishFailureMessage(
+                csproj,
+                publishOptions,
+                publishResult,
+                nativeAotToolchain);
             return FailedPreparation(
                 "PublishFailed",
-                $"Publish failed for '{csproj.Name}' (exit code {publishResult.ExitCode}).",
+                error,
                 executed: true,
                 exitCode: publishResult.ExitCode);
         }
@@ -347,7 +369,10 @@ internal sealed partial class ProjectRunService
 
         if (!options.Json && logger.IsEnabled(LogLevel.Information))
         {
-            ansiConsole.MarkupLineInterpolated($"{UiSymbols.Check} Native publish completed");
+            var completion = finalResolution.PublishAot
+                ? "Native AOT publish completed"
+                : "Publish completed";
+            ansiConsole.MarkupLineInterpolated($"{UiSymbols.Check} {completion}");
             ansiConsole.MarkupLineInterpolated($"  Output: {finalResolution.PublishDirectory}");
         }
 
@@ -363,6 +388,7 @@ internal sealed partial class ProjectRunService
         ProjectRunOptions options,
         DirectoryInfo workingDir,
         string? csWinRTMetadata,
+        IReadOnlyDictionary<string, string>? environmentOverrides,
         CancellationToken cancellationToken)
     {
         var arguments = BuildPublishPassArguments(
@@ -386,11 +412,8 @@ internal sealed partial class ProjectRunService
         else
         {
             ansiConsole.MarkupLineInterpolated($"{UiSymbols.Wrench} Publishing...");
-            if (logger.IsEnabled(LogLevel.Debug))
-            {
-                ansiConsole.MarkupLineInterpolated(
-                    $"[dim]   dotnet {Markup.Escape(RedactSecretsForDisplay(display))}[/]");
-            }
+            ansiConsole.MarkupLineInterpolated(
+                $"[dim]   dotnet {Markup.Escape(RedactSecretsForDisplay(display))}[/]");
 
             var writeLock = new object();
             void WriteLive(string line)
@@ -408,11 +431,110 @@ internal sealed partial class ProjectRunService
         return await dotNetService.RunDotnetCommandAsync(
             workingDir,
             arguments,
-            environmentOverrides: null,
+            environmentOverrides,
             stdout,
             stderr,
             cancellationToken);
     }
+
+    internal sealed record NativeAotToolchainSetup(
+        string? VsWherePath,
+        string StandardVsWherePath,
+        bool AddedToPath,
+        IReadOnlyDictionary<string, string>? EnvironmentOverrides);
+
+    internal static NativeAotToolchainSetup ResolveNativeAotToolchainSetup(
+        string? inheritedPath = null,
+        string? installedVsWherePath = null)
+    {
+        inheritedPath ??= Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+        var pathVsWhere = FindExecutableOnPath("vswhere.exe", inheritedPath);
+        installedVsWherePath ??= Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+            "Microsoft Visual Studio",
+            "Installer",
+            "vswhere.exe");
+        if (pathVsWhere is not null)
+        {
+            return new NativeAotToolchainSetup(
+                pathVsWhere,
+                installedVsWherePath,
+                AddedToPath: false,
+                EnvironmentOverrides: null);
+        }
+
+        if (File.Exists(installedVsWherePath))
+        {
+            var installerDirectory = Path.GetDirectoryName(installedVsWherePath)!;
+            var updatedPath = string.IsNullOrWhiteSpace(inheritedPath)
+                ? installerDirectory
+                : $"{installerDirectory}{Path.PathSeparator}{inheritedPath}";
+            return new NativeAotToolchainSetup(
+                installedVsWherePath,
+                installedVsWherePath,
+                AddedToPath: true,
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["PATH"] = updatedPath,
+                });
+        }
+
+        return new NativeAotToolchainSetup(
+                VsWherePath: null,
+                installedVsWherePath,
+                AddedToPath: false,
+                EnvironmentOverrides: null);
+    }
+
+    private static string? FindExecutableOnPath(string executableName, string path)
+    {
+        foreach (var directory in path.Split(
+                     Path.PathSeparator,
+                     StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var candidate = Path.Combine(directory.Trim('"'), executableName);
+            if (File.Exists(candidate))
+            {
+                return Path.GetFullPath(candidate);
+            }
+        }
+
+        return null;
+    }
+
+    private static string BuildPublishFailureMessage(
+        FileInfo csproj,
+        ProjectRunOptions options,
+        (int ExitCode, string Output, string Error) publishResult,
+        NativeAotToolchainSetup? nativeAotToolchain)
+    {
+        var message = $"Publish failed for '{csproj.Name}' (exit code {publishResult.ExitCode}).";
+        var diagnostics = $"{publishResult.Output}{Environment.NewLine}{publishResult.Error}";
+        if (nativeAotToolchain is not null &&
+            nativeAotToolchain.VsWherePath is null &&
+            diagnostics.Contains("vswhere.exe", StringComparison.OrdinalIgnoreCase) &&
+            diagnostics.Contains("not recognized", StringComparison.OrdinalIgnoreCase))
+        {
+            message +=
+                " Native AOT could not locate the MSVC linker because vswhere.exe was not found on PATH " +
+                $"or at the standard Visual Studio Installer path '{nativeAotToolchain.StandardVsWherePath}'. " +
+                "Install Visual Studio or Visual Studio Build Tools with the Desktop development with C++ workload.";
+        }
+
+        if (UserEnabledPublishAotGlobally(options) &&
+            diagnostics.Contains("NETSDK1207", StringComparison.OrdinalIgnoreCase))
+        {
+            message +=
+                " PublishAot was passed with -p, which makes it a global MSBuild property and can apply it to referenced library projects that do not support Native AOT. " +
+                "Set '<PublishAot>true</PublishAot>' in the runnable app project instead.";
+        }
+
+        return message;
+    }
+
+    private static bool UserEnabledPublishAotGlobally(ProjectRunOptions options) =>
+        options.Properties.Any(property =>
+            property.Equals("PublishAot=true", StringComparison.OrdinalIgnoreCase));
 
     private static ProjectRunResolution CreatePublishResolution(
         FileInfo csproj,

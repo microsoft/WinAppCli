@@ -405,7 +405,7 @@ function packageApp(options: PackageOptions): Promise<WinappResult>
 
 ### `restore()`
 
-Use after cloning a repo or when .winapp/ folder is missing. Reinstalls SDK packages from existing winapp.yaml without changing versions. Requires winapp.yaml (created by 'init'). To check for newer SDK versions, use 'update' instead.
+Use after cloning a repo or when .winapp/ folder is missing. Reinstalls SDK packages without changing versions, reading them from winapp.yaml or, for a .NET project initialized by 'init', from the .csproj via 'dotnet restore'. Requires a project already initialized by 'init'. To check for newer SDK versions, use 'update' instead.
 
 ```typescript
 function restore(options?: RestoreOptions): Promise<WinappResult>
@@ -416,7 +416,7 @@ function restore(options?: RestoreOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `baseDirectory` | `string \| undefined` | No | Base/root directory for the winapp workspace |
-| `configDir` | `string \| undefined` | No | Directory to read configuration from (default: current directory) |
+| `configDir` | `string \| undefined` | No | Directory to read configuration from (default: base-directory) |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
 
@@ -452,7 +452,7 @@ function run(options?: RunOptions): Promise<WinappResult>
 | `noRestore` | `boolean \| undefined` | No | Project mode: skip restoring during dotnet build or dotnet publish. |
 | `outputAppxDirectory` | `string \| undefined` | No | Output directory for the loose layout package. If not specified, a directory named AppX inside the input directory will be used. |
 | `project` | `string \| undefined` | No | Project mode: when the input is a solution (.sln/.slnx) or a directory with multiple runnable app projects, selects which project to launch (by name or path). Ignored in folder mode. |
-| `property` | `string \| string[] \| undefined` | No | Project mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode. |
+| `property` | `string \| string[] \| undefined` | No | Project mode: MSBuild property as Name=Value, forwarded to build or publish and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode. |
 | `publish` | `boolean \| undefined` | No | Project mode: run dotnet publish and launch the exact evaluated PublishDir artifact instead of build output. |
 | `runtime` | `string \| undefined` | No | Project mode: target .NET runtime identifier (RID), e.g. win-x64. Project mode uses only the RID's architecture, always builds the canonical win-<arch>, and rejects non-Windows RIDs (e.g. linux-x64); it overrides --arch. Ignored in folder mode. |
 | `symbols` | `boolean \| undefined` | No | Download symbols from Microsoft Symbol Server for richer native crash analysis, including the WinUI stowed-exception dispatch stack. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. |
@@ -1571,7 +1571,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `baseDirectory` | `string \| undefined` | No | Base/root directory for the winapp workspace |
-| `configDir` | `string \| undefined` | No | Directory to read configuration from (default: current directory) |
+| `configDir` | `string \| undefined` | No | Directory to read configuration from (default: base-directory) |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
@@ -1588,19 +1588,22 @@ type ManifestTemplates = "packaged" | "sparse"
 | `configuration` | `string \| undefined` | No | Project mode: build configuration (e.g., Debug, Release). Ignored in folder mode. Default: Debug. |
 | `debugOutput` | `boolean \| undefined` | No | Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. For WinUI apps, a crash also triggers a stowed-exception triage pass; the first run downloads debugger components (cached under the winapp global directory) and can be pointed at an existing debugger install via the WINAPP_DBGTOOLS_DIR environment variable. Cannot be combined with --no-launch or --json. |
 | `detach` | `boolean \| undefined` | No | Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). |
+| `dryRun` | `boolean \| undefined` | No | Project mode: evaluate and validate the selected build or publish plan without building, publishing, registering, or launching. |
 | `executable` | `string \| undefined` | No | Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder. |
 | `framework` | `string \| undefined` | No | Project mode: target framework moniker for multi-targeted projects (e.g. net10.0-windows10.0.26100.0). Ignored in folder mode. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `manifest` | `string \| undefined` | No | Path to the Package.appxmanifest (default: auto-detect from input folder or current directory) |
-| `noBuild` | `boolean \| undefined` | No | Project mode: skip building and run the existing build output (still evaluates output properties). Ignored in folder mode. |
+| `noBuild` | `boolean \| undefined` | No | Project mode: without --publish, skip dotnet build and run existing TargetDir output; with --publish, pass --no-build to dotnet publish. |
 | `noLaunch` | `boolean \| undefined` | No | Only create the debug identity and register the package without launching the application |
-| `noRestore` | `boolean \| undefined` | No | Project mode: skip restoring the project before building. Ignored in folder mode. |
+| `noRestore` | `boolean \| undefined` | No | Project mode: skip restoring during dotnet build or dotnet publish. |
 | `outputAppxDirectory` | `string \| undefined` | No | Output directory for the loose layout package. If not specified, a directory named AppX inside the input directory will be used. |
 | `project` | `string \| undefined` | No | Project mode: when the input is a solution (.sln/.slnx) or a directory with multiple runnable app projects, selects which project to launch (by name or path). Ignored in folder mode. |
-| `property` | `string \| string[] \| undefined` | No | Project mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode. |
+| `property` | `string \| string[] \| undefined` | No | Project mode: MSBuild property as Name=Value, forwarded to build or publish and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode. |
+| `publish` | `boolean \| undefined` | No | Project mode: run dotnet publish and launch the exact evaluated PublishDir artifact instead of build output. |
 | `runtime` | `string \| undefined` | No | Project mode: target .NET runtime identifier (RID), e.g. win-x64. Project mode uses only the RID's architecture, always builds the canonical win-<arch>, and rejects non-Windows RIDs (e.g. linux-x64); it overrides --arch. Ignored in folder mode. |
 | `symbols` | `boolean \| undefined` | No | Download symbols from Microsoft Symbol Server for richer native crash analysis, including the WinUI stowed-exception dispatch stack. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. |
 | `unregisterOnExit` | `boolean \| undefined` | No | Unregister the development package after the application exits. Only removes packages registered in development mode. |
+| `verifyNativeAot` | `boolean \| undefined` | No | Project mode: implies --publish and fails unless the published payload and running process are verified as Native AOT. |
 | `withAlias` | `boolean \| undefined` | No | Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use "winapp manifest add-alias" to add an execution alias to the manifest. |
 | `appArgs` | `string \| string[] \| undefined` | No | Arguments to pass to the launched application (forwarded after --). |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |

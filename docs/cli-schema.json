@@ -2101,7 +2101,7 @@
           "recursive": false
         },
         "--property": {
-          "description": "Project mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode.",
+          "description": "Project mode: MSBuild property as Name=Value, forwarded to build or publish and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode.",
           "hidden": false,
           "aliases": [
             "-p"

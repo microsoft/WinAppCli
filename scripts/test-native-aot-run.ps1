@@ -95,6 +95,27 @@ function Set-ApplicationManifestIdentity {
     $document.Save($manifestPath)
 }
 
+function Enable-NativeAotInProject {
+    param([string]$ProjectPath)
+
+    [xml]$document = Get-Content -LiteralPath $ProjectPath -Raw
+    $propertyGroup = $document.Project.PropertyGroup | Select-Object -First 1
+    if ($null -eq $propertyGroup) {
+        throw "No PropertyGroup was found in '$ProjectPath'."
+    }
+
+    if ($null -eq $propertyGroup.PublishAot) {
+        $publishAot = $document.CreateElement("PublishAot")
+        $publishAot.InnerText = "true"
+        $propertyGroup.AppendChild($publishAot) | Out-Null
+    }
+    else {
+        $propertyGroup.PublishAot = "true"
+    }
+
+    $document.Save($ProjectPath)
+}
+
 function Invoke-WinappJson {
     param([string[]]$Arguments)
 
@@ -166,6 +187,7 @@ try {
     $unpackagedAssembly = "WinAppNativeAotUnpackaged$token"
     $packagedProject = Join-Path $packagedRoot "$packagedAssembly.csproj"
     Move-Item -LiteralPath (Join-Path $packagedRoot "winui-app.csproj") -Destination $packagedProject
+    Enable-NativeAotInProject $packagedProject
     Set-ApplicationManifestIdentity $packagedRoot $packagedAssembly
 
     $unpackagedProject = Join-Path $unpackagedRoot "$unpackagedAssembly.csproj"
@@ -204,7 +226,6 @@ System.Threading.Thread.Sleep(System.Threading.Timeout.Infinite);
         "--detach",
         "-c", "Release",
         "-r", "win-$Architecture",
-        "-p", "PublishAot=true",
         "-p", "WindowsAppSDKSelfContained=true",
         "-p", "PublishProfile=",
         "--output-appx-directory", $stagingRoot,
@@ -224,7 +245,6 @@ System.Threading.Thread.Sleep(System.Threading.Timeout.Infinite);
         "--detach",
         "-c", "Release",
         "-r", "win-$Architecture",
-        "-p", "PublishAot=true",
         "-p", "WindowsAppSDKSelfContained=true",
         "--json"
     )

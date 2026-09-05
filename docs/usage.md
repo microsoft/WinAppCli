@@ -788,17 +788,17 @@ Project mode requires the **.NET SDK 8.0.100 or newer** (for MSBuild `--getPrope
 - `--dry-run` - Evaluate the build or publish plan and validate settings without restoring, building, publishing, registering, or launching. If restored Native AOT assets are missing, it reports an indeterminate result and prints the exact `dotnet restore` command to run. It does not validate native build-tool availability.
 - `--no-build` - Without `--publish`, skip `dotnet build` and use existing `TargetDir` output. With `--publish`, invoke `dotnet publish --no-build` and resolve its `PublishDir`; it does not mean “skip publish.”
 - `--no-restore` - Skip restoring during `dotnet build` or `dotnet publish`.
-- `-p, --property <Name=Value>` - MSBuild property, forwarded consistently to preparation and property evaluation. Repeatable (e.g. `-p WindowsPackageType=None` or `-p PublishProfile=Custom`).
+- `-p, --property <Name=Value>` - MSBuild property, forwarded consistently to build or publish and property evaluation. Repeatable (e.g. `-p WindowsPackageType=None` or `-p PublishProfile=Custom`).
 
 `--publish`, `--verify-native-aot`, and `--dry-run` require project mode. Passing one when the input resolves to a build-output folder is a usage error.
 
-**Native AOT prerequisites:** Windows Native AOT publishing requires .NET SDK 8.0.100 or newer plus Visual Studio or Visual Studio Build Tools with Desktop development with C++. WinApp does not install these prerequisites; `dotnet publish` reports any that are missing.
+**Native AOT prerequisites:** Windows Native AOT publishing requires .NET SDK 8.0.100 or newer plus Visual Studio or Visual Studio Build Tools with Desktop development with C++. If `vswhere.exe` exists in the standard Visual Studio Installer directory but is missing from `PATH`, WinApp adds that directory only to the `dotnet publish` child process. WinApp does not install the C++ workload; other missing prerequisites are reported by `dotnet publish`.
 
 For `--verify-native-aot`, WinApp also checks that the process remains alive during a short internal startup window. A self-contained single-file JIT app can hide CoreCLR inside its executable, so WinApp rejects the official .NET single-file bundle marker rather than certifying it from missing sidecar files. Packaged output must be registered in development mode at this invocation's staging directory; unpackaged output must run directly from the evaluated `PublishDir`. JSON output includes the source executable, staging/process paths, package identity, PID, exit code when available, window information, and layered verification results.
 
-If the app exits during verification, the error reports its exit code when available. Re-run without `--verify-native-aot` or `--detach` and add `--debug-output`; add `--symbols` for native crash details.
+If the app exits during verification, the error reports its exit code when available. Re-run without `--verify-native-aot` and `--detach`, then add `--debug-output`; add `--symbols` for native crash details.
 
-**Build output & verbosity:** the project is built in two steps — a `dotnet build` whose output **streams live** to your console, followed by a fast property-evaluation pass. winapp prints the exact `dotnet build …` invocation before the output, and streams warnings even on a successful build. Verbosity:
+**Build or publish output & verbosity:** project preparation runs in two steps — `dotnet build` or `dotnet publish`, whose output **streams live** to your console, followed by a fast property-evaluation pass. winapp prints the exact `dotnet …` invocation before the output and streams warnings even on success. Verbosity:
 
 | Flag | dotnet verbosity | Adds |
 |------|------------------|------|

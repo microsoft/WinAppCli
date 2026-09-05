@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Spectre.Console;
 using WinApp.Cli.Models;
@@ -146,6 +147,63 @@ public sealed class ProjectPublishServiceTests
         Assert.IsNotNull(outcome.Resolution);
         Assert.AreEqual(1, dotnet.ArgumentListInvocations.Count);
         CollectionAssert.Contains(dotnet.ArgumentListInvocations[0].ToArray(), "--no-build");
+    }
+
+    [TestMethod]
+    public async Task PreparePublish_DefaultOutputPrintsRedactedInvocation()
+    {
+        var publishDirectory = _tempDirectory.CreateSubdirectory("publish");
+        File.WriteAllText(ChildPath(publishDirectory.FullName, "App.exe"), "fixture");
+        var properties = UnpackagedProperties(publishDirectory.FullName, publishAot: false);
+        using var output = new StringWriter();
+        var (service, _) = CreateService(properties, output: output, logLevel: LogLevel.Information);
+        var options = new ProjectRunOptions(
+            "Release",
+            "x64",
+            null,
+            NoBuild: false,
+            NoRestore: true,
+            Properties: ["PackageCertificatePassword=hunter2"]);
+
+        var outcome = await service.PrepareAndResolveAsync(
+            _project,
+            options,
+            ProjectPreparationOperation.Publish,
+            CancellationToken.None);
+
+        Assert.AreEqual(0, outcome.ExitCode, outcome.Error);
+        StringAssert.Contains(output.ToString(), "dotnet publish");
+        StringAssert.Contains(output.ToString(), "PackageCertificatePassword=***");
+        StringAssert.Contains(output.ToString(), "Publish completed");
+        Assert.IsFalse(output.ToString().Contains("Native AOT publish completed", StringComparison.Ordinal));
+        Assert.IsFalse(output.ToString().Contains("hunter2", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task PrepareNativeAot_DefaultOutputUsesNativeAotCompletionLabel()
+    {
+        var publishDirectory = _tempDirectory.CreateSubdirectory("publish");
+        File.WriteAllText(ChildPath(publishDirectory.FullName, "App.exe"), "native fixture");
+        var properties = UnpackagedProperties(publishDirectory.FullName, publishAot: true);
+        using var output = new StringWriter();
+        var (service, _) = CreateService(properties, output: output, logLevel: LogLevel.Information);
+        var options = new ProjectRunOptions(
+            "Release",
+            "x64",
+            null,
+            NoBuild: false,
+            NoRestore: true,
+            Properties: [],
+            VerifyNativeAot: true);
+
+        var outcome = await service.PrepareAndResolveAsync(
+            _project,
+            options,
+            ProjectPreparationOperation.Publish,
+            CancellationToken.None);
+
+        Assert.AreEqual(0, outcome.ExitCode, outcome.Error);
+        StringAssert.Contains(output.ToString(), "Native AOT publish completed");
     }
 
     [TestMethod]
@@ -552,6 +610,160 @@ public sealed class ProjectPublishServiceTests
     }
 
     [TestMethod]
+    public async Task PrepareNativeAot_GlobalPublishAotFailureRecommendsProjectProperty()
+    {
+        var properties = UnpackagedProperties(
+            TempPath("publish"),
+            publishAot: true);
+        var (service, dotnet) = CreateService(properties);
+        dotnet.RunDotnetArgumentListHandler = _ =>
+            (1, string.Empty, "error NETSDK1207: Ahead-of-time compilation is not supported for netstandard2.0.");
+        var options = new ProjectRunOptions(
+            "Release",
+            "x64",
+            null,
+            NoBuild: false,
+            NoRestore: false,
+            Properties: ["PublishAot=true"],
+            VerifyNativeAot: true);
+
+        var outcome = await service.PrepareAndResolveAsync(
+            _project,
+            options,
+            ProjectPreparationOperation.Publish,
+            CancellationToken.None);
+
+        Assert.AreEqual("PublishFailed", outcome.ErrorCode);
+        StringAssert.Contains(outcome.Error, "global MSBuild property");
+        StringAssert.Contains(outcome.Error, "runnable app project");
+    }
+
+    [TestMethod]
+    public async Task PrepareNativeAot_InstalledVsWhereMissingFromPath_IsAddedForPublishOnly()
+    {
+        var publishDirectory = _tempDirectory.CreateSubdirectory("publish");
+        File.WriteAllText(ChildPath(publishDirectory.FullName, "App.exe"), "native fixture");
+        var properties = UnpackagedProperties(publishDirectory.FullName, publishAot: true);
+        var (service, dotnet) = CreateService(properties);
+        service.NativeAotToolchainSetupOverrideForTests = static () =>
+            new ProjectRunService.NativeAotToolchainSetup(
+                @"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe",
+                @"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe",
+                AddedToPath: true,
+                new Dictionary<string, string>
+                {
+                    ["PATH"] = @"C:\Program Files (x86)\Microsoft Visual Studio\Installer;C:\Windows",
+                });
+        var options = new ProjectRunOptions(
+            "Release",
+            "x64",
+            null,
+            NoBuild: false,
+            NoRestore: true,
+            Properties: [],
+            VerifyNativeAot: true);
+
+        var outcome = await service.PrepareAndResolveAsync(
+            _project,
+            options,
+            ProjectPreparationOperation.Publish,
+            CancellationToken.None);
+
+        Assert.AreEqual(0, outcome.ExitCode, outcome.Error);
+        var environment = dotnet.ArgumentListEnvironmentInvocations.Single();
+        Assert.IsNotNull(environment);
+        Assert.AreEqual(
+            @"C:\Program Files (x86)\Microsoft Visual Studio\Installer;C:\Windows",
+            environment["PATH"]);
+    }
+
+    [TestMethod]
+    public async Task PrepareNativeAot_VsWhereFailureExplainsPathAndStandardLocation()
+    {
+        var properties = UnpackagedProperties(
+            TempPath("publish"),
+            publishAot: true);
+        var (service, dotnet) = CreateService(properties);
+        var standardPath = @"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe";
+        service.NativeAotToolchainSetupOverrideForTests = () =>
+            new ProjectRunService.NativeAotToolchainSetup(
+                VsWherePath: null,
+                standardPath,
+                AddedToPath: false,
+                EnvironmentOverrides: null);
+        dotnet.RunDotnetArgumentListHandler = _ =>
+            (123, string.Empty, "'vswhere.exe' is not recognized as an internal or external command.");
+        var options = new ProjectRunOptions(
+            "Release",
+            "x64",
+            null,
+            NoBuild: false,
+            NoRestore: false,
+            Properties: [],
+            VerifyNativeAot: true);
+
+        var outcome = await service.PrepareAndResolveAsync(
+            _project,
+            options,
+            ProjectPreparationOperation.Publish,
+            CancellationToken.None);
+
+        Assert.AreEqual("PublishFailed", outcome.ErrorCode);
+        StringAssert.Contains(outcome.Error, "vswhere.exe was not found on PATH");
+        StringAssert.Contains(outcome.Error, standardPath);
+        StringAssert.Contains(outcome.Error, "Desktop development with C++");
+    }
+
+    [TestMethod]
+    public void ResolveNativeAotToolchainSetup_InstalledVsWhereMissingFromPath_AddsOnlyChildPath()
+    {
+        var installerDirectory = _tempDirectory.CreateSubdirectory("installer");
+        var vsWhere = Path.Combine(installerDirectory.FullName, "vswhere.exe");
+        File.WriteAllText(vsWhere, "fixture");
+        var inheritedPath = Path.Combine(_tempDirectory.FullName, "existing");
+
+        var setup = ProjectRunService.ResolveNativeAotToolchainSetup(inheritedPath, vsWhere);
+
+        Assert.IsTrue(setup.AddedToPath);
+        Assert.AreEqual(vsWhere, setup.VsWherePath);
+        Assert.IsNotNull(setup.EnvironmentOverrides);
+        Assert.AreEqual(
+            $"{installerDirectory.FullName}{Path.PathSeparator}{inheritedPath}",
+            setup.EnvironmentOverrides["PATH"]);
+    }
+
+    [TestMethod]
+    public void ResolveNativeAotToolchainSetup_VsWhereAlreadyOnPath_DoesNotOverrideEnvironment()
+    {
+        var pathDirectory = _tempDirectory.CreateSubdirectory("path");
+        var vsWhere = Path.Combine(pathDirectory.FullName, "vswhere.exe");
+        File.WriteAllText(vsWhere, "fixture");
+
+        var setup = ProjectRunService.ResolveNativeAotToolchainSetup(
+            pathDirectory.FullName,
+            TempPath("missing", "vswhere.exe"));
+
+        Assert.IsFalse(setup.AddedToPath);
+        Assert.AreEqual(vsWhere, setup.VsWherePath);
+        Assert.IsNull(setup.EnvironmentOverrides);
+    }
+
+    [TestMethod]
+    public void ResolveNativeAotToolchainSetup_VsWhereMissing_ExplainsBothLocations()
+    {
+        var missing = TempPath("missing", "vswhere.exe");
+
+        var setup = ProjectRunService.ResolveNativeAotToolchainSetup(
+            TempPath("empty-path"),
+            missing);
+
+        Assert.IsNull(setup.VsWherePath);
+        Assert.AreEqual(missing, setup.StandardVsWherePath);
+        Assert.IsFalse(setup.AddedToPath);
+        Assert.IsNull(setup.EnvironmentOverrides);
+    }
+
+    [TestMethod]
     public async Task PrepareNativeAot_PublishWarningsDoNotBlockVerification()
     {
        var publishDirectory = _tempDirectory.CreateSubdirectory("publish");
@@ -678,7 +890,9 @@ public sealed class ProjectPublishServiceTests
     private static (ProjectRunService Service, FakeDotNetService Dotnet)
         CreateService(
             string propertiesJson,
-            FakeCsWinRTMetadataShimService? shim = null)
+            FakeCsWinRTMetadataShimService? shim = null,
+            TextWriter? output = null,
+            LogLevel? logLevel = null)
     {
         var dotnet = new FakeDotNetService
         {
@@ -690,14 +904,22 @@ public sealed class ProjectPublishServiceTests
         };
         var console = AnsiConsole.Create(new AnsiConsoleSettings
         {
-            Out = new AnsiConsoleOutput(TextWriter.Null),
+            Out = new AnsiConsoleOutput(output ?? TextWriter.Null),
         });
         var service = new ProjectRunService(
             dotnet,
             new ProjectDetectionService(NullLogger<ProjectDetectionService>.Instance, dotnet),
             shim ?? new FakeCsWinRTMetadataShimService(),
             console,
-            NullLogger<ProjectRunService>.Instance);
+            logLevel is null
+                ? NullLogger<ProjectRunService>.Instance
+                : new LevelLogger<ProjectRunService>(logLevel.Value));
+        service.NativeAotToolchainSetupOverrideForTests = static () =>
+            new ProjectRunService.NativeAotToolchainSetup(
+                "vswhere.exe",
+                "vswhere.exe",
+                AddedToPath: false,
+                EnvironmentOverrides: null);
         return (service, dotnet);
     }
 

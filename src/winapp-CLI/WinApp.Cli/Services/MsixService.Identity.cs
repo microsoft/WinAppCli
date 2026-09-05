@@ -520,6 +520,13 @@ internal partial class MsixService
             }
 
             var destPath = Path.Combine(outputDir.FullName, packagePath);
+            if (string.Equals(Path.GetExtension(packagePath), ".pdb", StringComparison.OrdinalIgnoreCase))
+            {
+                File.Delete(destPath);
+                skipped++;
+                continue;
+            }
+
             var destFile = new FileInfo(destPath);
 
             // Skip unchanged files (same size and timestamp)
@@ -562,7 +569,11 @@ internal partial class MsixService
                 "resources.pri"
             };
 
-            var result = IncrementalCopyHelper.SyncDirectory(inputDirectory, outputAppXDirectory, protectedFiles);
+            var result = IncrementalCopyHelper.SyncDirectory(
+                inputDirectory,
+                outputAppXDirectory,
+                protectedFiles,
+                static file => !string.Equals(file.Extension, ".pdb", StringComparison.OrdinalIgnoreCase));
             taskContext.AddDebugMessage($"{UiSymbols.Check} Sync to output directory: {result.Copied} copied, {result.Skipped} unchanged, {result.Deleted} deleted");
         }
 

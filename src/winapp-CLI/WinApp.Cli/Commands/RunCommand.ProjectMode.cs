@@ -825,7 +825,7 @@ internal partial class RunCommand
                        report.ErrorCode = "NativeAotVerificationFailed";
                        report.Error =
                            $"Native AOT verification failed: {ex.Message} Launched process PID {processId} was terminated. " +
-                           "Re-run without --verify-native-aot or --detach and add --debug-output; add --symbols for native crash details.";
+                           "Re-run without --verify-native-aot and --detach, then add --debug-output; add --symbols for native crash details.";
                        if (isJson)
                        {
                            PrintJson(report);

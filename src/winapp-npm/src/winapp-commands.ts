@@ -631,7 +631,7 @@ export interface RunOptions extends CommonOptions {
   outputAppxDirectory?: string;
   /** Project mode: when the input is a solution (.sln/.slnx) or a directory with multiple runnable app projects, selects which project to launch (by name or path). Ignored in folder mode. */
   project?: string;
-  /** Project mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode. */
+  /** Project mode: MSBuild property as Name=Value, forwarded to build or publish and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode. */
   property?: string | string[];
   /** Project mode: run dotnet publish and launch the exact evaluated PublishDir artifact instead of build output. */
   publish?: boolean;

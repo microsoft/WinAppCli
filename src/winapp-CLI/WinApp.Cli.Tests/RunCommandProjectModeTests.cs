@@ -1006,7 +1006,7 @@ public class RunCommandProjectModeTests : BaseCommandTests
            LoadedModules: [],
            MainWindowHandle: 0,
            MainWindowTitle: string.Empty,
-           Error: "The app exited with exit code 42 before Native AOT verification completed. Re-run without --verify-native-aot or --detach and add --debug-output; add --symbols for native crash details.",
+           Error: "The app exited with exit code 42 before Native AOT verification completed. Re-run without --verify-native-aot and --detach, then add --debug-output; add --symbols for native crash details.",
            ExitCode: 42);
        var command = GetRequiredService<RunCommand>();
 
