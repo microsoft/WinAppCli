@@ -718,9 +718,9 @@ public sealed class ProjectPublishServiceTests
     public void ResolveNativeAotToolchainSetup_InstalledVsWhereMissingFromPath_AddsOnlyChildPath()
     {
         var installerDirectory = _tempDirectory.CreateSubdirectory("installer");
-        var vsWhere = Path.Combine(installerDirectory.FullName, "vswhere.exe");
+        var vsWhere = Path.Join(installerDirectory.FullName, "vswhere.exe");
         File.WriteAllText(vsWhere, "fixture");
-        var inheritedPath = Path.Combine(_tempDirectory.FullName, "existing");
+        var inheritedPath = Path.Join(_tempDirectory.FullName, "existing");
 
         var setup = ProjectRunService.ResolveNativeAotToolchainSetup(inheritedPath, vsWhere);
 
@@ -736,7 +736,7 @@ public sealed class ProjectPublishServiceTests
     public void ResolveNativeAotToolchainSetup_VsWhereAlreadyOnPath_DoesNotOverrideEnvironment()
     {
         var pathDirectory = _tempDirectory.CreateSubdirectory("path");
-        var vsWhere = Path.Combine(pathDirectory.FullName, "vswhere.exe");
+        var vsWhere = Path.Join(pathDirectory.FullName, "vswhere.exe");
         File.WriteAllText(vsWhere, "fixture");
 
         var setup = ProjectRunService.ResolveNativeAotToolchainSetup(
