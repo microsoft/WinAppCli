@@ -180,15 +180,13 @@ internal sealed partial class ProjectRunService
             return FailedPreparation("PublishAotRequired", error, executed: false);
         }
 
-        if (publishAot || options.VerifyNativeAot)
+        if ((publishAot || options.VerifyNativeAot) &&
+            !IsNativeAotArchitecture(options.Architecture))
         {
-            if (!IsNativeAotArchitecture(options.Architecture))
-            {
-                return FailedPreparation(
-                    "UnsupportedNativeAotArchitecture",
-                    $"Windows Native AOT publishing supports win-x64 and win-arm64. Runtime 'win-{options.Architecture}' is not supported.",
-                    executed: false);
-            }
+            return FailedPreparation(
+                "UnsupportedNativeAotArchitecture",
+                $"Windows Native AOT publishing supports win-x64 and win-arm64. Runtime 'win-{options.Architecture}' is not supported.",
+                executed: false);
         }
 
         if (options.DryRun &&
@@ -449,11 +447,11 @@ internal sealed partial class ProjectRunService
     {
         inheritedPath ??= Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
         var pathVsWhere = FindExecutableOnPath("vswhere.exe", inheritedPath);
-        installedVsWherePath ??= Path.Combine(
+        var installerDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
             "Microsoft Visual Studio",
-            "Installer",
-            "vswhere.exe");
+            "Installer");
+        installedVsWherePath ??= Path.Join(installerDirectory, "vswhere.exe");
         if (pathVsWhere is not null)
         {
             return new NativeAotToolchainSetup(
@@ -465,7 +463,7 @@ internal sealed partial class ProjectRunService
 
         if (File.Exists(installedVsWherePath))
         {
-            var installerDirectory = Path.GetDirectoryName(installedVsWherePath)!;
+            installerDirectory = Path.GetDirectoryName(installedVsWherePath)!;
             var updatedPath = string.IsNullOrWhiteSpace(inheritedPath)
                 ? installerDirectory
                 : $"{installerDirectory}{Path.PathSeparator}{inheritedPath}";
@@ -488,11 +486,20 @@ internal sealed partial class ProjectRunService
 
     private static string? FindExecutableOnPath(string executableName, string path)
     {
-        foreach (var directory in path.Split(
-                     Path.PathSeparator,
-                     StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        if (string.IsNullOrWhiteSpace(executableName) ||
+            Path.IsPathRooted(executableName) ||
+            !string.Equals(Path.GetFileName(executableName), executableName, StringComparison.Ordinal))
         {
-            var candidate = Path.Combine(directory.Trim('"'), executableName);
+            return null;
+        }
+
+        var candidates = path
+            .Split(
+                Path.PathSeparator,
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(directory => Path.Join(directory.Trim('"'), executableName));
+        foreach (var candidate in candidates)
+        {
             if (File.Exists(candidate))
             {
                 return Path.GetFullPath(candidate);

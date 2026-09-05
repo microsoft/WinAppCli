@@ -238,13 +238,13 @@ public class MsixServiceIdentityTests : BaseCommandTests
     public async Task CopyFilesFromRecipeAsync_ExcludesPdbFromRuntimeLayout()
     {
         var srcDir = _tempDirectory.CreateSubdirectory("recipe-src");
-        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "AppxManifest.xml"));
+        var srcManifest = new FileInfo(Path.Join(srcDir.FullName, "AppxManifest.xml"));
         await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
-        var pdb = new FileInfo(Path.Combine(srcDir.FullName, "TestApp.pdb"));
+        var pdb = new FileInfo(Path.Join(srcDir.FullName, "TestApp.pdb"));
         await File.WriteAllTextAsync(pdb.FullName, "large symbols", TestContext.CancellationToken);
         var outputDir = _tempDirectory.CreateSubdirectory("layout");
         await File.WriteAllTextAsync(
-            Path.Combine(outputDir.FullName, "TestApp.pdb"),
+            Path.Join(outputDir.FullName, "TestApp.pdb"),
             "stale symbols",
             TestContext.CancellationToken);
         var recipe = new FileInfo(WriteRecipe(srcManifest, (pdb.FullName, "TestApp.pdb")));
@@ -252,7 +252,7 @@ public class MsixServiceIdentityTests : BaseCommandTests
         await InvokeCopyFilesFromRecipeAsync(recipe, outputDir);
 
         Assert.IsFalse(
-            File.Exists(Path.Combine(outputDir.FullName, "TestApp.pdb")),
+            File.Exists(Path.Join(outputDir.FullName, "TestApp.pdb")),
             "PDBs stay in the publish directory and should not be duplicated into the runtime layout.");
     }
 
