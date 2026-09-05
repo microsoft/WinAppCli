@@ -128,6 +128,139 @@ public class InteractiveDesktopStoreTests
     }
 
     [TestMethod]
+    public void Read_IncompleteObject_IsTreatedAsCorruption()
+    {
+        // An empty object is not a fresh state, it is a truncated one. Every property carried a
+        // defaulting initializer, so `{}` bound to exactly what CreateFresh() produces — version 1,
+        // ticket 1, no owner, no commands — and sailed through structural validation as if a real
+        // coordinator had written it. A file truncated to `{}` by a crashed writer, a disk-full
+        // rewrite or a stray editor therefore looked like "nobody is using the desktop".
+        _paths.EnsureDirectories();
+        File.WriteAllText(_paths.StatePath, "{}");
+
+        using (var stateLock = _store.AcquireStateLock(CancellationToken.None))
+        {
+            var result = _store.Read();
+            Assert.IsTrue(
+                result.RecoveredFromCorruption,
+                "a document missing every field the writer always emits must be corruption, not a fresh state");
+            Assert.IsNotNull(result.State);
+        }
+
+        Assert.IsTrue(
+            Directory.EnumerateFiles(_paths.LockDirectory, "state.corrupt-*.json").Any(),
+            "the unusable document must be quarantined rather than silently believed");
+    }
+
+    [TestMethod]
+    public void Read_IncompleteObjectWithALiveParticipant_FailsClosed()
+    {
+        // The consequence that makes this critical rather than untidy. Believing `{}` mints a fresh
+        // owner while another process still holds its lease, so two workflows drive one desktop at
+        // once. With a live lease the read must refuse instead.
+        _paths.EnsureDirectories();
+        File.WriteAllText(_paths.StatePath, "{}");
+
+        using var lease = _participants.OpenLease(_inspector.CurrentProcessId, _inspector.CurrentProcessStartTicksUtc);
+
+        using var stateLock = _store.AcquireStateLock(CancellationToken.None);
+        var ex = Assert.ThrowsExactly<UiCoordinationException>(() => _store.Read());
+        Assert.AreEqual(UiCoordinationErrorCodes.Unavailable, ex.Code);
+
+        Assert.AreEqual("{}", File.ReadAllText(_paths.StatePath),
+            "failing closed must leave the bytes alone rather than replacing them with a fresh state");
+    }
+
+    [TestMethod]
+    public void Read_WaiterMissingARequiredField_IsTreatedAsCorruption()
+    {
+        // A partially written entry is worse than a missing one: an absent ownerKind would default to
+        // whichever enum value is zero, so a truncated waiter would be promoted later with an owner
+        // kind nobody ever wrote — deciding, among other things, whether it earns an idle grace.
+        _paths.EnsureDirectories();
+        const string truncatedWaiter = """
+            {"version":1,"turnId":0,"turnStartedTick64":0,"nextTicket":2,"idleExpiresTick64":0,
+             "ownerCommands":[],
+             "waiters":[{"ticket":1,"ownerKey":"abc","pid":4242,"processStartTicksUtc":99,"operation":"ui click","mode":"desktop-exclusive"}]}
+            """;
+        File.WriteAllText(_paths.StatePath, truncatedWaiter);
+
+        using var stateLock = _store.AcquireStateLock(CancellationToken.None);
+        var result = _store.Read();
+
+        Assert.IsTrue(
+            result.RecoveredFromCorruption,
+            "a waiter missing ownerKind must not default into valid scheduling semantics");
+    }
+
+    [TestMethod]
+    public void Read_OwnerCommandMissingStatus_IsTreatedAsCorruption()
+    {
+        // Status decides whether a command is running or still blocked behind a barrier. Defaulting it
+        // silently would let a truncated entry claim either.
+        _paths.EnsureDirectories();
+        const string truncatedCommand = """
+            {"version":1,"turnId":1,"turnStartedTick64":5,"nextTicket":2,"idleExpiresTick64":0,
+             "owner":{"kind":"workflow","key":"abc"},
+             "ownerCommands":[{"ticket":1,"pid":4242,"processStartTicksUtc":99,"operation":"ui click","mode":"desktop-exclusive"}],
+             "waiters":[]}
+            """;
+        File.WriteAllText(_paths.StatePath, truncatedCommand);
+
+        using var stateLock = _store.AcquireStateLock(CancellationToken.None);
+        var result = _store.Read();
+
+        Assert.IsTrue(
+            result.RecoveredFromCorruption,
+            "an owner command missing status must not default into a runnable entry");
+    }
+
+    [TestMethod]
+    public void Read_AFreshlyPublishedState_StillRoundTrips()
+    {
+        // The other half of the contract: requiring fields must not reject what this binary writes.
+        _paths.EnsureDirectories();
+
+        using var stateLock = _store.AcquireStateLock(CancellationToken.None);
+        var published = InteractiveDesktopState.CreateFresh();
+        published.Owner = new OwnerRecord { Kind = UiOwnerKind.Workflow, Key = "abc" };
+        published.TurnId = 3;
+        published.TurnStartedTick64 = 1_234;
+        published.OwnerCommands.Add(new OwnerCommandEntry
+        {
+            Ticket = published.AllocateTicket(),
+            Pid = 4242,
+            ProcessStartTicksUtc = 99,
+            Operation = "ui click",
+            Mode = UiTurnMode.DesktopExclusive,
+            Status = UiCommandStatus.Running,
+        });
+        published.Waiters.Add(new WaiterEntry
+        {
+            Ticket = published.AllocateTicket(),
+            OwnerKey = "def",
+            OwnerKind = UiOwnerKind.Anonymous,
+            Pid = 5252,
+            ProcessStartTicksUtc = 100,
+            Operation = "ui screenshot",
+            Mode = UiTurnMode.DesktopExclusive,
+        });
+        _store.Publish(published);
+
+        var result = _store.Read();
+
+        Assert.IsFalse(result.RecoveredFromCorruption, "this binary's own output must read back cleanly");
+        Assert.IsFalse(result.UnknownNewerVersion);
+        Assert.IsNotNull(result.State);
+        Assert.AreEqual(3, result.State!.TurnId);
+        Assert.AreEqual("abc", result.State.Owner!.Key);
+        Assert.HasCount(1, result.State.OwnerCommands);
+        Assert.HasCount(1, result.State.Waiters);
+        Assert.AreEqual(UiOwnerKind.Anonymous, result.State.Waiters[0].OwnerKind);
+        Assert.AreEqual(UiCommandStatus.Running, result.State.OwnerCommands[0].Status);
+    }
+
+    [TestMethod]
     public void Read_UnknownNewerVersion_IsNeverResetOrDowngraded()
     {
         _paths.EnsureDirectories();
@@ -263,9 +396,14 @@ public class InteractiveDesktopStoreTests
     [TestMethod]
     public void Publish_RoundTripsStateAndPreservesUnknownFieldsFromANewerWriter()
     {
+        // The fixture carries every field the v1 writer emits, because a document missing one of those
+        // is now corruption rather than a partially populated state. Confirmed against a real published
+        // file: version, turnId, turnStartedTick64, nextTicket, idleExpiresTick64, ownerCommands and
+        // waiters are always written.
         _paths.EnsureDirectories();
         WriteRawState("""
-            {"version":1,"turnId":3,"nextTicket":9,"owner":{"kind":"workflow","key":"a","futureOwnerField":"keep-me"},
+            {"version":1,"turnId":3,"turnStartedTick64":100,"nextTicket":9,"idleExpiresTick64":0,
+             "owner":{"kind":"workflow","key":"a","futureOwnerField":"keep-me"},
              "ownerCommands":[],"waiters":[],"futureRootField":{"nested":true}}
             """);
 

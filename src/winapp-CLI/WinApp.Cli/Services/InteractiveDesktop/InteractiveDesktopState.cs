@@ -17,6 +17,17 @@ namespace WinApp.Cli.Services.InteractiveDesktop;
 /// additive fields survive a rewrite by an older compatible binary (spec §8, "Preserve unknown fields
 /// when rewriting a known version"). A <see cref="Version"/> greater than
 /// <see cref="CurrentVersion"/> is never reset or downgraded.
+/// <para>
+/// Every property the v1 writer always emits is <see cref="JsonRequiredAttribute">required</see>. The
+/// initializers below exist for <see cref="CreateFresh"/> and for code that builds a state in memory;
+/// without the attribute they also silently absorbed a truncated document, because <c>{}</c> bound to
+/// precisely the values <see cref="CreateFresh"/> produces and then passed structural validation as a
+/// genuinely empty desktop. Requiring them turns a partial document into a
+/// <see cref="JsonException"/>, which is corruption, which fails closed while any lease is live.
+/// Optional properties stay optional: <see cref="Owner"/> and
+/// <see cref="DiagnosticIdleExpiresUtc"/> are omitted when null, and an
+/// <see cref="UiTurnMode.Observe"/> entry legitimately carries no ticket.
+/// </para>
 /// </remarks>
 internal sealed class InteractiveDesktopState
 {
@@ -24,9 +35,11 @@ internal sealed class InteractiveDesktopState
     internal const int CurrentVersion = 1;
 
     /// <summary>Schema version. Values above <see cref="CurrentVersion"/> are failed closed, never rewritten.</summary>
+    [JsonRequired]
     public int Version { get; set; } = CurrentVersion;
 
     /// <summary>Incremented every time the turn is claimed by an owner. Diagnostic and test observability.</summary>
+    [JsonRequired]
     public long TurnId { get; set; }
 
     /// <summary>
@@ -35,9 +48,11 @@ internal sealed class InteractiveDesktopState
     /// has been held — across all of that owner's commands — rather than how long its own command
     /// waited (spec §16 turn-age bucket). Zero when no owner holds the turn.
     /// </summary>
+    [JsonRequired]
     public long TurnStartedTick64 { get; set; }
 
     /// <summary>Next globally monotonic arrival ticket. Tickets order the barrier and the global FIFO.</summary>
+    [JsonRequired]
     public long NextTicket { get; set; } = 1;
 
     /// <summary>The owner currently holding the turn, or <see langword="null"/> when the desktop is free.</summary>
@@ -48,15 +63,18 @@ internal sealed class InteractiveDesktopState
     /// <see cref="OwnerCommands"/> is empty — a waiting or running owner command keeps the turn
     /// regardless of this value.
     /// </summary>
+    [JsonRequired]
     public long IdleExpiresTick64 { get; set; }
 
     /// <summary>Human-readable mirror of <see cref="IdleExpiresTick64"/>. Diagnostic only; never compared.</summary>
     public string? DiagnosticIdleExpiresUtc { get; set; }
 
     /// <summary>Commands belonging to the current owner, in arrival order.</summary>
+    [JsonRequired]
     public List<OwnerCommandEntry> OwnerCommands { get; set; } = [];
 
     /// <summary>Other owners' commands waiting for the turn, oldest ticket first.</summary>
+    [JsonRequired]
     public List<WaiterEntry> Waiters { get; set; } = [];
 
     /// <summary>Unknown properties from a newer writer, preserved verbatim on rewrite.</summary>
@@ -89,12 +107,14 @@ internal sealed class InteractiveDesktopState
 internal sealed class OwnerRecord
 {
     /// <summary>How this owner was resolved. Drives whether the turn earns a post-command idle grace.</summary>
+    [JsonRequired]
     public UiOwnerKind Kind { get; set; }
 
     /// <summary>
     /// Lowercase hex SHA-256 of the domain-separated owner payload. Never the raw
     /// <c>WINAPP_UI_WORKFLOW_ID</c>, and never emitted in output, logs or telemetry.
     /// </summary>
+    [JsonRequired]
     public string Key { get; set; } = "";
 
     /// <summary>Unknown properties from a newer writer, preserved verbatim on rewrite.</summary>
@@ -114,21 +134,26 @@ internal sealed class OwnerCommandEntry
     public long? Ticket { get; set; }
 
     /// <summary>Owning <c>winapp.exe</c> process id.</summary>
+    [JsonRequired]
     public int Pid { get; set; }
 
     /// <summary>
     /// The owning process's <c>Process.StartTime.ToUniversalTime().Ticks</c>. Combined with
     /// <see cref="Pid"/> this identifies the participant lease and detects PID reuse.
     /// </summary>
+    [JsonRequired]
     public long ProcessStartTicksUtc { get; set; }
 
     /// <summary>Command name for diagnostics, e.g. <c>ui click</c>. Never includes arguments.</summary>
+    [JsonRequired]
     public string Operation { get; set; } = "";
 
     /// <summary>The command's coordination mode.</summary>
+    [JsonRequired]
     public UiTurnMode Mode { get; set; }
 
     /// <summary>Whether the command is blocked behind an earlier barrier or executing.</summary>
+    [JsonRequired]
     public UiCommandStatus Status { get; set; }
 
     /// <summary>Unknown properties from a newer writer, preserved verbatim on rewrite.</summary>
@@ -140,27 +165,34 @@ internal sealed class OwnerCommandEntry
 internal sealed class WaiterEntry
 {
     /// <summary>Globally monotonic arrival ticket. Defines strict FIFO order among waiters.</summary>
+    [JsonRequired]
     public long Ticket { get; set; }
 
     /// <summary>The waiting command's owner key (SHA-256 hex). Becomes the current owner on promotion.</summary>
+    [JsonRequired]
     public string OwnerKey { get; set; } = "";
 
     /// <summary>Owning <c>winapp.exe</c> process id.</summary>
+    [JsonRequired]
     public int Pid { get; set; }
 
     /// <summary>The owning process's <c>Process.StartTime.ToUniversalTime().Ticks</c>.</summary>
+    [JsonRequired]
     public long ProcessStartTicksUtc { get; set; }
 
     /// <summary>The owner kind to install when this waiter is promoted.</summary>
+    [JsonRequired]
     public UiOwnerKind OwnerKind { get; set; }
 
     /// <summary>Command name for diagnostics, e.g. <c>ui click</c>. Never includes arguments.</summary>
+    [JsonRequired]
     public string Operation { get; set; } = "";
 
     /// <summary>
     /// The mode this waiter requested, stored so any process can promote it without inferring behavior
     /// from the operation name (spec §8).
     /// </summary>
+    [JsonRequired]
     public UiTurnMode Mode { get; set; }
 
     /// <summary>Unknown properties from a newer writer, preserved verbatim on rewrite.</summary>
