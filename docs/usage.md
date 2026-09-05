@@ -691,7 +691,7 @@ winapp run [<input>] [options]
 **Options:**
 
 - `--manifest <path>` - Path to Package.appxmanifest (default: auto-detect from input folder or current directory)
-- `--output-appx-directory <path>` - Output directory for the loose layout package (default: `AppX` inside the input folder directory)
+- `--output-appx-directory <path>` - Output directory for the loose layout package (default: `AppX` inside the input folder directory). winapp keeps this directory matching the build, so a file your app no longer contains is removed from it on the next run. Point it at a directory of its own: if it contains the build output, winapp warns and leaves extra files alone rather than deleting build artifacts.
 - `--args <string>` - Command-line arguments to pass to the application. Alternatively, use `--` followed by arguments to avoid escaping (e.g., `winapp run . -- --flag value`).
 - `--no-launch` - Only create the debug identity and register the package without launching the application
 - `--with-alias` - Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a `uap5:ExecutionAlias` in the manifest (use `winapp manifest add-alias` to add one). Cannot be combined with `--no-launch`. Cannot be combined with `--json`.

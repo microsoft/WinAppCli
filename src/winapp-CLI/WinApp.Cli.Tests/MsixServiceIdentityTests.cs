@@ -234,6 +234,291 @@ public class MsixServiceIdentityTests : BaseCommandTests
         Assert.IsFalse(File.Exists(Path.Combine(outputDir.FullName, "does-not-exist.dll")), "Missing source must not produce a dest file");
     }
 
+    // ---- CopyFilesFromRecipeAsync: reconciliation ---------------------------------
+
+    /// <summary>
+    /// The layout is winapp's own directory and MSBuild never cleans it, so a file dropped from the
+    /// app must disappear from the layout on the next materialization. Before this was reconciled,
+    /// the layout was the union of every build ever put into it.
+    /// </summary>
+    [TestMethod]
+    public async Task CopyFilesFromRecipeAsync_SecondRun_RemovesContentDroppedFromTheBuild()
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("recipe-src");
+        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+
+        var fixtures = srcDir.CreateSubdirectory("Fixtures");
+        var keep = new FileInfo(Path.Combine(fixtures.FullName, "keep.txt"));
+        var dropped = new FileInfo(Path.Combine(fixtures.FullName, "dropped.txt"));
+        await File.WriteAllTextAsync(keep.FullName, "keep", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(dropped.FullName, "dropped", TestContext.CancellationToken);
+
+        var outputDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "layout"));
+
+        await InvokeCopyFilesFromRecipeAsync(
+            new FileInfo(WriteRecipe(srcManifest,
+                (keep.FullName, @"Fixtures\keep.txt"),
+                (dropped.FullName, @"Fixtures\dropped.txt"))),
+            outputDir);
+
+        Assert.IsTrue(File.Exists(Path.Combine(outputDir.FullName, "Fixtures", "dropped.txt")), "First run should stage both fixtures");
+
+        // The file is removed from the app and the next build no longer lists it.
+        dropped.Delete();
+
+        await InvokeCopyFilesFromRecipeAsync(
+            new FileInfo(WriteRecipe(srcManifest, (keep.FullName, @"Fixtures\keep.txt"))),
+            outputDir);
+
+        Assert.IsFalse(File.Exists(Path.Combine(outputDir.FullName, "Fixtures", "dropped.txt")),
+            "A file the recipe no longer lists must not survive in the layout");
+        Assert.IsTrue(File.Exists(Path.Combine(outputDir.FullName, "Fixtures", "keep.txt")),
+            "A file the recipe still lists must be kept");
+        Assert.IsTrue(File.Exists(Path.Combine(outputDir.FullName, "appxmanifest.xml")), "The manifest must be kept");
+    }
+
+    [TestMethod]
+    public async Task CopyFilesFromRecipeAsync_RemovesDirectoryItsOwnPruningEmptied()
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("recipe-src");
+        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        var nested = srcDir.CreateSubdirectory("Fixtures");
+        var only = new FileInfo(Path.Combine(nested.FullName, "only.txt"));
+        await File.WriteAllTextAsync(only.FullName, "only", TestContext.CancellationToken);
+
+        var outputDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "layout"));
+
+        await InvokeCopyFilesFromRecipeAsync(
+            new FileInfo(WriteRecipe(srcManifest, (only.FullName, @"Fixtures\only.txt"))), outputDir);
+
+        // A directory that was already empty before this run is the caller's, not ours.
+        var preexistingEmpty = Directory.CreateDirectory(Path.Combine(outputDir.FullName, "PreexistingEmpty"));
+
+        only.Delete();
+        await InvokeCopyFilesFromRecipeAsync(new FileInfo(WriteRecipe(srcManifest)), outputDir);
+
+        Assert.IsFalse(Directory.Exists(Path.Combine(outputDir.FullName, "Fixtures")),
+            "A directory left empty by pruning should not linger in the layout");
+        Assert.IsTrue(Directory.Exists(preexistingEmpty.FullName),
+            "A directory that pruning did not empty must be left alone");
+        Assert.IsTrue(outputDir.Exists, "The layout directory itself must never be removed");
+    }
+
+    /// <summary>
+    /// A missing source means the build could not refresh that file, not that the app dropped it.
+    /// Deleting it would turn a partial build into a broken layout.
+    /// </summary>
+    [TestMethod]
+    public async Task CopyFilesFromRecipeAsync_MissingSourceFile_KeepsThePreviouslyStagedFile()
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("recipe-src");
+        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        var payload = new FileInfo(Path.Combine(srcDir.FullName, "TestApp.dll"));
+        await File.WriteAllTextAsync(payload.FullName, "v1", TestContext.CancellationToken);
+
+        var outputDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "layout"));
+
+        await InvokeCopyFilesFromRecipeAsync(
+            new FileInfo(WriteRecipe(srcManifest, (payload.FullName, "TestApp.dll"))), outputDir);
+
+        payload.Delete();
+
+        // Same recipe, source now unreadable.
+        await InvokeCopyFilesFromRecipeAsync(
+            new FileInfo(WriteRecipe(srcManifest, (payload.FullName, "TestApp.dll"))), outputDir);
+
+        Assert.AreEqual("v1", await File.ReadAllTextAsync(Path.Combine(outputDir.FullName, "TestApp.dll"), TestContext.CancellationToken),
+            "A recipe entry whose source is missing must leave the staged file intact");
+    }
+
+    /// <summary>A recipe that describes nothing is evidence of a bad read, not of an empty app.</summary>
+    [TestMethod]
+    public async Task CopyFilesFromRecipeAsync_RecipeListsNothing_LeavesLayoutUntouched()
+    {
+        var outputDir = Directory.CreateDirectory(Path.Combine(_tempDirectory.FullName, "layout"));
+        var existing = Path.Combine(outputDir.FullName, "TestApp.exe");
+        await File.WriteAllTextAsync(existing, "exe", TestContext.CancellationToken);
+
+        var recipePath = Path.Combine(_tempDirectory.FullName, "Empty.build.appxrecipe");
+        await File.WriteAllTextAsync(
+            recipePath,
+            """
+            <?xml version="1.0" encoding="utf-8"?>
+            <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+              <ItemGroup />
+            </Project>
+            """,
+            TestContext.CancellationToken);
+
+        await InvokeCopyFilesFromRecipeAsync(new FileInfo(recipePath), new DirectoryInfo(outputDir.FullName));
+
+        Assert.IsTrue(File.Exists(existing), "An empty recipe must not empty the layout");
+    }
+
+    [TestMethod]
+    public async Task CopyFilesFromRecipeAsync_NeverRemovesManifestOrResourcesPri()
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("recipe-src");
+        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        var srcExe = new FileInfo(Path.Combine(srcDir.FullName, "TestApp.exe"));
+        await File.WriteAllTextAsync(srcExe.FullName, "exe", TestContext.CancellationToken);
+
+        var outputDir = Directory.CreateDirectory(Path.Combine(_tempDirectory.FullName, "layout"));
+        var pri = Path.Combine(outputDir.FullName, "resources.pri");
+        await File.WriteAllTextAsync(pri, "pri", TestContext.CancellationToken);
+        var registeredManifest = Path.Combine(outputDir.FullName, "appxmanifest.xml");
+        await File.WriteAllTextAsync(registeredManifest, "previously registered", TestContext.CancellationToken);
+
+        // Recipe lists only the exe: neither the manifest nor the PRI appear in it.
+        var recipe = new FileInfo(WriteRecipeWithoutManifest(srcExe.FullName, "TestApp.exe"));
+
+        await InvokeCopyFilesFromRecipeAsync(recipe, new DirectoryInfo(outputDir.FullName));
+
+        Assert.IsTrue(File.Exists(pri), "resources.pri backs a live registration and must never be pruned");
+        Assert.IsTrue(File.Exists(registeredManifest), "The layout manifest backs a live registration and must never be pruned");
+    }
+
+    [TestMethod]
+    public async Task CopyFilesFromRecipeAsync_LayoutContainsTheBuildOutput_PrunesNothing()
+    {
+        // The recipe lives in the build output directory; here the user pointed the layout at the
+        // folder above it, so the build output is inside the layout.
+        var layout = _tempDirectory.CreateSubdirectory("bin");
+        var srcDir = layout.CreateSubdirectory("Debug");
+        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        var srcExe = new FileInfo(Path.Combine(srcDir.FullName, "TestApp.exe"));
+        await File.WriteAllTextAsync(srcExe.FullName, "exe", TestContext.CancellationToken);
+        var symbols = Path.Combine(srcDir.FullName, "TestApp.pdb");
+        await File.WriteAllTextAsync(symbols, "pdb", TestContext.CancellationToken);
+
+        var recipePath = Path.Combine(srcDir.FullName, "TestApp.build.appxrecipe");
+        await File.WriteAllTextAsync(
+            recipePath,
+            $"""
+            <?xml version="1.0" encoding="utf-8"?>
+            <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+              <ItemGroup>
+                <AppXManifest Include="{srcManifest.FullName}"><PackagePath>AppxManifest.xml</PackagePath></AppXManifest>
+                <AppxPackagedFile Include="{srcExe.FullName}"><PackagePath>TestApp.exe</PackagePath></AppxPackagedFile>
+              </ItemGroup>
+            </Project>
+            """,
+            TestContext.CancellationToken);
+
+        await InvokeCopyFilesFromRecipeAsync(new FileInfo(recipePath), layout);
+
+        Assert.IsTrue(File.Exists(symbols), "A build artifact the recipe does not package must survive when the layout contains the build output");
+        Assert.IsTrue(File.Exists(recipePath), "The recipe itself must survive");
+        Assert.IsTrue(File.Exists(Path.Combine(layout.FullName, "TestApp.exe")), "The layout is still produced");
+    }
+
+    [TestMethod]
+    public async Task CopyFilesFromRecipeAsync_PruningStaysInsideTheLayout()
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("recipe-src");
+        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+
+        var sibling = _tempDirectory.CreateSubdirectory("sibling");
+        var siblingFile = Path.Combine(sibling.FullName, "unrelated.txt");
+        await File.WriteAllTextAsync(siblingFile, "unrelated", TestContext.CancellationToken);
+
+        var outputDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "layout"));
+
+        await InvokeCopyFilesFromRecipeAsync(new FileInfo(WriteRecipe(srcManifest)), outputDir);
+
+        Assert.IsTrue(File.Exists(siblingFile), "Nothing outside the layout may be touched");
+        Assert.IsTrue(File.Exists(Path.Combine(srcDir.FullName, "AppxManifest.xml")), "The build output may not be touched");
+    }
+
+    /// <summary>
+    /// A junction inside the layout points at a tree winapp does not own, so pruning must stop at it
+    /// rather than delete whatever it targets.
+    /// </summary>
+    [TestMethod]
+    public async Task CopyFilesFromRecipeAsync_DoesNotDeleteThroughADirectoryJunction()
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("recipe-src");
+        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+
+        var outside = _tempDirectory.CreateSubdirectory("outside");
+        var outsideFile = Path.Combine(outside.FullName, "precious.txt");
+        await File.WriteAllTextAsync(outsideFile, "precious", TestContext.CancellationToken);
+
+        var outputDir = Directory.CreateDirectory(Path.Combine(_tempDirectory.FullName, "layout"));
+        var junction = Path.Combine(outputDir.FullName, "linked");
+        if (!TryCreateJunction(junction, outside.FullName))
+        {
+            Assert.Inconclusive("Could not create a directory junction on this machine.");
+            return;
+        }
+
+        try
+        {
+            await InvokeCopyFilesFromRecipeAsync(new FileInfo(WriteRecipe(srcManifest)), new DirectoryInfo(outputDir.FullName));
+
+            Assert.IsTrue(File.Exists(outsideFile), "Pruning must not follow a junction out of the layout");
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(junction, recursive: false);
+            }
+            catch
+            {
+                // Best-effort cleanup; the temp root is removed anyway.
+            }
+        }
+    }
+
+    /// <summary>Junction creation needs no elevation, unlike a symbolic link.</summary>
+    private static bool TryCreateJunction(string linkPath, string target)
+    {
+        try
+        {
+            using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe")
+            {
+                ArgumentList = { "/c", "mklink", "/J", linkPath, target },
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            });
+
+            process?.WaitForExit(15000);
+            return Directory.Exists(linkPath)
+                && new DirectoryInfo(linkPath).Attributes.HasFlag(FileAttributes.ReparsePoint);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Writes a recipe with a packaged file but no AppXManifest entry.</summary>
+    private string WriteRecipeWithoutManifest(string include, string packagePath)
+    {
+        var recipePath = Path.Combine(_tempDirectory.FullName, "NoManifest.build.appxrecipe");
+        File.WriteAllText(
+            recipePath,
+            $"""
+            <?xml version="1.0" encoding="utf-8"?>
+            <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+              <ItemGroup>
+                <AppxPackagedFile Include="{include}"><PackagePath>{packagePath}</PackagePath></AppxPackagedFile>
+              </ItemGroup>
+            </Project>
+            """);
+        return recipePath;
+    }
+
     // ---- SyncFilesToOutputDirectory -----------------------------------------------
 
     [TestMethod]
@@ -582,6 +867,63 @@ public class MsixServiceIdentityTests : BaseCommandTests
         Assert.AreEqual(registeredResult.Publisher, materializedResult.Publisher);
         Assert.AreEqual(registeredResult.ApplicationId, materializedResult.ApplicationId);
         AssertLayoutsMatch(registered, materialized);
+    }
+
+    /// <summary>
+    /// The user-visible shape of the bug: an execution target mirrors the host layout exactly, so a
+    /// file the app no longer contains must be gone from the layout the second time it is materialized.
+    /// </summary>
+    [TestMethod]
+    public async Task MaterializeLooseLayoutAsync_SecondRun_DropsContentRemovedFromTheApp()
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("build-output");
+        var srcManifest = new FileInfo(TestPaths.Under(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        await File.WriteAllTextAsync(TestPaths.Under(srcDir.FullName, "TestApp.exe"), "exe", TestContext.CancellationToken);
+        var fixtures = srcDir.CreateSubdirectory("Fixtures");
+        var dropped = new FileInfo(TestPaths.Under(fixtures.FullName, "dropped.txt"));
+        await File.WriteAllTextAsync(dropped.FullName, "dropped", TestContext.CancellationToken);
+
+        async Task WriteBuildRecipeAsync(bool includeDropped)
+        {
+            var droppedEntry = includeDropped
+                ? $"<AppxPackagedFile Include=\"{dropped.FullName}\"><PackagePath>Fixtures\\dropped.txt</PackagePath></AppxPackagedFile>"
+                : string.Empty;
+
+            await File.WriteAllTextAsync(
+                TestPaths.Under(srcDir.FullName, "TestApp.build.appxrecipe"),
+                $"""
+                <?xml version="1.0" encoding="utf-8"?>
+                <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+                  <ItemGroup>
+                    <AppXManifest Include="{srcManifest.FullName}"><PackagePath>appxmanifest.xml</PackagePath></AppXManifest>
+                    <AppxPackagedFile Include="{TestPaths.Under(srcDir.FullName, "TestApp.exe")}"><PackagePath>TestApp.exe</PackagePath></AppxPackagedFile>
+                    {droppedEntry}
+                  </ItemGroup>
+                </Project>
+                """,
+                TestContext.CancellationToken);
+        }
+
+        // An explicitly supplied layout directory, as `--output-appx-directory` produces.
+        var layout = new DirectoryInfo(TestPaths.Under(_tempDirectory.FullName, "explicit-layout"));
+
+        await WriteBuildRecipeAsync(includeDropped: true);
+        await _msixService.MaterializeLooseLayoutAsync(
+            srcManifest, srcDir, layout, TestTaskContext, cancellationToken: TestContext.CancellationToken);
+        Assert.IsTrue(File.Exists(TestPaths.Under(layout.FullName, "Fixtures", "dropped.txt")));
+
+        // The file is removed from the app; the rebuild no longer produces or lists it.
+        dropped.Delete();
+        await WriteBuildRecipeAsync(includeDropped: false);
+
+        await _msixService.MaterializeLooseLayoutAsync(
+            srcManifest, srcDir, layout, TestTaskContext, cancellationToken: TestContext.CancellationToken);
+
+        Assert.IsFalse(Directory.Exists(TestPaths.Under(layout.FullName, "Fixtures")),
+            "Content removed from the app must not survive in the layout an execution target mirrors");
+        Assert.IsTrue(File.Exists(TestPaths.Under(layout.FullName, "TestApp.exe")), "The app itself must still be staged");
+        Assert.IsTrue(File.Exists(TestPaths.Under(layout.FullName, "appxmanifest.xml")), "The manifest must still be staged");
     }
 
     [TestMethod]
