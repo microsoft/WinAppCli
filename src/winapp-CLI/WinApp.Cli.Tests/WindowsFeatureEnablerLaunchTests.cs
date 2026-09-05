@@ -16,8 +16,16 @@ namespace WinApp.Cli.Tests;
 /// <see cref="WindowsFeatureEnabler.RunElevatedAsync(ProcessStartInfo, Func{ProcessStartInfo, Process?}, CancellationToken)"/>,
 /// so each test supplies a harmless child of its own and the production wait, exit-code, and
 /// handle-suppression logic runs against that instead of against <c>dism.exe</c>.
+/// <para>
+/// <c>[DoNotParallelize]</c>, for the same reason <c>SandboxHandleInheritanceTests</c> is: these
+/// tests exercise <see cref="StandardHandleInheritance.Suppress"/>, which clears
+/// <c>HANDLE_FLAG_INHERIT</c> on this <em>process's</em> standard handles and serializes on a
+/// process-wide <see cref="Monitor"/>. Run in parallel, an open scope here would strip inheritance
+/// from a child another test is starting at that moment, silently costing that child its output.
+/// </para>
 /// </remarks>
 [TestClass]
+[DoNotParallelize]
 public class WindowsFeatureEnablerLaunchTests
 {
     /// <summary>Long enough that only a genuinely stranded gate fails it.</summary>

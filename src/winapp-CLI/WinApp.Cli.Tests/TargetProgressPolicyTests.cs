@@ -22,8 +22,15 @@ namespace WinApp.Cli.Tests;
 /// orchestrator and from <c>run</c>'s own target path, on different streams, and a flag that reached
 /// only one of them produced a "quiet" run that still narrated half of itself.
 /// </para>
+/// <para>
+/// <c>[DoNotParallelize]</c> because <see cref="Quiet_DoesNotSuppressFailureReporting"/> redirects
+/// the process-wide <see cref="Console.Error"/>, and the assembly otherwise runs tests in parallel
+/// at method level. Left parallel, it would capture another test's diagnostics as if they were its
+/// own and hide that test's from it — a failure that reads as an unrelated flake.
+/// </para>
 /// </remarks>
 [TestClass]
+[DoNotParallelize]
 public class TargetProgressPolicyTests
 {
     /// <summary>Registration resolves the enabled sink when <c>--quiet</c> was not given.</summary>
