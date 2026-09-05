@@ -312,16 +312,14 @@ internal sealed partial class ProjectRunService
             cancellationToken,
             requireConcreteRid: publishAot || options.VerifyNativeAot);
 
-        if (nativeAotToolchain is not null)
+        if (nativeAotToolchain is not null &&
+            nativeAotToolchain.AddedToPath &&
+            nativeAotToolchain.VsWherePath is { } vsWherePath &&
+            !options.Json &&
+            logger.IsEnabled(LogLevel.Information))
         {
-            if (nativeAotToolchain.AddedToPath &&
-                nativeAotToolchain.VsWherePath is { } vsWherePath &&
-                !options.Json &&
-                logger.IsEnabled(LogLevel.Information))
-            {
-                ansiConsole.MarkupLineInterpolated(
-                    $"{UiSymbols.Note} Found vswhere.exe at [blue]{Markup.Escape(vsWherePath)}[/], but its directory was not on PATH. WinApp will add it to PATH for this publish.");
-            }
+            ansiConsole.MarkupLineInterpolated(
+                $"{UiSymbols.Note} Found vswhere.exe at [blue]{Markup.Escape(vsWherePath)}[/], but its directory was not on PATH. WinApp will add it to PATH for this publish.");
         }
 
         var publishResult = await RunPublishPassAsync(

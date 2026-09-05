@@ -1010,7 +1010,7 @@ public sealed class ProjectPublishServiceTests
         File.WriteAllText(trustedDotnet, "fixture");
 
         var resolved = ProjectRunService.ResolveDotnetHostPath(
-            dotnetRoot: null,
+            dotnetRoot: TempPath("missing-dotnet-root"),
             inheritedPath: $".{Path.PathSeparator}{trustedDirectory.FullName}");
 
         Assert.AreEqual(trustedDotnet, resolved);

@@ -203,7 +203,7 @@ internal sealed class NativeAotVerifier(IPackageRegistrationService packageRegis
                 PackageRegistration: packageRegistration,
                 ProcessPath: processPath,
                 LoadedModules: modules,
-                MainWindowHandle: process.MainWindowHandle.ToInt64(),
+                MainWindowHandle: mainWindowHandle.ToInt64(),
                 MainWindowTitle: process.MainWindowTitle ?? string.Empty,
                 Error: error,
                 ExitCode: null);
