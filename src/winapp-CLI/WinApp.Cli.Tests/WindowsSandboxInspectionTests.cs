@@ -107,11 +107,10 @@ public class WindowsSandboxInspectionTests
     }
 
     /// <summary>
-    /// The other half of the contract: the path that exists to make later commands agree with this
-    /// one still records what it resolved. Inspection is the exception, not a new default.
+    /// A manual client may be used where it stands, but must not be persisted as winapp-owned.
     /// </summary>
     [TestMethod]
-    public async Task Resolve_ForACapture_DoesRecordTheClientItAdopted()
+    public async Task Resolve_ForACapture_DoesNotRecordTheClientItAdopted()
     {
         var backend = CreateBackend();
         await backend.TryAttachAsync(TestContext.CancellationToken);
@@ -120,9 +119,9 @@ public class WindowsSandboxInspectionTests
         backend.ResolveDesktopSurface(TargetDesktopUse.PixelCapture);
 
         var after = _stateStore.Read(WindowsSandboxTarget.Default)!;
-        Assert.IsTrue(after.Revision > before, "The adopted client must survive into the next command.");
-        Assert.AreEqual((long)LiveClient.Handle, after.ClientWindowHandle);
-        Assert.AreEqual(LiveClient.ProcessId, after.ClientProcessId);
+        Assert.AreEqual(before, after.Revision);
+        Assert.IsNull(after.ClientWindowHandle);
+        Assert.IsFalse(after.ClientOwnedByWinapp);
     }
 
     /// <summary>Everything about the persisted record that a read must not disturb.</summary>
@@ -169,7 +168,7 @@ public class WindowsSandboxInspectionTests
 
         public Task<SandboxClientWindow?> PlaceConnectedClientAsync(
             WindowsSandboxWindowSnapshot snapshot,
-            SandboxConnectOwnership? ownership,
+            SandboxConnectAttempt attempt,
             CancellationToken cancellationToken) => Task.FromResult<SandboxClientWindow?>(client);
 
         public SandboxClientWindow ResolveClient(SandboxClientWindow? remembered) => client;

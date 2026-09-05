@@ -101,12 +101,14 @@ internal interface IWindowsSandboxCli
     /// immediate-failure window.
     /// </summary>
     /// <returns>
-    /// The launched connect, which the caller must dispose once it has finished attributing client
-    /// windows to it. The attempt is what proves which window this connect created.
+    /// The launched connect, which the callback receives immediately and the caller must dispose once
+    /// it has finished attributing client windows to it. The callback owns that attempt even when the
+    /// bounded failure watch later throws or is cancelled, so any already-placed client can still be
+    /// persisted before the error propagates.
     /// </returns>
     Task<SandboxConnectAttempt> ConnectAsync(
         string id,
-        Action<SandboxConnectOwnership?> onLaunched,
+        Action<SandboxConnectAttempt> onLaunched,
         CancellationToken cancellationToken);
 
     /// <summary>

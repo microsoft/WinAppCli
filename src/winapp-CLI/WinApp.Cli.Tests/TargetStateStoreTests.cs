@@ -113,6 +113,7 @@ public class TargetStateStoreTests
                 ClientWindowHandle = 0x2A2A,
                 ClientProcessId = 4242,
                 ClientProcessStartTicksUtc = 638_000_000_000_000_000,
+                ClientOwnedByWinapp = true,
             },
             expectedRevision: 0);
 
@@ -125,6 +126,7 @@ public class TargetStateStoreTests
         // The start time is what distinguishes this window from whatever owns that handle and
         // process ID after Windows recycles them.
         Assert.AreEqual(638_000_000_000_000_000, read.ClientProcessStartTicksUtc);
+        Assert.IsTrue(read.ClientOwnedByWinapp);
     }
 
     [TestMethod]

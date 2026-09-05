@@ -204,6 +204,7 @@ internal sealed class TargetDeploymentService(IDeploymentStateStore stateStore)
             target,
             state with
             {
+                WasPackaged = state.WasPackaged || state.Package is not null,
                 Package = null,
                 TrackedOperationProcessId = null,
                 TrackedOperationProcessStartTicksUtc = null,

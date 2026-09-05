@@ -56,10 +56,15 @@ internal sealed class SandboxConnectAttempt : IDisposable
     /// Not a failure. The client may well be starting; winapp simply has no evidence to tie a window
     /// to this connect, and says so rather than claiming one.
     /// </remarks>
-    public static SandboxConnectAttempt Unidentified { get; } = new(null, null);
+    public static SandboxConnectAttempt Unidentified => new(null, null);
 
     /// <summary>The launcher to attribute new client windows to, or null when there is none.</summary>
     public SandboxConnectOwnership? Ownership { get; }
+
+    /// <summary>
+    /// Placement started as soon as the caller received this attempt, if exact ownership was available.
+    /// </summary>
+    internal Task<SandboxClientWindow?>? Placement { get; set; }
 
     /// <summary>Wraps a launched connect process, keeping its ID reserved.</summary>
     /// <remarks>

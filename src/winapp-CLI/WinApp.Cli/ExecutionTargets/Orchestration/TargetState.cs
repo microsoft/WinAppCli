@@ -120,6 +120,12 @@ internal sealed record TargetState
     /// </summary>
     public long? ClientProcessStartTicksUtc { get; init; }
 
+    /// <summary>
+    /// Whether the client identity was proven through the exact <c>wsb connect</c> launcher winapp
+    /// created. False for legacy records and adopted/manual clients.
+    /// </summary>
+    public bool ClientOwnedByWinapp { get; init; }
+
     /// <summary>UTC timestamp of the last commit, for diagnostics only.</summary>
     public DateTimeOffset? UpdatedUtc { get; init; }
 }

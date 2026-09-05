@@ -18,8 +18,6 @@ namespace WinApp.Cli.ExecutionTargets.WindowsSandbox;
 internal sealed class WindowsSandboxWindowSnapshot(HWND foregroundWindow)
 {
     public HWND ForegroundWindow { get; } = foregroundWindow;
-
-    internal Task<SandboxClientWindow?>? EarlyPlacement { get; set; }
 }
 
 /// <summary>
@@ -61,17 +59,17 @@ internal interface IWindowsSandboxWindowController
     /// </summary>
     void ObserveConnect(
         WindowsSandboxWindowSnapshot snapshot,
-        SandboxConnectOwnership? ownership,
+        SandboxConnectAttempt attempt,
         CancellationToken cancellationToken)
     {
     }
 
     /// <summary>
-    /// Places the client that <paramref name="ownership"/> created, and reports which window it was.
+    /// Places the client that <paramref name="attempt"/> created, and reports which window it was.
     /// </summary>
     /// <param name="snapshot">Host desktop state from before the connect, for restoring focus.</param>
-    /// <param name="ownership">
-    /// The <c>wsb connect</c> winapp launched. Null when winapp could not identify it, in which case
+    /// <param name="attempt">
+    /// The <c>wsb connect</c> winapp launched. Its ownership is null when winapp could not identify it, in which case
     /// nothing is claimed: there is no evidence left to tell winapp's client from anyone else's.
     /// </param>
     /// <param name="cancellationToken">Cancels the wait for the client window.</param>
@@ -81,7 +79,7 @@ internal interface IWindowsSandboxWindowController
     /// </returns>
     Task<SandboxClientWindow?> PlaceConnectedClientAsync(
         WindowsSandboxWindowSnapshot snapshot,
-        SandboxConnectOwnership? ownership,
+        SandboxConnectAttempt attempt,
         CancellationToken cancellationToken);
 
     /// <summary>
@@ -179,33 +177,35 @@ internal sealed class WindowsSandboxWindowController : IWindowsSandboxWindowCont
     /// </remarks>
     public void ObserveConnect(
         WindowsSandboxWindowSnapshot snapshot,
-        SandboxConnectOwnership? ownership,
+        SandboxConnectAttempt attempt,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(attempt);
 
-        snapshot.EarlyPlacement = ownership is null
+        attempt.Placement = attempt.Ownership is null
             ? Task.FromResult<SandboxClientWindow?>(null)
             : WaitAndPlaceAsync(
                 snapshot,
-                ownership,
+                attempt.Ownership,
                 EarlyPollInterval,
                 cancellationToken);
     }
 
     public async Task<SandboxClientWindow?> PlaceConnectedClientAsync(
         WindowsSandboxWindowSnapshot snapshot,
-        SandboxConnectOwnership? ownership,
+        SandboxConnectAttempt attempt,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(attempt);
 
-        if (snapshot.EarlyPlacement is { } earlyPlacement)
+        if (attempt.Placement is { } earlyPlacement)
         {
             return await earlyPlacement.ConfigureAwait(false);
         }
 
-        if (ownership is null)
+        if (attempt.Ownership is null)
         {
             // Without the launcher there is no way to tell winapp's client from a concurrent
             // caller's, and moving the wrong window off-screen is worse than moving none.
@@ -215,7 +215,7 @@ internal sealed class WindowsSandboxWindowController : IWindowsSandboxWindowCont
             return null;
         }
 
-        return await WaitAndPlaceAsync(snapshot, ownership, PollInterval, cancellationToken)
+        return await WaitAndPlaceAsync(snapshot, attempt.Ownership, PollInterval, cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -333,6 +333,11 @@ internal sealed class WindowsSandboxWindowController : IWindowsSandboxWindowCont
             return new SandboxClientStatus(client, IsMinimized: false);
         }
 
+        if (remembered is null || client != remembered)
+        {
+            throw NotReady(use, client, restored: false, foregroundPreserved: true, adopted: true);
+        }
+
         _park(client, previousForeground);
 
         var stillLive = _listClients()
@@ -345,7 +350,7 @@ internal sealed class WindowsSandboxWindowController : IWindowsSandboxWindowCont
 
         if (!restored || !foregroundPreserved)
         {
-            throw NotReady(use, client, restored, foregroundPreserved);
+            throw NotReady(use, client, restored, foregroundPreserved, adopted: false);
         }
 
         return new SandboxClientStatus(client, IsMinimized: false);
@@ -355,7 +360,8 @@ internal sealed class WindowsSandboxWindowController : IWindowsSandboxWindowCont
         TargetDesktopUse use,
         SandboxClientWindow client,
         bool restored,
-        bool foregroundPreserved) =>
+        bool foregroundPreserved,
+        bool adopted) =>
         ExecutionTargetException.Create(
             use == TargetDesktopUse.RealInput
                 ? ExecutionTargetErrorCodes.InputNotReady
@@ -363,13 +369,16 @@ internal sealed class WindowsSandboxWindowController : IWindowsSandboxWindowCont
             use == TargetDesktopUse.RealInput
                 ? "The Windows Sandbox client is minimized and could not be restored without taking focus."
                 : "The Windows Sandbox client is minimized and could not be restored for capture without taking focus.",
-            userAction: "Restore the Windows Sandbox window, then retry.",
+            userAction: adopted
+                ? "Restore or reconnect the existing Windows Sandbox window, then retry."
+                : "Restore the Windows Sandbox window, then retry.",
             context: new Dictionary<string, string>
             {
                 ["clientProcessId"] = client.ProcessId.ToString(CultureInfo.InvariantCulture),
                 ["clientWindowHandle"] = client.Handle.ToString(CultureInfo.InvariantCulture),
                 ["restored"] = restored.ToString(),
                 ["foregroundPreserved"] = foregroundPreserved.ToString(),
+                ["adopted"] = adopted.ToString(),
             });
 
     /// <summary>

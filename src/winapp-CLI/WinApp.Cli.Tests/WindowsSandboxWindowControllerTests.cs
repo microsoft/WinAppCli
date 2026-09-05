@@ -261,6 +261,26 @@ public class WindowsSandboxWindowControllerTests
     }
 
     [TestMethod]
+    public void EnsureClientReady_MinimizedAdoptedClientFailsWithoutMovingIt()
+    {
+        var parked = new List<nint>();
+        var controller = new WindowsSandboxWindowController(
+            () => [Candidate(12, 200, OurLauncher)],
+            (client, _) => parked.Add(client.Handle),
+            _ => true,
+            () => Snapshot(900).ForegroundWindow);
+
+        var failure = Assert.ThrowsExactly<ExecutionTargetException>(() =>
+            controller.EnsureClientReady(
+                remembered: null,
+                TargetDesktopUse.PixelCapture));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.ArtifactFailed, failure.Error.Code);
+        Assert.AreEqual("True", failure.Error.Context!["adopted"]);
+        Assert.AreEqual(0, parked.Count, "A manual client must never be moved off-screen.");
+    }
+
+    [TestMethod]
     public void EnsureClientReady_WindowReplacedDuringRestore_FailsCapture()
     {
         var replaced = false;
@@ -314,7 +334,7 @@ public class WindowsSandboxWindowControllerTests
         var controller = scripted.CreateController();
 
         var placed = await controller.PlaceConnectedClientAsync(
-            Snapshot(), Ownership(), TestContext.CancellationToken);
+            Snapshot(), Attempt(), TestContext.CancellationToken);
 
         Assert.IsNotNull(placed);
         Assert.AreEqual((nint)200, placed.Handle);
@@ -328,10 +348,11 @@ public class WindowsSandboxWindowControllerTests
         var controller = scripted.CreateController();
         var snapshot = Snapshot();
 
-        controller.ObserveConnect(snapshot, Ownership(), TestContext.CancellationToken);
+        var attempt = Attempt();
+        controller.ObserveConnect(snapshot, attempt, TestContext.CancellationToken);
 
-        Assert.IsNotNull(snapshot.EarlyPlacement);
-        var placed = await snapshot.EarlyPlacement;
+        Assert.IsNotNull(attempt.Placement);
+        var placed = await attempt.Placement;
         Assert.AreEqual((nint)200, placed!.Handle);
         CollectionAssert.AreEqual(new nint[] { 200 }, scripted.Parked);
     }
@@ -353,7 +374,7 @@ public class WindowsSandboxWindowControllerTests
         var controller = scripted.CreateController();
 
         var placed = await controller.PlaceConnectedClientAsync(
-            Snapshot(), Ownership(), TestContext.CancellationToken);
+            Snapshot(), Attempt(), TestContext.CancellationToken);
 
         Assert.IsNotNull(placed, "winapp's own client did arrive, and parentage identifies it.");
         Assert.AreEqual((nint)300, placed.Handle);
@@ -374,7 +395,7 @@ public class WindowsSandboxWindowControllerTests
         var controller = scripted.CreateController();
 
         var placed = await controller.PlaceConnectedClientAsync(
-            Snapshot(), Ownership(), TestContext.CancellationToken);
+            Snapshot(), Attempt(), TestContext.CancellationToken);
 
         Assert.IsNull(placed);
         Assert.AreEqual(0, scripted.Parked.Count);
@@ -387,7 +408,7 @@ public class WindowsSandboxWindowControllerTests
         var controller = scripted.CreateController();
 
         var placed = await controller.PlaceConnectedClientAsync(
-            Snapshot(), ownership: null, TestContext.CancellationToken);
+            Snapshot(), SandboxConnectAttempt.Unidentified, TestContext.CancellationToken);
 
         Assert.IsNull(placed, "With no launcher there is no evidence, and winapp does not guess.");
         Assert.AreEqual(0, scripted.Parked.Count);
@@ -402,7 +423,7 @@ public class WindowsSandboxWindowControllerTests
         var controller = scripted.CreateController();
 
         Assert.IsNull(await controller.PlaceConnectedClientAsync(
-            Snapshot(), Ownership(), TestContext.CancellationToken));
+            Snapshot(), Attempt(), TestContext.CancellationToken));
         Assert.AreEqual(0, scripted.Parked.Count);
         Assert.AreEqual(1, scripted.Looks, "The evidence is already lost, so there is nothing to wait for.");
     }
@@ -420,7 +441,7 @@ public class WindowsSandboxWindowControllerTests
         var controller = scripted.CreateController();
 
         var placed = await controller.PlaceConnectedClientAsync(
-            Snapshot(), Ownership(), TestContext.CancellationToken);
+            Snapshot(), Attempt(), TestContext.CancellationToken);
 
         Assert.IsNull(placed, "An older window cannot be the one this connect just created.");
         Assert.AreEqual(0, scripted.Parked.Count, "The user's own Sandbox window must not be moved.");
@@ -440,7 +461,7 @@ public class WindowsSandboxWindowControllerTests
         var controller = scripted.CreateController();
 
         var placed = await controller.PlaceConnectedClientAsync(
-            Snapshot(), Ownership(), TestContext.CancellationToken);
+            Snapshot(), Attempt(), TestContext.CancellationToken);
 
         Assert.IsNotNull(placed);
         Assert.AreEqual((nint)300, placed.Handle);
@@ -454,7 +475,7 @@ public class WindowsSandboxWindowControllerTests
         var controller = scripted.CreateController();
 
         Assert.IsNull(await controller.PlaceConnectedClientAsync(
-            Snapshot(), Ownership(), TestContext.CancellationToken));
+            Snapshot(), Attempt(), TestContext.CancellationToken));
         Assert.AreEqual(0, scripted.Parked.Count);
         Assert.IsTrue(scripted.Looks > 1, "Waiting for a client that is still starting is expected.");
     }
@@ -464,6 +485,9 @@ public class WindowsSandboxWindowControllerTests
     private static WindowsSandboxWindowSnapshot Snapshot(nint foreground = 0) => new(new(foreground));
 
     private static SandboxConnectOwnership Ownership() => new(OurLauncher, LauncherStartTicks);
+
+    private static SandboxConnectAttempt Attempt() =>
+        SandboxConnectAttempt.ForLauncher(OurLauncher, LauncherStartTicks);
 
     private static SandboxClientWindow Client(int processId, nint handle, long startTicksUtc = 1000) =>
         new(handle, processId, startTicksUtc);

@@ -78,11 +78,14 @@ so and exits 0 — start one with `winapp run . --on sandbox`.
 
 Prefer `--duration-sec` on `target record`. Without it the recording runs until Ctrl+C or a newline on
 redirected stdin, which an unattended script cannot supply. Bad options are rejected with
-`target_invalid_arguments` before any Sandbox is started. Nothing is ever activated or focused, so
-none of these interrupt what the user is doing; `target screenshot` fails rather than bringing the
-Sandbox window to the front to get a frame, and publishes by rename so an existing screenshot at the
-destination survives a failed capture. A minimized exact client is restored and parked without
-activation only when its identity and the caller's foreground can both be re-proven. `target record`
+`target_invalid_arguments` before any Sandbox is started. Warm capture of an already parked client
+does not activate or focus it. Cold connection or reconnect can briefly foreground the Sandbox
+because Windows may paint it before exact ownership is observable; winapp parks it and restores the
+previous foreground at the earliest safe point. `target screenshot` fails rather than bringing the
+Sandbox window forward just to get a frame, and publishes by rename so an existing screenshot at the
+destination survives a failed capture. A minimized exact winapp-owned client is restored and parked
+without activation only when its identity and the caller's foreground can both be re-proven. A
+minimized adopted/manual client is left untouched and fails until restored or reconnected. `target record`
 holds that promise for the whole take: a client that stops being
 capturable mid-take ends the recording with `"stopReason": "capture_unavailable"` and publishes the
 frames already captured; a window capture only ever returns black for counts as not capturable, so a

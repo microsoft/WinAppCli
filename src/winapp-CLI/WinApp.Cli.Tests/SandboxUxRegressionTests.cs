@@ -163,6 +163,43 @@ public class SandboxUxRegressionTests
             "A brand-new instance has no interactive session until a client connects.");
     }
 
+    [TestMethod]
+    public async Task ConnectCancellationAfterPlacement_PersistsTheParkedClient()
+    {
+        var client = new SandboxClientWindow((nint)0x1234, 4321, 638_900_000_000_000_000);
+        var windows = new PlacedWindowController(client);
+        using var harness = new BackendHarness(windows);
+        harness.Cli.ConnectFailure = new OperationCanceledException(new CancellationToken(canceled: true));
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => harness.Backend.EnsureConnectedAsync(
+                new EnsureTargetOptions(RequireInteractiveDesktop: true),
+                TestContext.CancellationToken));
+
+        Assert.AreEqual(client, harness.ReadClient());
+        Assert.AreEqual(client, windows.Placed);
+    }
+
+    [TestMethod]
+    public async Task ConnectFastFailureAfterPlacement_PersistsTheParkedClient()
+    {
+        var client = new SandboxClientWindow((nint)0x5678, 8765, 638_900_000_100_000_000);
+        var windows = new PlacedWindowController(client);
+        using var harness = new BackendHarness(windows);
+        harness.Cli.ConnectFailure = ExecutionTargetException.Create(
+            ExecutionTargetErrorCodes.NoInteractiveSession,
+            "The Windows Sandbox client could not connect.");
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
+            () => harness.Backend.EnsureConnectedAsync(
+                new EnsureTargetOptions(RequireInteractiveDesktop: true),
+                TestContext.CancellationToken));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.NoInteractiveSession, failure.Error.Code);
+        Assert.AreEqual(client, harness.ReadClient());
+        Assert.AreEqual(client, windows.Placed);
+    }
+
     /// <summary>
     /// Connection material survives process exit, so the next CLI process can reuse the agent.
     /// </summary>
@@ -482,7 +519,9 @@ public class SandboxUxRegressionTests
         private readonly TargetStateDirectoryProvider _directories;
         private readonly TargetStateStore _stateStore;
 
-        public BackendHarness()
+        private readonly IWindowsSandboxWindowController _windowController;
+
+        public BackendHarness(IWindowsSandboxWindowController? windowController = null)
         {
             _root = new DirectoryInfo(TestPaths.TempRoot(nameof(SandboxUxRegressionTests)));
             _root.Create();
@@ -490,6 +529,7 @@ public class SandboxUxRegressionTests
             _directories = new TargetStateDirectoryProvider(_root.FullName);
             _stateStore = new TargetStateStore(_directories);
             Cli = new RecordingSandboxCli();
+            _windowController = windowController ?? new NoOpWindowController();
 
             var binary = new FileInfo(Path.Join(_root.FullName, "winapp.exe"));
             File.WriteAllText(binary.FullName, "agent");
@@ -502,6 +542,20 @@ public class SandboxUxRegressionTests
         public WindowsSandboxBackend Backend { get; }
 
         public ExecutionTargetEpoch Epoch { get; private set; }
+
+        public SandboxClientWindow? ReadClient()
+        {
+            var state = _stateStore.Read(WindowsSandboxTarget.Default);
+            return state is
+            {
+                ClientOwnedByWinapp: true,
+                ClientWindowHandle: { } handle,
+                ClientProcessId: { } processId,
+                ClientProcessStartTicksUtc: { } startTicksUtc,
+            }
+                ? new SandboxClientWindow((nint)handle, processId, startTicksUtc)
+                : null;
+        }
 
         /// <summary>Pretends a managed instance from a previous command is still running.</summary>
         /// <remarks>
@@ -618,7 +672,7 @@ public class SandboxUxRegressionTests
                 new WindowsSandboxLifecycle(Cli, _stateStore),
                 _directories,
                 new StaticBinaryProvider(binary),
-                new NoOpWindowController(),
+                _windowController,
 
                 // No setup runner: this harness models a host where wsb.exe is already usable, so
                 // the support probe short-circuits on IsAvailable before setup would be consulted.
@@ -694,6 +748,8 @@ public class SandboxUxRegressionTests
         /// </remarks>
         public GuestSessionAvailability Session { get; set; } = GuestSessionAvailability.NoLoginSession;
 
+        public Exception? ConnectFailure { get; set; }
+
         public Task<GuestSessionAvailability> ProbeInteractiveSessionAsync(
             string id,
             CancellationToken cancellationToken)
@@ -715,13 +771,15 @@ public class SandboxUxRegressionTests
 
         public Task<SandboxConnectAttempt> ConnectAsync(
             string id,
-            Action<SandboxConnectOwnership?> onLaunched,
+            Action<SandboxConnectAttempt> onLaunched,
             CancellationToken cancellationToken)
         {
             Operations.Add($"connect:{id}");
             var attempt = SandboxConnectAttempt.ForLauncher(4242, 1_000_000);
-            onLaunched(attempt.Ownership);
-            return Task.FromResult(attempt);
+            onLaunched(attempt);
+            return ConnectFailure is null
+                ? Task.FromResult(attempt)
+                : Task.FromException<SandboxConnectAttempt>(ConnectFailure);
         }
 
         public Task<int> ExecuteAsync(
@@ -756,10 +814,35 @@ public class SandboxUxRegressionTests
 
         public Task<SandboxClientWindow?> PlaceConnectedClientAsync(
             WindowsSandboxWindowSnapshot snapshot,
-            SandboxConnectOwnership? ownership,
+            SandboxConnectAttempt attempt,
             CancellationToken cancellationToken) => Task.FromResult<SandboxClientWindow?>(null);
 
         public SandboxClientWindow ResolveClient(SandboxClientWindow? remembered) =>
             throw new NotSupportedException("These tests never capture the target's desktop.");
+    }
+
+    private sealed class PlacedWindowController(SandboxClientWindow client) : IWindowsSandboxWindowController
+    {
+        public SandboxClientWindow? Placed { get; private set; }
+
+        public WindowsSandboxWindowSnapshot Capture() => new(default);
+
+        public void ObserveConnect(
+            WindowsSandboxWindowSnapshot snapshot,
+            SandboxConnectAttempt attempt,
+            CancellationToken cancellationToken)
+        {
+            Placed = client;
+            attempt.Placement = Task.FromResult<SandboxClientWindow?>(client);
+        }
+
+        public Task<SandboxClientWindow?> PlaceConnectedClientAsync(
+            WindowsSandboxWindowSnapshot snapshot,
+            SandboxConnectAttempt attempt,
+            CancellationToken cancellationToken) =>
+            attempt.Placement ?? Task.FromResult<SandboxClientWindow?>(null);
+
+        public SandboxClientWindow ResolveClient(SandboxClientWindow? remembered) =>
+            remembered ?? client;
     }
 }

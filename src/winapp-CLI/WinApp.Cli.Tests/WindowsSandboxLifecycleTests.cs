@@ -126,11 +126,11 @@ internal sealed class FakeWindowsSandboxCli : IWindowsSandboxCli
 
     public Task<SandboxConnectAttempt> ConnectAsync(
         string id,
-        Action<SandboxConnectOwnership?> onLaunched,
+        Action<SandboxConnectAttempt> onLaunched,
         CancellationToken cancellationToken)
     {
         var attempt = SandboxConnectAttempt.ForLauncher(4242, 1_000_000);
-        onLaunched(attempt.Ownership);
+        onLaunched(attempt);
         return Task.FromResult(attempt);
     }
 

@@ -460,14 +460,16 @@ one state root per machine unless you specifically want independent managers.
 ### The Sandbox window must stay connected
 
 Real input and screen recording require the Sandbox's remote-session client to be connected and
-not minimized. winapp keeps the window it owns off-screen and at the bottom of the window order,
-without activating it, so it never takes your foreground.
+not minimized. Once connected, winapp keeps the window it owns off-screen and at the bottom of the
+window order without activating it. A cold connection or reconnect has the brief-foreground ceiling
+described below.
 
-If the client is minimized before a real-input or capture command, winapp restores only the exact
-managed or adopted client, immediately before the operation. The restore is nonactivating and is
-accepted only when the same handle, process ID, and process start time remain live, the window is no
-longer minimized, and the previous foreground window is unchanged. Read-only UI inspection does not
-restore or move a minimized client.
+If winapp's exact owned client is minimized before a real-input or capture command, winapp restores
+it immediately before the operation. The restore is nonactivating and is accepted only when the same
+handle, process ID, and process start time remain live, the window is no longer minimized, and the
+previous foreground window is unchanged. A minimized adopted/manual client is never moved off-screen;
+restore or reconnect that window manually. Read-only UI inspection does not restore or move any
+minimized client.
 
 winapp connects a client only when the guest does not already have an interactive session. If you
 already had the Sandbox open, that window keeps being the one you see: connecting again would start
@@ -476,7 +478,7 @@ a **second** client rather than reuse yours, and the extra one outlives `wsb sto
 If you closed the Sandbox window, the guest session survives it — so winapp cannot tell from the
 session alone that the window is gone. It finds out when the guest agent reports it has no input
 desktop, and at that point it reconnects for you, **once**, placing the new window off-screen and
-without taking your foreground. If the guest still has no input desktop after that, winapp stops and
+restoring the previous foreground at the earliest safe point. If the guest still has no input desktop after that, winapp stops and
 reports `sandbox_input_not_ready` with a `wsb connect` command rather than reconnecting again.
 
 On a cold connection, Windows can assign foreground and paint the client before its top-level

@@ -582,6 +582,47 @@ public class SandboxRunTests
     }
 
     [TestMethod]
+    public async Task UnregisterOwnedPackage_LiteralV1ClaimPreservesPackagedHistoryWithoutReconcile()
+    {
+        const string Layout = @"C:\WinAppGuest\deployments\legacy-layout";
+        await using var harness = new Harness(_guestManaged, _stateRoot);
+        await WriteLegacyStateAsync(
+            "legacy-owner",
+            $$"""
+            {
+              "schemaVersion": 1,
+              "revision": 3,
+              "deploymentId": "legacy-owner",
+              "targetEpoch": "{{Epoch.Value}}",
+              "dirty": false,
+              "desired": [],
+              "package": {
+                "packageName": "Contoso.MyApp",
+                "publisher": "CN=Contoso",
+                "packageFamilyName": "Contoso.MyApp_abc",
+                "registeredLocation": "C:\\WinAppGuest\\deployments\\legacy-layout"
+              }
+            }
+            """);
+        harness.AppLauncher.FakeRegisteredLocation = Layout;
+        harness.PackageRegistration.OnUnregisterByFullName = (_, _) =>
+            harness.AppLauncher.FakePackageFullName = null;
+
+        await harness.Runner.UnregisterOwnedPackageAsync(
+            harness.Target,
+            "Contoso.MyApp",
+            "CN=Contoso",
+            "Contoso.MyApp_abc",
+            requiredDeploymentId: null,
+            requiredRevision: null,
+            TestContext.CancellationToken);
+
+        var cleared = harness.States.Read(WindowsSandboxTarget.Default, "legacy-owner")!;
+        Assert.IsNull(cleared.Package);
+        Assert.IsTrue(cleared.WasPackaged);
+    }
+
+    [TestMethod]
     public async Task UnregisterOwnedPackage_WhenWindowsStillReportsRegistration_PreservesAllClaims()
     {
         await WriteHostFileAsync("app.exe", "binary");

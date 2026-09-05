@@ -655,7 +655,7 @@ public class SandboxAdoptionTests
 
         public Task<SandboxConnectAttempt> ConnectAsync(
             string id,
-            Action<SandboxConnectOwnership?> onLaunched,
+            Action<SandboxConnectAttempt> onLaunched,
             CancellationToken cancellationToken)
         {
             Operations.Add($"connect:{id}");
@@ -668,7 +668,7 @@ public class SandboxAdoptionTests
             }
 
             var attempt = SandboxConnectAttempt.ForLauncher(LauncherProcessId, LauncherStartTicks);
-            onLaunched(attempt.Ownership);
+            onLaunched(attempt);
             return Task.FromResult(attempt);
         }
 
@@ -782,7 +782,7 @@ public class SandboxAdoptionTests
 
         public Task<SandboxClientWindow?> PlaceConnectedClientAsync(
             WindowsSandboxWindowSnapshot snapshot,
-            SandboxConnectOwnership? ownership,
+            SandboxConnectAttempt attempt,
             CancellationToken cancellationToken) => Task.FromResult<SandboxClientWindow?>(null);
 
         public SandboxClientWindow ResolveClient(SandboxClientWindow? remembered) =>

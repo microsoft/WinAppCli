@@ -293,14 +293,14 @@ public class WindowsSandboxCliTests
 
         try
         {
-            SandboxConnectOwnership? ownership = null;
+            SandboxConnectAttempt? observed = null;
             var connect = _cli.ConnectAsync(
                 "sandbox-1",
-                observed => ownership = observed,
+                attempt => observed = attempt,
                 TestContext.CancellationTokenSource.Token);
 
-            Assert.IsNotNull(ownership);
-            Assert.AreEqual(launched!.Id, ownership.LauncherProcessId);
+            Assert.IsNotNull(observed);
+            Assert.AreEqual(launched!.Id, observed.Ownership!.LauncherProcessId);
             Assert.IsFalse(connect.IsCompleted);
 
             var attempt = await connect;

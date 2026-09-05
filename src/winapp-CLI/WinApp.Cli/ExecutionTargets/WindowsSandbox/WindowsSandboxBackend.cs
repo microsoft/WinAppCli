@@ -597,6 +597,7 @@ internal sealed class WindowsSandboxBackend(
                     ClientProcessId = clientChanged ? _client!.ProcessId : state.ClientProcessId,
                     ClientProcessStartTicksUtc =
                         clientChanged ? _client!.StartTicksUtc : state.ClientProcessStartTicksUtc,
+                    ClientOwnedByWinapp = clientChanged || state.ClientOwnedByWinapp,
                 },
                 state.Revision);
         }
@@ -611,8 +612,8 @@ internal sealed class WindowsSandboxBackend(
     /// The recorded client is only a hint. It is offered to the controller, which uses it only while
     /// that exact window is still open, so a handle persisted by an earlier winapp process can never
     /// resolve against whatever owns that number now. When there is no usable record — an adopted
-    /// Sandbox, or state written before this was recorded — the controller adopts the single open
-    /// client and this remembers it, so the next command in this run agrees with this one.
+    /// Sandbox, or state written before this was recorded — the controller may read the single open
+    /// client as adopted, but never persists or caches it as owned.
     /// </remarks>
     public TargetDesktopSurface ResolveDesktopSurface(TargetDesktopUse use)
     {
@@ -620,10 +621,9 @@ internal sealed class WindowsSandboxBackend(
         var status = windowController.EnsureClientReady(remembered, use);
         var client = status.Window;
 
-        if (client != _client)
+        if (remembered is not null && client != _client)
         {
             _client = client;
-            RememberClientWindow(client);
         }
 
         return Describe(status, remembered);
@@ -678,16 +678,24 @@ internal sealed class WindowsSandboxBackend(
 
     /// <summary>The persisted client triple, or null when any part of it is missing.</summary>
     private static SandboxClientWindow? ReadClient(TargetState state) =>
-        state is { ClientWindowHandle: { } handle, ClientProcessId: { } pid, ClientProcessStartTicksUtc: { } ticks }
+        state is
+        {
+            ClientOwnedByWinapp: true,
+            ClientWindowHandle: { } handle,
+            ClientProcessId: { } pid,
+            ClientProcessStartTicksUtc: { } ticks,
+        }
             ? new SandboxClientWindow((nint)handle, pid, ticks)
             : null;
 
     /// <summary>
-    /// Records an adopted client window, best effort.
+    /// Records a client window proven to have been created by winapp, best effort.
     /// </summary>
     /// <remarks>
-    /// Never fatal: losing it only means the next command re-adopts the same single open window, and
-    /// failing a capture that already succeeded over a contended state file would be worse.
+    /// Never fatal: losing it only means the next command treats the single open window as adopted,
+    /// and failing a connection over a contended state file would be worse. Adopted/manual clients
+    /// are deliberately never written here: remembering one would later make it look winapp-owned
+    /// and allow minimized restore to move the user's window off-screen.
     /// </remarks>
     private void RememberClientWindow(SandboxClientWindow client)
     {
@@ -714,6 +722,7 @@ internal sealed class WindowsSandboxBackend(
                     ClientWindowHandle = client.Handle,
                     ClientProcessId = client.ProcessId,
                     ClientProcessStartTicksUtc = client.StartTicksUtc,
+                    ClientOwnedByWinapp = true,
                 },
                 state.Revision);
         }
@@ -1186,23 +1195,55 @@ internal sealed class WindowsSandboxBackend(
         var windowSnapshot = windowController.Capture();
         using var placementCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         SandboxConnectAttempt? attempt = null;
+        var connectCompleted = false;
 
         try
         {
             attempt = await cli.ConnectAsync(
                 instanceId,
-                ownership => windowController.ObserveConnect(
-                    windowSnapshot, ownership, placementCancellation.Token),
+                launched =>
+                {
+                    attempt = launched;
+                    windowController.ObserveConnect(
+                        windowSnapshot, launched, placementCancellation.Token);
+                },
                 cancellationToken).ConfigureAwait(false);
-
-            _client = await windowController
-                .PlaceConnectedClientAsync(windowSnapshot, attempt.Ownership, cancellationToken)
-                .ConfigureAwait(false);
+            connectCompleted = true;
         }
         finally
         {
-            placementCancellation.Cancel();
-            attempt?.Dispose();
+            if (!connectCompleted)
+            {
+                placementCancellation.Cancel();
+            }
+
+            if (attempt is not null)
+            {
+                try
+                {
+                    var placed = await windowController
+                        .PlaceConnectedClientAsync(
+                            windowSnapshot,
+                            attempt,
+                            connectCompleted ? cancellationToken : CancellationToken.None)
+                        .ConfigureAwait(false);
+
+                    if (placed is not null)
+                    {
+                        _client = placed;
+                        RememberClientWindow(placed);
+                    }
+                }
+                catch (OperationCanceledException) when (!connectCompleted)
+                {
+                    // Cancellation before placement leaves no hidden client to remember.
+                }
+                finally
+                {
+                    placementCancellation.Cancel();
+                    attempt.Dispose();
+                }
+            }
         }
     }
 
