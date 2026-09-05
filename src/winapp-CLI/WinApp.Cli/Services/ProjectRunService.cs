@@ -395,7 +395,9 @@ internal sealed partial class ProjectRunService(
             options.Architecture,
             options.Framework,
             options.NoRestore,
-            string.IsNullOrEmpty(runArguments) ? null : runArguments);
+            string.IsNullOrEmpty(runArguments) ? null : runArguments,
+            RuntimeIdentifier: NullIfEmpty(GetProp(props, "RuntimeIdentifier")),
+            EvaluatedPlatform: NullIfEmpty(GetProp(props, "Platform")));
 
         return new ProjectBuildOutcome(resolution, 0);
     }

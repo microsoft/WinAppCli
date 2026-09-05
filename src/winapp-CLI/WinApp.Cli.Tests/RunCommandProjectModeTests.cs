@@ -839,6 +839,40 @@ public class RunCommandProjectModeTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task ProjectMode_NormalJsonReportsOnlyEvaluatedPlatformAndRuntime()
+    {
+       var csproj = CreateCsproj();
+       var targetDirectory = CreateTargetDir(withManifest: false);
+       var executable = ChildPath(targetDirectory.FullName, "App.exe");
+       File.WriteAllText(executable, "fixture");
+       _fakeProjectRunService.PreparationOutcome = new ProjectPreparationOutcome(
+           new ProjectRunResolution(
+               csproj,
+               targetDirectory.FullName,
+               executable,
+               ProjectPackaging.Unpackaged,
+               SelfContained: true,
+               Architecture: "x64",
+               RuntimeIdentifier: null,
+               EvaluatedPlatform: "AnyCPU"),
+           0);
+       var command = GetRequiredService<RunCommand>();
+
+       var exitCode = await ParseAndInvokeWithCaptureAsync(
+           command,
+           [csproj.FullName, "--detach", "--json"]);
+
+       Assert.AreEqual(0, exitCode);
+       using var json = System.Text.Json.JsonDocument.Parse(TestAnsiConsole.Output);
+       var root = json.RootElement;
+       Assert.AreEqual("AnyCPU", root.GetProperty("Platform").GetString());
+       Assert.IsFalse(root.TryGetProperty("RuntimeIdentifier", out _));
+       Assert.IsFalse(
+           root.TryGetProperty("Alive", out _),
+           "Alive must remain absent when no liveness verification was performed.");
+    }
+
+    [TestMethod]
     public async Task ProjectMode_FrameworkDependentUnpackagedPublishUsesEvaluatedAssetsFile()
     {
        var csproj = CreateCsproj();

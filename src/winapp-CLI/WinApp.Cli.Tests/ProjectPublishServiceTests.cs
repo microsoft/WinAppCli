@@ -427,7 +427,9 @@ public sealed class ProjectPublishServiceTests
         Assert.AreEqual("RestoreRequired", outcome.Reason);
         StringAssert.Contains(outcome.SuggestedCommand, "dotnet restore");
         StringAssert.Contains(outcome.SuggestedCommand, "win-x64");
-        StringAssert.Contains(outcome.SuggestedCommand, "PublishAot=true");
+        Assert.IsFalse(
+            outcome.SuggestedCommand.Contains("PublishAot=", StringComparison.OrdinalIgnoreCase),
+            "The suggested restore must not globalize the app project's PublishAot property.");
         Assert.AreEqual(0, dotnet.ArgumentListInvocations.Count);
     }
 

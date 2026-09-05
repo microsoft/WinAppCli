@@ -238,12 +238,6 @@ internal sealed partial class ProjectRunService
             tokens.Add($"-p:{property}");
         }
 
-        if (publishAot && !forwarded.Any(property =>
-                property.StartsWith("PublishAot=", StringComparison.OrdinalIgnoreCase)))
-        {
-            tokens.Add("-p:PublishAot=true");
-        }
-
         AppendSolutionProperties(tokens, options);
         return WindowsCommandLine.JoinArguments(tokens) ?? string.Empty;
     }

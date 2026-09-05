@@ -460,9 +460,7 @@ internal partial class RunCommand
                Reason = outcome.Reason,
                SuggestedCommand = outcome.SuggestedCommand,
                Configuration = options.Configuration,
-               RuntimeIdentifier = RunArchHelper.ToRuntimeIdentifier(options.Architecture),
                Architecture = options.Architecture,
-               Platform = options.Platform ?? options.Architecture,
                ProjectPath = csproj.FullName,
                Toolchain = outcome.Toolchain,
                ErrorCode = outcome.ErrorCode,
@@ -478,8 +476,8 @@ internal partial class RunCommand
            report.Ready = outcome.Ready;
            report.Reason = outcome.Reason;
            report.SuggestedCommand = outcome.SuggestedCommand;
-           report.RuntimeIdentifier = resolution.RuntimeIdentifier ?? report.RuntimeIdentifier;
-           report.Platform = resolution.EvaluatedPlatform ?? report.Platform;
+           report.RuntimeIdentifier = resolution.RuntimeIdentifier;
+           report.Platform = resolution.EvaluatedPlatform;
            report.PublishAot = resolution.Operation == ProjectPreparationOperation.Publish
                ? resolution.PublishAot
                : null;
@@ -825,7 +823,6 @@ internal partial class RunCommand
                 var processId = launched.ProcessId;
                 report.ProcessId = processId;
                 report.ProcessPath = resolution.SourceExecutable ?? exePath;
-                report.Alive = true;
 
                 if (verifyNativeAot)
                 {

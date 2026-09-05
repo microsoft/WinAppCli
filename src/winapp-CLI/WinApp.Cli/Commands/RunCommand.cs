@@ -694,7 +694,6 @@ internal partial class RunCommand : Command, IShortDescription
                     if (projectReport is not null)
                     {
                        projectReport.ProcessId = processId;
-                       projectReport.Alive = true;
                     }
 
                     if (verifyNativeAot)
