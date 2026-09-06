@@ -1166,6 +1166,61 @@ public sealed class ProjectPublishServiceTests
     }
 
     [TestMethod]
+    public async Task PreparePublish_ImportedAotAfterRestoreRunsStrictToolchainPreflight()
+    {
+       var publishDirectory = _tempDirectory.CreateSubdirectory("publish-imported-aot");
+       File.WriteAllText(ChildPath(publishDirectory.FullName, "App.exe"), "native fixture");
+       var properties = UnpackagedProperties(publishDirectory.FullName, publishAot: true);
+       var (service, dotnet) = CreateService(properties);
+       service.NativeAotToolchainSetupOverrideForTests = target =>
+           new ProjectRunService.NativeAotToolchainSetup(
+               Ready: false,
+               Error: $"Missing Hostarm64\\{target}\\link.exe.",
+               HostArchitecture: "arm64",
+               TargetArchitecture: target,
+               VsWherePath: "vswhere.exe",
+               StandardVsWherePath: "vswhere.exe",
+               VisualStudioPath: @"C:\VS",
+               MsvcVersion: null,
+               LinkerPath: null,
+               WindowsSdkVersion: null,
+               WindowsSdkRoot: null,
+               AddedToPath: false,
+               EnvironmentOverrides: null);
+       var evaluateCount = 0;
+       dotnet.RunDotnetCommandHandler = arguments =>
+       {
+           if (arguments == "--version")
+           {
+               return (0, "10.0.303", string.Empty);
+           }
+
+           evaluateCount++;
+           return evaluateCount == 1
+               ? (1, string.Empty, "NETSDK1004: project.assets.json was not found")
+               : (0, properties, string.Empty);
+       };
+       var options = new ProjectRunOptions(
+           "Release",
+           "x64",
+           null,
+           NoBuild: false,
+           NoRestore: false,
+           Properties: []);
+
+       var outcome = await service.PrepareAndResolveAsync(
+           _project,
+           options,
+           ProjectPreparationOperation.Publish,
+           CancellationToken.None);
+
+       Assert.AreEqual("NativeAotToolchainMissing", outcome.ErrorCode);
+       Assert.IsFalse(outcome.Executed);
+       Assert.AreEqual(0, dotnet.ArgumentListInvocations.Count);
+       StringAssert.Contains(outcome.Error, @"Hostarm64\x64\link.exe");
+    }
+
+    [TestMethod]
     public async Task PreparePublish_IndeterminatePreflightAddsInstalledVsWhereToChildPath()
     {
        var publishDirectory = _tempDirectory.CreateSubdirectory("publish-indeterminate");

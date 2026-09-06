@@ -31,6 +31,11 @@ internal static class IncrementalCopyHelper
             throw new InvalidOperationException(
                 $"The destination directory '{destDir.FullName}' cannot be the source directory '{sourceDir.FullName}' or one of its ancestors.");
         }
+        if (PathSafety.HasReparsePointOnExistingPath(destDir.FullName))
+        {
+            throw new InvalidOperationException(
+                $"The destination directory '{destDir.FullName}' contains a symbolic link or junction and cannot be synchronized safely.");
+        }
 
         if (!destDir.Exists)
         {

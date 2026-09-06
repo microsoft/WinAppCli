@@ -588,6 +588,11 @@ internal partial class MsixService
             throw new InvalidDataException(
                 $"The appx recipe PackagePath '{packagePath}' resolves outside the output directory '{outputDir.FullName}'.");
         }
+        if (PathSafety.HasReparsePointOnPath(destination, outputDir.FullName))
+        {
+            throw new InvalidDataException(
+                $"The appx recipe PackagePath '{packagePath}' crosses a symbolic link or junction in the output directory.");
+        }
 
         return destination;
     }

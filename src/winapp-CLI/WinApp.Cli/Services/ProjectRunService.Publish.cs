@@ -312,6 +312,69 @@ internal sealed partial class ProjectRunService
             cancellationToken,
             requireConcreteRid: publishAot || options.VerifyNativeAot);
 
+        if (initialProperties is null)
+        {
+            var preparedEvaluateArgs = BuildEvaluateArguments(
+                csproj,
+                resolvedOptions,
+                csWinRTMetadata,
+                forceRuntimeIdentifier: true);
+            logger.LogDebug(
+                "{UISymbol} Post-restore publish preflight evaluation: dotnet {Arguments}",
+                UiSymbols.Note,
+                RedactSecretsForDisplay(preparedEvaluateArgs));
+            var (preparedExit, preparedStdout, preparedStderr) =
+                await dotNetService.RunDotnetCommandAsync(
+                    workingDir,
+                    preparedEvaluateArgs,
+                    cancellationToken);
+            if (preparedExit != 0)
+            {
+                WriteEvaluationDiagnostics(options.Json, preparedStdout, preparedStderr);
+                return FailedPreparation(
+                    "PublishPlanInvalid",
+                    EvaluationFailureMessage(preparedStderr),
+                    executed: false,
+                    exitCode: preparedExit);
+            }
+
+            var preparedProperties = MsBuildPropertyReader.Parse(preparedStdout, RequestedProperties);
+            publishAot = IsTrue(GetProp(preparedProperties, "PublishAot"));
+            if (publishAot)
+            {
+                if (!IsNativeAotArchitecture(options.Architecture))
+                {
+                    return FailedPreparation(
+                        "UnsupportedNativeAotArchitecture",
+                        $"Windows Native AOT publishing supports win-x64 and win-arm64. Runtime 'win-{options.Architecture}' is not supported.",
+                        executed: false);
+                }
+
+                nativeAotToolchain = NativeAotToolchainSetupOverrideForTests?.Invoke(options.Architecture)
+                    ?? ResolveNativeAotToolchainSetup(options.Architecture);
+                if (!nativeAotToolchain.Ready)
+                {
+                    return FailedPreparation(
+                        "NativeAotToolchainMissing",
+                        nativeAotToolchain.Error ?? "The Native AOT toolchain is not ready.",
+                        executed: false,
+                        toolchain: nativeAotToolchain.ToInfo());
+                }
+
+                if (resolvedOptions.OmitRuntimeIdentifier)
+                {
+                    resolvedOptions = ResolvePlatformInjection(
+                        csproj,
+                        resolvedOptions,
+                        requireConcreteRid: true);
+                    publishOptions = resolvedOptions with
+                    {
+                        NoRestore = options.NoRestore,
+                    };
+                }
+            }
+        }
+
         var publishEnvironment = nativeAotToolchain?.EnvironmentOverrides;
         VsWhereEnvironmentSetup? fallbackVsWhere = null;
         if (publishEnvironment is null && initialProperties is null)

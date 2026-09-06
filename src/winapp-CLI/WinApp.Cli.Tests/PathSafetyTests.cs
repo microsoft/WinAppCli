@@ -204,6 +204,31 @@ public class PathSafetyTests
         }
     }
 
+    [TestMethod]
+    public void HasReparsePointOnExistingPath_ParentJunction_ReturnsTrue()
+    {
+        var real = Path.Combine(_tempDir.FullName, "real-parent");
+        Directory.CreateDirectory(real);
+        var junction = Path.Combine(_tempDir.FullName, "linked-parent");
+        if (!TryCreateJunction(junction, real))
+        {
+            Assert.Inconclusive("Could not create a junction (CI may lack the privilege).");
+            return;
+        }
+
+        try
+        {
+            var child = Path.Combine(junction, "staging");
+            Assert.IsTrue(
+                PathSafety.HasReparsePointOnExistingPath(child),
+                "a junction in an existing parent segment must be refused");
+        }
+        finally
+        {
+            try { Directory.Delete(junction, recursive: false); } catch { /* ignore */ }
+        }
+    }
+
     // Creates a junction when the host permits it; callers mark false as inconclusive.
     private static bool TryCreateJunction(string link, string target)
     {
