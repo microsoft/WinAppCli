@@ -12,6 +12,9 @@ namespace WinApp.Cli.Services;
 
 internal sealed partial class ProjectRunService
 {
+    internal static readonly IReadOnlyList<string> VsWhereArguments =
+        ["-all", "-prerelease", "-products", "*", "-property", "installationPath", "-utf8"];
+
     internal sealed record VsWhereEnvironmentSetup(
         string? VsWherePath,
         string StandardVsWherePath,
@@ -244,7 +247,7 @@ internal sealed partial class ProjectRunService
                 RedirectStandardError = true,
                 CreateNoWindow = true,
             };
-            foreach (var argument in new[] { "-all", "-products", "*", "-property", "installationPath", "-utf8" })
+            foreach (var argument in VsWhereArguments)
             {
                 startInfo.ArgumentList.Add(argument);
             }

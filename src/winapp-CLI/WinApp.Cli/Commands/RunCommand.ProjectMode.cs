@@ -846,7 +846,24 @@ internal partial class RunCommand
                        launched.Kill();
                        throw;
                    }
-                   catch (Exception ex)
+                   catch (InvalidOperationException ex)
+                   {
+                       return HandleRuntimeVerificationException(ex);
+                   }
+                   catch (IOException ex)
+                   {
+                       return HandleRuntimeVerificationException(ex);
+                   }
+                   catch (UnauthorizedAccessException ex)
+                   {
+                       return HandleRuntimeVerificationException(ex);
+                   }
+                   catch (System.ComponentModel.Win32Exception ex)
+                   {
+                       return HandleRuntimeVerificationException(ex);
+                   }
+
+                   int HandleRuntimeVerificationException(Exception ex)
                    {
                        launched.Kill();
                        report.ErrorCode = "NativeAotVerificationFailed";

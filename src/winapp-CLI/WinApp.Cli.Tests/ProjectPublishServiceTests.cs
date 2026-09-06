@@ -1063,6 +1063,14 @@ public sealed class ProjectPublishServiceTests
     }
 
     [TestMethod]
+    public void NativeAotToolchainDiscovery_IncludesPreviewVisualStudioInstallations()
+    {
+        CollectionAssert.Contains(
+            ProjectRunService.VsWhereArguments.ToArray(),
+            "-prerelease");
+    }
+
+    [TestMethod]
     public void ResolveDotnetHostPath_IgnoresRelativePathEntries()
     {
         var trustedDirectory = _tempDirectory.CreateSubdirectory("trusted-dotnet");
