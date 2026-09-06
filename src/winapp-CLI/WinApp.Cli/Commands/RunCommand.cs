@@ -732,6 +732,7 @@ internal partial class RunCommand : Command, IShortDescription
                        {
                            errorMessage = runtimeVerification.Error ?? "Native AOT runtime verification failed.";
                            projectReport.ErrorCode = NativeAotRuntimeErrorCode(runtimeVerification);
+                           projectReport.Ready = false;
                            projectReport.Error =
                                $"{errorMessage} Launched process PID {processId} was terminated or had already exited.";
                            appLauncherService.TerminatePackageProcesses(packageFullName, processId);
@@ -769,6 +770,7 @@ internal partial class RunCommand : Command, IShortDescription
                         {
                             projectReport.ProcessId = processId;
                             projectReport.ErrorCode = "NativeAotVerificationFailed";
+                            projectReport.Ready = false;
                             projectReport.Error = errorMessage;
                         }
                     }
@@ -802,6 +804,7 @@ internal partial class RunCommand : Command, IShortDescription
                    {
                        projectReport.Error ??= errorMessage;
                        projectReport.ErrorCode ??= PackagedLaunchErrorCode(errorMessage);
+                       projectReport.Ready = false;
                        PrintJson(projectReport);
                    }
                    else

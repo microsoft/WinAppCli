@@ -1132,6 +1132,7 @@ public class RunCommandProjectModeTests : BaseCommandTests
        Assert.AreEqual(
            "DotNetSingleFileBundleDetected",
            json.RootElement.GetProperty("ErrorCode").GetString());
+       Assert.IsFalse(json.RootElement.GetProperty("Ready").GetBoolean());
        StringAssert.Contains(json.RootElement.GetProperty("Error").GetString(), "single-file bundle");
        Assert.AreEqual(0, _fakeAppLauncherService.LaunchExecutableCalls.Count);
     }
@@ -1171,6 +1172,7 @@ public class RunCommandProjectModeTests : BaseCommandTests
        Assert.AreEqual(
            "ProcessExitedDuringVerification",
            json.RootElement.GetProperty("ErrorCode").GetString());
+       Assert.IsFalse(json.RootElement.GetProperty("Ready").GetBoolean());
     }
 
     [TestMethod]

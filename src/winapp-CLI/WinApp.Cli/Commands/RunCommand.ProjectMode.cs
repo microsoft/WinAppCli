@@ -413,6 +413,7 @@ internal partial class RunCommand
 
                if (!staticVerification.Succeeded)
                {
+                   report.Ready = false;
                    report.ErrorCode = staticVerification.SingleFileBundle
                        ? "DotNetSingleFileBundleDetected"
                        : staticVerification.ForbiddenFiles.Count > 0
@@ -782,6 +783,7 @@ internal partial class RunCommand
                             : $"Failed to prepare the Windows App Runtime: {runtimeErrorMessage}";
                        report.ErrorCode = "WindowsAppRuntimeUnavailable";
                        report.Error = jsonError;
+                       report.Ready = false;
                        PrintJson(report);
                     }
                     return runtimeResult;
@@ -810,6 +812,7 @@ internal partial class RunCommand
                 {
                    report.ErrorCode = "LaunchFailed";
                    report.Error = detail;
+                   report.Ready = false;
                    PrintJson(report);
                 }
                 return 1;
@@ -847,6 +850,7 @@ internal partial class RunCommand
                    {
                        launched.Kill();
                        report.ErrorCode = "NativeAotVerificationFailed";
+                       report.Ready = false;
                        report.Error =
                            $"Native AOT verification failed: {ex.Message} Launched process PID {processId} was terminated. " +
                            "Re-run without --verify-native-aot and --detach, then add --debug-output; add --symbols for native crash details.";
@@ -870,6 +874,7 @@ internal partial class RunCommand
                    {
                        launched.Kill();
                        report.ErrorCode = NativeAotRuntimeErrorCode(runtimeVerification);
+                       report.Ready = false;
                        report.Error =
                            $"{runtimeVerification.Error ?? "Native AOT runtime verification failed."} " +
                            $"Launched process PID {processId} was terminated or had already exited.";

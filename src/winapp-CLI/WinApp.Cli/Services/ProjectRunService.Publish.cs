@@ -312,6 +312,15 @@ internal sealed partial class ProjectRunService
             cancellationToken,
             requireConcreteRid: publishAot || options.VerifyNativeAot);
 
+        var publishEnvironment = nativeAotToolchain?.EnvironmentOverrides;
+        VsWhereEnvironmentSetup? fallbackVsWhere = null;
+        if (publishEnvironment is null && initialProperties is null)
+        {
+            fallbackVsWhere = VsWhereEnvironmentSetupOverrideForTests?.Invoke()
+                ?? ResolveVsWhereEnvironment();
+            publishEnvironment = fallbackVsWhere.EnvironmentOverrides;
+        }
+
         if (nativeAotToolchain is not null &&
             nativeAotToolchain.AddedToPath &&
             nativeAotToolchain.VsWherePath is { } vsWherePath &&
@@ -321,13 +330,20 @@ internal sealed partial class ProjectRunService
             ansiConsole.MarkupLineInterpolated(
                 $"{UiSymbols.Note} Found vswhere.exe at [blue]{Markup.Escape(vsWherePath)}[/], but its directory was not on PATH. WinApp will add it to PATH for this publish.");
         }
+        else if (fallbackVsWhere is { AddedToPath: true, VsWherePath: { } fallbackPath } &&
+                 !options.Json &&
+                 logger.IsEnabled(LogLevel.Information))
+        {
+            ansiConsole.MarkupLineInterpolated(
+                $"{UiSymbols.Note} Found vswhere.exe at [blue]{Markup.Escape(fallbackPath)}[/], but its directory was not on PATH. WinApp will add it to PATH for this publish.");
+        }
 
         var publishResult = await RunPublishPassAsync(
             csproj,
             publishOptions,
             workingDir,
             csWinRTMetadata,
-            nativeAotToolchain?.EnvironmentOverrides,
+            publishEnvironment,
             cancellationToken);
         if (publishResult.ExitCode != 0)
         {

@@ -62,6 +62,7 @@ internal sealed partial class ProjectRunService(
     internal Func<bool>? NativeTerminalGateOverrideForTests { get; set; }
 
     internal Func<string, NativeAotToolchainSetup>? NativeAotToolchainSetupOverrideForTests { get; set; }
+    internal Func<VsWhereEnvironmentSetup>? VsWhereEnvironmentSetupOverrideForTests { get; set; }
 
     /// <inheritdoc />
     public async Task<string?> CheckSdkAsync(DirectoryInfo workingDirectory, CancellationToken cancellationToken)

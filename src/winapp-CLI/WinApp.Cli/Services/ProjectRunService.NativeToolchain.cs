@@ -12,6 +12,12 @@ namespace WinApp.Cli.Services;
 
 internal sealed partial class ProjectRunService
 {
+    internal sealed record VsWhereEnvironmentSetup(
+        string? VsWherePath,
+        string StandardVsWherePath,
+        bool AddedToPath,
+        IReadOnlyDictionary<string, string>? EnvironmentOverrides);
+
     internal sealed record NativeAotToolchainSetup(
         bool Ready,
         string? Error,
@@ -76,28 +82,11 @@ internal sealed partial class ProjectRunService
                 $"Windows Native AOT toolchain discovery supports x64 and ARM64 hosts; the current host is '{hostName}'.");
         }
 
-        inheritedPath ??= Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
-        var installerDirectory = Path.Join(
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
-            "Microsoft Visual Studio",
-            "Installer");
-        installedVsWherePath ??= Path.Join(installerDirectory, "vswhere.exe");
-        var vsWherePath = FindExecutableOnPath("vswhere.exe", inheritedPath);
-        var addedToPath = false;
-        IReadOnlyDictionary<string, string>? environmentOverrides = null;
-        if (vsWherePath is null && File.Exists(installedVsWherePath))
-        {
-            vsWherePath = Path.GetFullPath(installedVsWherePath);
-            installerDirectory = Path.GetDirectoryName(vsWherePath)!;
-            var updatedPath = string.IsNullOrWhiteSpace(inheritedPath)
-                ? installerDirectory
-                : $"{installerDirectory}{Path.PathSeparator}{inheritedPath}";
-            addedToPath = true;
-            environmentOverrides = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["PATH"] = updatedPath,
-            };
-        }
+        var vsWhere = ResolveVsWhereEnvironment(inheritedPath, installedVsWherePath);
+        var vsWherePath = vsWhere.VsWherePath;
+        installedVsWherePath = vsWhere.StandardVsWherePath;
+        var addedToPath = vsWhere.AddedToPath;
+        var environmentOverrides = vsWhere.EnvironmentOverrides;
 
         var installations = visualStudioInstallations ??
             (vsWherePath is null ? [] : QueryVisualStudioInstallations(vsWherePath));
@@ -189,6 +178,50 @@ internal sealed partial class ProjectRunService
             WindowsSdkRoot: null,
             AddedToPath: false,
             EnvironmentOverrides: null);
+    }
+
+    internal static VsWhereEnvironmentSetup ResolveVsWhereEnvironment(
+        string? inheritedPath = null,
+        string? installedVsWherePath = null)
+    {
+        inheritedPath ??= Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+        var installerDirectory = Path.Join(
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+            "Microsoft Visual Studio",
+            "Installer");
+        installedVsWherePath ??= Path.Join(installerDirectory, "vswhere.exe");
+        var vsWherePath = FindExecutableOnPath("vswhere.exe", inheritedPath);
+        if (vsWherePath is not null)
+        {
+            return new VsWhereEnvironmentSetup(
+                vsWherePath,
+                installedVsWherePath,
+                AddedToPath: false,
+                EnvironmentOverrides: null);
+        }
+
+        if (!File.Exists(installedVsWherePath))
+        {
+            return new VsWhereEnvironmentSetup(
+                VsWherePath: null,
+                installedVsWherePath,
+                AddedToPath: false,
+                EnvironmentOverrides: null);
+        }
+
+        vsWherePath = Path.GetFullPath(installedVsWherePath);
+        installerDirectory = Path.GetDirectoryName(vsWherePath)!;
+        var updatedPath = string.IsNullOrWhiteSpace(inheritedPath)
+            ? installerDirectory
+            : $"{installerDirectory}{Path.PathSeparator}{inheritedPath}";
+        return new VsWhereEnvironmentSetup(
+            vsWherePath,
+            installedVsWherePath,
+            AddedToPath: true,
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["PATH"] = updatedPath,
+            });
     }
 
     private static string HostArchitectureName(Architecture architecture) => architecture switch

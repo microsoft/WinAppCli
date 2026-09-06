@@ -1158,6 +1158,55 @@ public sealed class ProjectPublishServiceTests
     }
 
     [TestMethod]
+    public async Task PreparePublish_IndeterminatePreflightAddsInstalledVsWhereToChildPath()
+    {
+       var publishDirectory = _tempDirectory.CreateSubdirectory("publish-indeterminate");
+       File.WriteAllText(ChildPath(publishDirectory.FullName, "App.exe"), "native fixture");
+       var properties = UnpackagedProperties(publishDirectory.FullName, publishAot: true);
+       var (service, dotnet) = CreateService(properties);
+       service.VsWhereEnvironmentSetupOverrideForTests = static () =>
+           new ProjectRunService.VsWhereEnvironmentSetup(
+               @"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe",
+               @"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe",
+               AddedToPath: true,
+               new Dictionary<string, string>
+               {
+                   ["PATH"] = @"C:\Program Files (x86)\Microsoft Visual Studio\Installer;C:\Windows",
+               });
+       var evaluateCount = 0;
+       dotnet.RunDotnetCommandHandler = arguments =>
+       {
+           if (arguments == "--version")
+           {
+               return (0, "10.0.303", string.Empty);
+           }
+
+           evaluateCount++;
+           return evaluateCount == 1
+               ? (1, string.Empty, "NETSDK1004: project.assets.json was not found")
+               : (0, properties, string.Empty);
+       };
+       var options = new ProjectRunOptions(
+           "Release",
+           "x64",
+           null,
+           NoBuild: false,
+           NoRestore: false,
+           Properties: []);
+
+       var outcome = await service.PrepareAndResolveAsync(
+           _project,
+           options,
+           ProjectPreparationOperation.Publish,
+           CancellationToken.None);
+
+       Assert.AreEqual(0, outcome.ExitCode, outcome.Error);
+       Assert.AreEqual(
+           @"C:\Program Files (x86)\Microsoft Visual Studio\Installer;C:\Windows",
+           dotnet.ArgumentListEnvironmentInvocations.Single()!["PATH"]);
+    }
+
+    [TestMethod]
     public async Task PreparePublish_IndeterminateConditionalPublishAotDoesNotTriggerAotRestrictions()
     {
        File.WriteAllText(
@@ -1294,6 +1343,12 @@ public sealed class ProjectPublishServiceTests
                 LinkerPath: @"C:\VS\link.exe",
                 WindowsSdkVersion: "10.0.26100.0",
                 WindowsSdkRoot: @"C:\Kits",
+                AddedToPath: false,
+                EnvironmentOverrides: null);
+        service.VsWhereEnvironmentSetupOverrideForTests = static () =>
+            new ProjectRunService.VsWhereEnvironmentSetup(
+                VsWherePath: null,
+                StandardVsWherePath: "vswhere.exe",
                 AddedToPath: false,
                 EnvironmentOverrides: null);
         return (service, dotnet);
