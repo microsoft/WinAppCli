@@ -43,13 +43,21 @@ internal static class GuestRunPlanner
     /// <param name="payloadPath">Guest folder holding the materialized layout the host deployed.</param>
     /// <param name="layoutPath">Guest folder the package is registered from.</param>
     /// <param name="options">Run options to forward.</param>
+    /// <remarks>
+    /// The layout is passed as <c>--managed-appx-directory</c>, not <c>--output-appx-directory</c>.
+    /// Both name where the layout goes; they differ in who owns it. The host created this directory
+    /// beside the payload for this deployment, so it is winapp's own and must be kept matching the
+    /// payload -- a file dropped from the app has to disappear from it, or the guest would go on
+    /// registering content the app no longer has. A directory a user names is theirs and is only
+    /// ever added to, which is the right default for a person and the wrong one here.
+    /// </remarks>
     public static List<string> BuildRunArguments(string payloadPath, string layoutPath, GuestRunOptions options)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(payloadPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(layoutPath);
         ArgumentNullException.ThrowIfNull(options);
 
-        var arguments = new List<string> { "run", payloadPath, "--output-appx-directory", layoutPath };
+        var arguments = new List<string> { "run", payloadPath, "--managed-appx-directory", layoutPath };
 
         if (options.NoLaunch)
         {

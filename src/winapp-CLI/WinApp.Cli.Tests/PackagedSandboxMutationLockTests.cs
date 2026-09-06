@@ -176,6 +176,52 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
     }
 
     /// <summary>
+    /// The host's own AppX directory, when nobody named one, is winapp's to prune -- that is the
+    /// whole reason a file the app dropped disappears from it on the next run.
+    /// </summary>
+    [TestMethod]
+    public async Task PackagedSandboxRun_WithNoDirectoryNamed_TreatsTheGeneratedLayoutAsWinapps()
+    {
+        var ct = TestContext.CancellationToken;
+
+        await using var harness = CreateHarness("implicit");
+
+        var task = RunAsync(harness, noLaunch: true, clean: false, ct, layoutOutput: LayoutOutput.Generated);
+
+        (await harness.Processes.WaitForNextAsync(ct)).Exit(0);
+        Assert.AreEqual(0, await task);
+
+        CollectionAssert.AreEqual(
+            new[] { LayoutReconciliation.Exact },
+            harness.Msix.LayoutReconciliations,
+            "a generated AppX directory is winapp's own, so it is reconciled exactly");
+    }
+
+    /// <summary>
+    /// A directory the developer named is theirs. winapp cannot tell their files from its own
+    /// leftovers, so it only ever adds -- and the docs tell them to use a fresh path when a
+    /// removal has to show up.
+    /// </summary>
+    [TestMethod]
+    public async Task PackagedSandboxRun_WithAUserNamedDirectory_NeverPrunesIt()
+    {
+        var ct = TestContext.CancellationToken;
+
+        await using var harness = CreateHarness("explicit");
+
+        var task = RunAsync(
+            harness, noLaunch: true, clean: false, ct, layoutOutput: LayoutOutput.UserSupplied(harness.Layout));
+
+        (await harness.Processes.WaitForNextAsync(ct)).Exit(0);
+        Assert.AreEqual(0, await task);
+
+        CollectionAssert.AreEqual(
+            new[] { LayoutReconciliation.Additive },
+            harness.Msix.LayoutReconciliations,
+            "a directory the user named must never have files removed from it");
+    }
+
+    /// <summary>
     /// <c>--no-launch</c> never splits into two guest calls -- there is no launch phase to protect
     /// the lease from -- so the single register-only call is the whole, already-locked operation.
     /// </summary>
@@ -483,7 +529,7 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
         host.Request.Arguments.Contains("--no-launch");
 
     /// <summary>
-    /// The registration layout a guest request names with <c>--output-appx-directory</c>, or null
+    /// The registration layout a guest request names with <c>--managed-appx-directory</c>, or null
     /// when it names none.
     /// </summary>
     private static string? LayoutDirectoryOf(GuestExecRequest request)
@@ -495,7 +541,7 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
             return null;
         }
 
-        var index = arguments.IndexOf("--output-appx-directory");
+        var index = arguments.IndexOf("--managed-appx-directory");
 
         return index >= 0 && index + 1 < arguments.Count
             ? arguments[index + 1]
@@ -529,12 +575,13 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
         bool clean,
         CancellationToken cancellationToken,
         bool withAlias = false,
-        bool unregisterOnExit = false) =>
+        bool unregisterOnExit = false,
+        LayoutOutput? layoutOutput = null) =>
         Task.Run(
             () => harness.Handler.ExecuteRunPipelineAsync(
                 new DirectoryInfo(harness.HostFolder ?? throw new InvalidOperationException()),
                 harness.Manifest,
-                harness.Layout,
+                layoutOutput ?? LayoutOutput.UserSupplied(harness.Layout),
                 appArgs: null,
                 noLaunch,
                 withAlias,
@@ -707,8 +754,10 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
 
             var identity = new MsixIdentityResult("SbxMutationLockTestPackage", "CN=SbxMutationLockTests", "App");
 
+            Msix = new FakeMsixService { FakeIdentityResult = identity };
+
             Handler = new RunCommand.Handler(
-                new FakeMsixService { FakeIdentityResult = identity },
+                Msix,
                 new FakeAppLauncherService(),
                 packageRegistrationService,
                 debugOutputService,
@@ -735,6 +784,12 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
         public FakePackageRegistrationService PackageRegistration { get; }
 
         public RunCommand.Handler Handler { get; }
+
+        /// <summary>
+        /// The layout service this run drove, so a test can read back the ownership the run decided
+        /// on -- the value that says whether the directory may be pruned.
+        /// </summary>
+        public FakeMsixService Msix { get; }
 
         public async ValueTask DisposeAsync()
         {

@@ -34,9 +34,11 @@ internal enum LayoutReconciliation
     Additive,
 
     /// <summary>
-    /// The <c>AppX</c> directory winapp generates next to the build output when the caller did not
-    /// name one. winapp creates it, nothing else writes to it, and MSBuild does not clean it, so it
-    /// can be made to match the build exactly.
+    /// A directory winapp itself created for this deployment and keeps for the next run: the
+    /// <c>AppX</c> directory generated next to the build output when the caller did not name one,
+    /// and the guest registration layout the host creates alongside a deployed payload. winapp
+    /// creates it, nothing else writes to it, and MSBuild does not clean it, so it can be made to
+    /// match the build exactly.
     /// </summary>
     Exact,
 }

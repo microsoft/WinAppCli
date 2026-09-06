@@ -1058,9 +1058,79 @@ public class MsixServiceIdentityTests : BaseCommandTests
             _testCacheDirectory, layout, TestContext.CancellationToken, TimeSpan.FromMilliseconds(200));
     }
 
-    /// <summary>Junction creation needs no elevation, unlike a symbolic link.</summary>
-    private static bool TryCreateJunction(string linkPath, string target)
+    /// <summary>
+    /// The shape of a packaged Windows Sandbox run, twice: the host deploys an exact payload into
+    /// the guest, and the guest registers from a layout directory the host created beside it. When
+    /// the app drops a file, the second run must drop it from that registration layout too --
+    /// otherwise the guest keeps registering content the app no longer contains, which is the bug
+    /// this whole change exists to fix. Without <c>--clean</c>: a workaround is not a fix.
+    /// </summary>
+    [TestMethod]
+    public async Task GuestRegistrationLayout_SecondRunAfterAFileIsDropped_NoLongerContainsIt()
     {
+        // The deployed payload: an exact copy of the host layout, so it never holds the dropped file.
+        var payload = _tempDirectory.CreateSubdirectory("abc");
+        var manifest = new FileInfo(Path.Combine(payload.FullName, "appxmanifest.xml"));
+        await File.WriteAllTextAsync(manifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        await File.WriteAllTextAsync(
+            Path.Combine(payload.FullName, "TestApp.exe"), "exe", TestContext.CancellationToken);
+
+        var fixtures = payload.CreateSubdirectory("Fixtures");
+        var dropped = new FileInfo(Path.Combine(fixtures.FullName, "removed.json"));
+        await File.WriteAllTextAsync(dropped.FullName, "{}", TestContext.CancellationToken);
+
+        // The registration layout: a sibling the host names, so it is winapp's own -- Exact.
+        var registrationLayout = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "abc-layout"));
+
+        InvokeSyncFilesToOutputDirectory(payload, registrationLayout, manifest);
+
+        var stagedDropped = Path.Combine(registrationLayout.FullName, "Fixtures", "removed.json");
+        Assert.IsTrue(File.Exists(stagedDropped), "the first run must stage the file the app still had");
+
+        // The app drops the file and is redeployed. The payload is exact, so it simply goes away.
+        dropped.Delete();
+
+        InvokeSyncFilesToOutputDirectory(payload, registrationLayout, manifest);
+
+        Assert.IsFalse(File.Exists(stagedDropped),
+            "the guest must not go on registering a file the app no longer contains");
+        Assert.IsTrue(File.Exists(Path.Combine(registrationLayout.FullName, "TestApp.exe")),
+            "the rest of the app must survive");
+        Assert.IsTrue(File.Exists(Path.Combine(registrationLayout.FullName, "appxmanifest.xml")),
+            "the manifest the package registers from must survive");
+    }
+
+    /// <summary>
+    /// The same two runs against a directory the user named. Nothing is removed, because winapp
+    /// cannot tell a build leftover from a file the developer put there.
+    /// </summary>
+    [TestMethod]
+    public async Task UserNamedLayout_SecondRunAfterAFileIsDropped_KeepsEverything()
+    {
+        var payload = _tempDirectory.CreateSubdirectory("additive-src");
+        var manifest = new FileInfo(Path.Combine(payload.FullName, "appxmanifest.xml"));
+        await File.WriteAllTextAsync(manifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+
+        var dropped = new FileInfo(Path.Combine(payload.FullName, "removed.json"));
+        await File.WriteAllTextAsync(dropped.FullName, "{}", TestContext.CancellationToken);
+
+        var layout = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "additive-layout"));
+
+        InvokeSyncFilesToOutputDirectory(payload, layout, manifest, "Additive");
+
+        var staged = Path.Combine(layout.FullName, "removed.json");
+        Assert.IsTrue(File.Exists(staged));
+
+        dropped.Delete();
+
+        InvokeSyncFilesToOutputDirectory(payload, layout, manifest, "Additive");
+
+        Assert.IsTrue(File.Exists(staged),
+            "a directory the user named is only ever added to, even when the app drops a file");
+    }
+
+    /// <summary>Junction creation needs no elevation, unlike a symbolic link.</summary>
+    private static bool TryCreateJunction(string linkPath, string target)    {
         try
         {
             using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe")

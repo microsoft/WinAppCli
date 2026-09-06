@@ -231,6 +231,73 @@ public class RunCommandTests : BaseCommandTests
         Assert.AreEqual(_tempDirectory.FullName, folder.FullName);
     }
 
+    /// <summary>
+    /// The three ways a run can name its layout, and who owns each. This is the decision that
+    /// makes deletion safe or unsafe, and it is made here -- from the options as typed -- because
+    /// once the default has been filled in the path alone no longer says who created the directory.
+    /// </summary>
+    [TestMethod]
+    public void ResolveLayoutOutput_NoDirectoryNamed_IsWinappsOwnGeneratedLayout()
+    {
+        var parseResult = GetRequiredService<RunCommand>().Parse([_tempDirectory.FullName]);
+
+        Assert.IsTrue(RunCommand.TryResolveLayoutOutput(parseResult, out var layoutOutput, out var error), error);
+        Assert.IsNull(layoutOutput.Directory, "the generated default is filled in later, by the run itself");
+        Assert.AreEqual(LayoutReconciliation.Exact, layoutOutput.Reconciliation);
+    }
+
+    [TestMethod]
+    public void ResolveLayoutOutput_UserTypedDirectory_IsNeverPruned()
+    {
+        var outputDir = Path.Combine(_tempDirectory.FullName, "mine");
+        var parseResult = GetRequiredService<RunCommand>()
+            .Parse([_tempDirectory.FullName, "--output-appx-directory", outputDir]);
+
+        Assert.IsTrue(RunCommand.TryResolveLayoutOutput(parseResult, out var layoutOutput, out var error), error);
+        Assert.AreEqual(outputDir, layoutOutput.Directory?.FullName);
+        Assert.AreEqual(LayoutReconciliation.Additive, layoutOutput.Reconciliation);
+    }
+
+    [TestMethod]
+    public void ResolveLayoutOutput_HostNamedGuestLayout_IsWinappOwned()
+    {
+        var layout = Path.Combine(_tempDirectory.FullName, "abc-layout");
+        var parseResult = GetRequiredService<RunCommand>()
+            .Parse([_tempDirectory.FullName, "--managed-appx-directory", layout]);
+
+        Assert.IsTrue(RunCommand.TryResolveLayoutOutput(parseResult, out var layoutOutput, out var error), error);
+        Assert.AreEqual(layout, layoutOutput.Directory?.FullName);
+        Assert.AreEqual(LayoutReconciliation.Exact, layoutOutput.Reconciliation);
+    }
+
+    /// <summary>
+    /// Both options name the same thing and disagree about who owns it. Picking one silently would
+    /// settle a deletion question by argument order, so the run refuses instead.
+    /// </summary>
+    [TestMethod]
+    public void ResolveLayoutOutput_BothDirectoryOptions_IsRefused()
+    {
+        var parseResult = GetRequiredService<RunCommand>().Parse(
+        [
+            _tempDirectory.FullName,
+            "--output-appx-directory", Path.Combine(_tempDirectory.FullName, "mine"),
+            "--managed-appx-directory", Path.Combine(_tempDirectory.FullName, "theirs"),
+        ]);
+
+        Assert.IsFalse(RunCommand.TryResolveLayoutOutput(parseResult, out _, out var error));
+        Assert.IsNotNull(error);
+        StringAssert.Contains(error, "--output-appx-directory", StringComparison.Ordinal);
+        StringAssert.Contains(error, "--managed-appx-directory", StringComparison.Ordinal);
+    }
+
+    /// <summary>The internal option stays out of help and the generated schema.</summary>
+    [TestMethod]
+    public void ManagedAppXDirectoryOption_IsHiddenFromUsers()
+    {
+        Assert.IsTrue(RunCommand.ManagedAppXDirectoryOption.Hidden);
+        Assert.IsFalse(RunCommand.OutputAppXDirectoryOption.Hidden);
+    }
+
     [TestMethod]
     public void ParseOptions_Clean_IsParsedCorrectly()
     {

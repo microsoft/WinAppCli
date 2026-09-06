@@ -34,7 +34,7 @@ internal partial class RunCommand
         private async Task<int> ExecutePackagedTargetRunAsync(
             DirectoryInfo inputFolder,
             FileInfo? manifest,
-            DirectoryInfo? outputAppXDirectory,
+            LayoutOutput layoutOutput,
             string? appArgs,
             bool noLaunch,
             bool withAlias,
@@ -69,14 +69,12 @@ internal partial class RunCommand
                 {
                     resolvedManifest = ResolveManifestForSandbox(inputFolder, manifest);
 
-                    // Only the AppX directory winapp generates for itself may have files removed from
-                    // it. A directory the caller named is theirs, and is only ever added to.
-                    var layoutReconciliation = outputAppXDirectory is null
-                        ? LayoutReconciliation.Exact
-                        : LayoutReconciliation.Additive;
-
-                    layout = outputAppXDirectory ?? new DirectoryInfo(
-                        TargetPathSafety.CombineInsideRoot(inputFolder.FullName, "AppX"));
+                    // Ownership travels with the path from the call site (see LayoutOutput). The
+                    // guest registration layout arrives here as WinappManaged: the host created it
+                    // beside the deployed payload, so it is winapp's to keep matching the build,
+                    // exactly like the generated AppX directory.
+                    layout = layoutOutput.Resolve(() => new DirectoryInfo(
+                        TargetPathSafety.CombineInsideRoot(inputFolder.FullName, "AppX")));
 
                     LongPathHelper.ValidatePathLength(resolvedManifest.FullName);
                     LongPathHelper.ValidatePathLength(layout.FullName);
@@ -94,7 +92,7 @@ internal partial class RunCommand
                             try
                             {
                                 identity = await msixService.MaterializeLooseLayoutAsync(
-                                    resolvedManifest, inputFolder, layout, taskContext, layoutReconciliation,
+                                    resolvedManifest, inputFolder, layout, taskContext, layoutOutput.Reconciliation,
                                     executable, projectFile, framework, noRestore, ct);
                                 return (0, $"{identity.PackageName} ready to deploy");
                             }

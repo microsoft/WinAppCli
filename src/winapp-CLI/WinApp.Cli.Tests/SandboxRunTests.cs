@@ -6,6 +6,7 @@ using WinApp.Cli.Commands;
 using WinApp.Cli.ExecutionTargets.Abstractions;
 using WinApp.Cli.ExecutionTargets.GuestAgent;
 using WinApp.Cli.ExecutionTargets.Orchestration;
+using WinApp.Cli.Services;
 
 using WinApp.Cli.ExecutionTargets.WindowsSandbox;
 
@@ -30,14 +31,14 @@ public class SandboxRunTests
     private static readonly string[] FullOptionMatrixArguments =
     [
         "run", @"C:\WinApp\deployments\abc",
-        "--output-appx-directory", @"C:\WinApp\deployments\abc-layout",
+        "--managed-appx-directory", @"C:\WinApp\deployments\abc-layout",
         "--no-launch", "--with-alias", "--debug-output", "--unregister-on-exit",
         "--detach", "--clean", "--json", "--args", "--flag value",
     ];
 
     private static readonly string[] MinimalRunArguments =
     [
-        "run", @"C:\WinApp\deployments\abc", "--output-appx-directory", @"C:\WinApp\deployments\abc-layout",
+        "run", @"C:\WinApp\deployments\abc", "--managed-appx-directory", @"C:\WinApp\deployments\abc-layout",
     ];
 
     private string _root = null!;
@@ -103,6 +104,42 @@ public class SandboxRunTests
             @"C:\WinApp\deployments\abc", @"C:\WinApp\deployments\abc-layout", new GuestRunOptions());
 
         CollectionAssert.AreEqual(MinimalRunArguments, arguments);
+    }
+
+    /// <summary>
+    /// The guest registration layout is a directory the host created for this deployment, so the
+    /// guest has to be told it is winapp's own. Sending it as <c>--output-appx-directory</c> would
+    /// tell the guest the opposite -- that a person named it -- and a file dropped from the app
+    /// would then be left behind in the directory the package is registered from.
+    /// </summary>
+    [TestMethod]
+    public void BuildRunArguments_MarksTheGuestLayoutAsWinappsOwn_NotAsAUserSuppliedDirectory()
+    {
+        var arguments = GuestRunPlanner.BuildRunArguments(
+            @"C:\WinApp\deployments\abc", @"C:\WinApp\deployments\abc-layout", new GuestRunOptions());
+
+        CollectionAssert.DoesNotContain(arguments, "--output-appx-directory");
+
+        var index = arguments.IndexOf("--managed-appx-directory");
+        Assert.AreNotEqual(-1, index, "the guest layout must be marked as winapp-managed");
+        Assert.AreEqual(@"C:\WinApp\deployments\abc-layout", arguments[index + 1]);
+    }
+
+    /// <summary>
+    /// The guest resolves that option to exact reconciliation, which is the whole point of sending
+    /// it: parsing it as anything else would silently restore the additive behavior.
+    /// </summary>
+    [TestMethod]
+    public void GuestRunArguments_ParseBackToAWinappOwnedLayout()
+    {
+        var arguments = GuestRunPlanner.BuildRunArguments(
+            @"C:\WinApp\deployments\abc", @"C:\WinApp\deployments\abc-layout", new GuestRunOptions());
+
+        var parseResult = new RunCommand().Parse(arguments.ToArray());
+
+        Assert.IsTrue(RunCommand.TryResolveLayoutOutput(parseResult, out var layoutOutput, out var error), error);
+        Assert.AreEqual(LayoutReconciliation.Exact, layoutOutput.Reconciliation);
+        Assert.AreEqual(@"C:\WinApp\deployments\abc-layout", layoutOutput.Directory?.FullName);
     }
 
     [TestMethod]

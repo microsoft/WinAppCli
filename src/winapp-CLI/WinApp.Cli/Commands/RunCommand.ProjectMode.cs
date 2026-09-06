@@ -146,6 +146,11 @@ internal partial class RunCommand
             var manifest = parseResult.GetValue(ManifestOption);
             var outputAppXDirectory = parseResult.GetValue(OutputAppXDirectoryOption);
 
+            if (!TryResolveLayoutOutput(parseResult, out var layoutOutput, out var layoutOutputError))
+            {
+                return Fail(layoutOutputError!, isJson);
+            }
+
             // Resolve the target architecture: --runtime's arch beats --arch; else the process arch.
             if (!TryResolveArchitecture(archOption, runtimeOption, out var architecture, out var archError))
             {
@@ -225,7 +230,7 @@ internal partial class RunCommand
 
             return resolution.Packaging == ProjectPackaging.Packaged
                 ? await RunPackagedProjectAsync(
-                    resolution, csproj, manifest, outputAppXDirectory, appArgs,
+                    resolution, csproj, manifest, layoutOutput, appArgs,
                     noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, noBuild, isJson,
                     executionTarget, cancellationToken)
                 : await RunUnpackagedProjectAsync(
@@ -243,7 +248,7 @@ internal partial class RunCommand
             ProjectRunResolution resolution,
             FileInfo csproj,
             FileInfo? manifest,
-            DirectoryInfo? outputAppXDirectory,
+            LayoutOutput layoutOutput,
             string? appArgs,
             bool noLaunch,
             bool withAlias,
@@ -276,7 +281,7 @@ internal partial class RunCommand
             }
 
             return await ExecuteRunPipelineAsync(
-                targetDir, manifest, outputAppXDirectory, appArgs,
+                targetDir, manifest, layoutOutput, appArgs,
                 noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, isJson,
                 runtimeArch: resolution.Architecture, projectFile: csproj, framework: resolution.Framework, noRestore: resolution.NoRestore, executionTarget, cancellationToken);
         }

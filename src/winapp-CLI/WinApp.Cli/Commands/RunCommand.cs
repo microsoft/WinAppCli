@@ -26,6 +26,7 @@ internal partial class RunCommand : Command, IShortDescription, ITargetAwareComm
     public static Argument<FileSystemInfo> InputArgument { get; }
     public static Option<FileInfo> ManifestOption { get; }
     public static Option<DirectoryInfo?> OutputAppXDirectoryOption { get; }
+    public static Option<DirectoryInfo?> ManagedAppXDirectoryOption { get; }
     public static Option<string> ArgsOption { get; }
     public static Option<bool> NoLaunchOption { get; }
     public static Option<bool> WithAliasOption { get; }
@@ -80,6 +81,18 @@ internal partial class RunCommand : Command, IShortDescription, ITargetAwareComm
         OutputAppXDirectoryOption = new Option<DirectoryInfo?>("--output-appx-directory")
         {
             Description = "Output directory for the loose layout package. If not specified, a directory named AppX inside the input directory is used, and winapp keeps it matching the build — a file your app no longer contains is removed from it on the next run. A directory you name here is only ever added to: winapp never deletes anything from it, so point it at a fresh path when files removed from your app must disappear from the layout."
+        };
+
+        ManagedAppXDirectoryOption = new Option<DirectoryInfo?>("--managed-appx-directory")
+        {
+            Description = "Internal: layout directory winapp created for this deployment and maintains exactly, as it does the generated AppX directory. Used by host-driven Windows Sandbox registration, where the layout must sit beside the deployed payload rather than inside it.",
+
+            // Hidden, like the guest verbs it serves (guest-launch, guest-agent): an internal step of
+            // a host-driven workflow, not something to type. It is the same directive the default
+            // AppX directory already carries -- "winapp made this, keep it matching the build" --
+            // just for a path only the host can name, so the guest is told outright instead of
+            // guessing ownership back out of the path it was handed.
+            Hidden = true,
         };
 
         ArgsOption = new Option<string>("--args")
@@ -178,12 +191,44 @@ internal partial class RunCommand : Command, IShortDescription, ITargetAwareComm
         };
     }
 
+    /// <summary>
+    /// Turns the two layout-directory options into one value carrying the path and its ownership.
+    /// </summary>
+    /// <remarks>
+    /// The two are mutually exclusive rather than merged: they name the same thing and disagree
+    /// about who owns it, and silently preferring one would decide a deletion question by argument
+    /// order.
+    /// </remarks>
+    internal static bool TryResolveLayoutOutput(ParseResult parseResult, out LayoutOutput layoutOutput, out string? error)
+    {
+        var userSupplied = parseResult.GetValue(OutputAppXDirectoryOption);
+        var winappManaged = parseResult.GetValue(ManagedAppXDirectoryOption);
+
+        if (userSupplied is not null && winappManaged is not null)
+        {
+            layoutOutput = LayoutOutput.Generated;
+            error = "--output-appx-directory and --managed-appx-directory cannot be used together. Use --output-appx-directory.";
+            return false;
+        }
+
+        layoutOutput = (userSupplied, winappManaged) switch
+        {
+            (not null, _) => LayoutOutput.UserSupplied(userSupplied),
+            (_, not null) => LayoutOutput.WinappManaged(winappManaged),
+            _ => LayoutOutput.Generated,
+        };
+
+        error = null;
+        return true;
+    }
+
     public RunCommand() : base("run", "Builds and runs a Windows app from a .csproj/.sln or a build-output folder. In project mode, invokes dotnet build then launches the app (packaged or unpackaged); in folder mode, creates a debug-signed layout, registers the package, and launches it.")
     {
         Arguments.Add(InputArgument);
         Arguments.Add(PassthroughArgument);
         Options.Add(ManifestOption);
         Options.Add(OutputAppXDirectoryOption);
+        Options.Add(ManagedAppXDirectoryOption);
         Options.Add(ArgsOption);
         Options.Add(NoLaunchOption);
         Options.Add(WithAliasOption);
@@ -247,7 +292,6 @@ internal partial class RunCommand : Command, IShortDescription, ITargetAwareComm
             // tokens; when it happens we fall back to the current directory (see resolution below).
             var inputArg = parseResult.GetValue(InputArgument);
             var manifest = parseResult.GetValue(ManifestOption);
-            var outputAppXDirectory = parseResult.GetValue(OutputAppXDirectoryOption);
             var appArgs = parseResult.GetValue(ArgsOption);
             var noLaunch = parseResult.GetValue(NoLaunchOption);
             var withAlias = parseResult.GetValue(WithAliasOption);
@@ -259,6 +303,11 @@ internal partial class RunCommand : Command, IShortDescription, ITargetAwareComm
             var executable = parseResult.GetValue(ExecutableOption);
             var executionTarget = ExecutionTargetSelection.Resolve(parseResult);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
+
+            if (!TryResolveLayoutOutput(parseResult, out var layoutOutput, out var layoutOutputError))
+            {
+                return Fail(layoutOutputError!, isJson);
+            }
 
             // Reject a valueless -p/--property. The option uses ZeroOrMore arity so a bare
             // '-p' (no Name=Value) parses without a value instead of raising a System.CommandLine
@@ -508,7 +557,7 @@ internal partial class RunCommand : Command, IShortDescription, ITargetAwareComm
             }
 
             return await ExecuteRunPipelineAsync(
-                inputFolder, manifest, outputAppXDirectory, appArgs,
+                inputFolder, manifest, layoutOutput, appArgs,
                 noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, isJson,
                 runtimeArch: null, projectFile: null, framework: null, noRestore: false, executionTarget, cancellationToken);
         }
@@ -523,7 +572,7 @@ internal partial class RunCommand : Command, IShortDescription, ITargetAwareComm
         internal async Task<int> ExecuteRunPipelineAsync(
             DirectoryInfo inputFolder,
             FileInfo? manifest,
-            DirectoryInfo? outputAppXDirectory,
+            LayoutOutput layoutOutput,
             string? appArgs,
             bool noLaunch,
             bool withAlias,
@@ -547,7 +596,7 @@ internal partial class RunCommand : Command, IShortDescription, ITargetAwareComm
             if (!executionTarget.IsLocal)
             {
                 return await ExecutePackagedTargetRunAsync(
-                    inputFolder, manifest, outputAppXDirectory, appArgs,
+                    inputFolder, manifest, layoutOutput, appArgs,
                     noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, executable, isJson,
                     projectFile, framework, noRestore, cancellationToken);
             }
@@ -604,14 +653,11 @@ internal partial class RunCommand : Command, IShortDescription, ITargetAwareComm
                         }
                     }
 
-                    // Whether winapp generated this directory decides whether it may later delete
-                    // files from it, and this is the only place that knows. Once the default is
-                    // filled in, the two cases are indistinguishable from the path alone.
-                    var layoutReconciliation = outputAppXDirectory is null
-                        ? LayoutReconciliation.Exact
-                        : LayoutReconciliation.Additive;
-
-                    outputAppXDirectory ??= new DirectoryInfo(Path.Combine(inputFolder.FullName, "AppX"));
+                    // Whether winapp owns this directory decides whether it may later delete files
+                    // from it. That travels with the path from the call site (see LayoutOutput):
+                    // once the default is filled in, the cases are indistinguishable from the path.
+                    var outputAppXDirectory = layoutOutput.Resolve(
+                        () => new DirectoryInfo(Path.Combine(inputFolder.FullName, "AppX")));
                     resolvedOutputDir = outputAppXDirectory;
 
                     // Validate that the manifest and output paths are usable (check long path support if needed)
@@ -635,7 +681,7 @@ internal partial class RunCommand : Command, IShortDescription, ITargetAwareComm
                         inputFolder,
                         outputAppXDirectory,
                         taskContext,
-                        layoutReconciliation,
+                        layoutOutput.Reconciliation,
                         clean,
                         executable,
                         runtimeArch,
