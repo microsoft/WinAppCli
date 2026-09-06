@@ -96,7 +96,7 @@ internal class UiScreenshotCommand : Command, IShortDescription
                 }
 
                 var (pixels, w, h) = await uiAutomation.ScreenshotAsync(singleSession, selector, captureScreen, focus, cancellationToken);
-                var pngBytes = EncodePng(pixels, w, h);
+                var pngBytes = PngImage.Encode(pixels, w, h);
 
                 var filePath = output ?? "screenshot.png";
                 var dir = Path.GetDirectoryName(Path.GetFullPath(filePath));
@@ -366,20 +366,6 @@ internal class UiScreenshotCommand : Command, IShortDescription
             appWindows.AddRange(ownedWindows);
 
             return appWindows.Count > 1 ? appWindows : null;
-        }
-
-        private static byte[] EncodePng(byte[] bgraPixels, int width, int height)
-        {
-            using var bitmap = new SKBitmap(width, height, SKColorType.Bgra8888, SKAlphaType.Premul);
-            unsafe
-            {
-                var ptr = (byte*)bitmap.GetPixels().ToPointer();
-                System.Runtime.InteropServices.Marshal.Copy(bgraPixels, 0, (nint)ptr, bgraPixels.Length);
-            }
-
-            using var image = SKImage.FromBitmap(bitmap);
-            using var data = image.Encode(SKEncodedImageFormat.Png, 100);
-            return data.ToArray();
         }
     }
 }

@@ -6,6 +6,7 @@ using System.CommandLine.Invocation;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
+using WinApp.Cli.ExecutionTargets.Abstractions;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
 
@@ -13,9 +14,6 @@ namespace WinApp.Cli.Commands;
 
 internal class UiRecordCommand : Command, IShortDescription
 {
-    private const int DefaultFrameArtifactMaxEdge = 1280;
-    private const int MaximumFrameArtifactMaxEdge = 4096;
-
     internal static readonly Option<bool> FramesOption = new("--frames")
     {
         Description = "Write timestamped JPEGs, frames.ndjson, and manifest.json to <output-name>.frames. Supports 1-30 fps and max-edge 64-4096 (default 1280), with a 1 GiB frame-data cap.",
@@ -54,71 +52,109 @@ internal class UiRecordCommand : Command, IShortDescription
         // Prevents the stdin monitor from racing disposal of its cancellation source.
         private volatile bool _stdinMonitorStopped;
 
+        /// <summary>The console this verb reports through, shared with any derived verb.</summary>
+        protected IAnsiConsole Output => ansiConsole;
+
+        /// <summary>
+        /// What is being recorded, resolved from this verb's own command line.
+        /// </summary>
+        /// <remarks>
+        /// The one thing that differs between recording an app on this desktop and recording an
+        /// execution target's whole desktop. Everything after it — option validation, output paths,
+        /// cadence, frame artifacts, partial-output handling, and the JSON contract — is identical,
+        /// and is shared rather than reimplemented so the two can never drift apart.
+        /// </remarks>
+        protected virtual Task<UiTarget> ResolveSubjectAsync(
+            ParseResult parseResult,
+            CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(parseResult);
+
+            return targetResolver.ResolveAsync(
+                parseResult.GetValue(SharedUiOptions.AppOption),
+                parseResult.GetValue(SharedUiOptions.WindowOption),
+                cancellationToken);
+        }
+
+        /// <summary>Checks that the command line names something to record.</summary>
+        /// <returns>False when it does not, after reporting why.</returns>
+        protected virtual bool TrySelectSubject(ParseResult parseResult, bool json)
+        {
+            ArgumentNullException.ThrowIfNull(parseResult);
+
+            if (!string.IsNullOrWhiteSpace(parseResult.GetValue(SharedUiOptions.AppOption)) ||
+                parseResult.GetValue(SharedUiOptions.WindowOption) is not null)
+            {
+                return true;
+            }
+
+            UiErrors.MissingApp(logger, json);
+            return false;
+        }
+
+        /// <summary>The element whose region to crop to, or null for the whole window.</summary>
+        protected virtual string? ElementSelector(ParseResult parseResult)
+        {
+            ArgumentNullException.ThrowIfNull(parseResult);
+
+            return parseResult.GetValue(SharedUiOptions.SelectorArgument);
+        }
+
+        /// <summary>Whether to capture the screen region rather than the window's own frames.</summary>
+        protected virtual bool CaptureScreen(ParseResult parseResult)
+        {
+            ArgumentNullException.ThrowIfNull(parseResult);
+
+            return parseResult.GetValue(SharedUiOptions.CaptureScreenOption);
+        }
+
+        /// <summary>How the recording is described while it runs.</summary>
+        protected virtual string DescribeSubject(UiTarget uiTarget)
+        {
+            ArgumentNullException.ThrowIfNull(uiTarget);
+
+            return $"\"{uiTarget.WindowTitle ?? ""}\" (PID {uiTarget.ProcessId})";
+        }
+
+        /// <summary>
+        /// Whether this recording must never restore, activate, or foreground the window.
+        /// </summary>
+        /// <remarks>
+        /// False for <c>ui record</c>, which records an app the user pointed at and is watching: a
+        /// minimized window is raised, and a blank <c>PrintWindow</c> frame is recovered from the
+        /// foreground, because the alternative is failing a recording the user is standing in front
+        /// of. A verb that advertises taking no focus overrides this.
+        /// </remarks>
+        protected virtual bool NoActivation(ParseResult parseResult) => false;
+
+        /// <summary>The execution target that produced the recording, or null for this machine.</summary>
+        protected virtual ExecutionTargetScope? Scope => null;
+
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
             var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
             var quiet = parseResult.GetValue(WinAppRootCommand.QuietOption);
-            var selector = parseResult.GetValue(SharedUiOptions.SelectorArgument);
-            var app = parseResult.GetValue(SharedUiOptions.AppOption);
-            var window = parseResult.GetValue(SharedUiOptions.WindowOption);
-            var durationSec = parseResult.GetValue(SharedUiOptions.DurationSecOption);
-            var fps = parseResult.GetValue(SharedUiOptions.FpsOption);
-            var maxEdge = parseResult.GetValue(SharedUiOptions.MaxEdgeOption);
-            var maxEdgeExplicit = parseResult.GetResult(SharedUiOptions.MaxEdgeOption)?.Implicit == false;
-            var captureScreen = parseResult.GetValue(SharedUiOptions.CaptureScreenOption);
-            var output = parseResult.GetValue(SharedUiOptions.OutputOption);
-            var frames = parseResult.GetValue(FramesOption);
+            var selector = ElementSelector(parseResult);
+            var captureScreen = CaptureScreen(parseResult);
 
-            // Validate options before resolving the target.
-            if (durationSec < 0)
+            // Validate every option before resolving the subject, so an unusable request never
+            // starts anything it would then have to abandon.
+            if (UiRecordOptionValidator.Validate(parseResult, out var validated) is { } optionError)
             {
-                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--duration-sec must be 0 or greater.");
-                logger.LogError("{Symbol} --duration-sec must be 0 or greater.", UiSymbols.Error);
+                UiJsonError.Emit(
+                    json,
+                    optionError.Code,
+                    optionError.Message,
+                    errorOut: parseResult.InvocationConfiguration.Error,
+                    recoveryHint: optionError.RecoveryHint);
+                logger.LogError("{Symbol} {Message}", UiSymbols.Error, optionError.Message);
                 return 1;
-            }
-            if (durationSec > 86400)
-            {
-                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--duration-sec must not exceed 86400 (24 hours).");
-                logger.LogError("{Symbol} --duration-sec must not exceed 86400 (24 hours).", UiSymbols.Error);
-                return 1;
-            }
-            if (fps < 1)
-            {
-                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--fps must be at least 1.");
-                logger.LogError("{Symbol} --fps must be at least 1.", UiSymbols.Error);
-                return 1;
-            }
-            if (!frames && maxEdge != 0 && maxEdge < 64)
-            {
-                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--max-edge must be 0 (unbounded) or >= 64 (encoder minimum).");
-                logger.LogError("{Symbol} --max-edge must be 0 (unbounded) or >= 64 (encoder minimum).", UiSymbols.Error);
-                return 1;
-            }
-            if (frames)
-            {
-                if (fps > 30)
-                {
-                    UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--frames supports --fps values from 1 through 30.");
-                    logger.LogError("{Symbol} --frames supports --fps values from 1 through 30.", UiSymbols.Error);
-                    return 1;
-                }
-                if (maxEdgeExplicit && (maxEdge < 64 || maxEdge > MaximumFrameArtifactMaxEdge))
-                {
-                    const string message = "--frames supports --max-edge values from 64 through 4096; omit --max-edge to use 1280.";
-                    UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, message);
-                    logger.LogError("{Symbol} {Message}", UiSymbols.Error, message);
-                    return 1;
-                }
-
-                if (!maxEdgeExplicit)
-                {
-                    maxEdge = DefaultFrameArtifactMaxEdge;
-                }
             }
 
-            if (string.IsNullOrWhiteSpace(app) && window is null)
+            var (filePath, framesDirectory, maxEdge, durationSec, fps) = validated!;
+
+            if (!TrySelectSubject(parseResult, json))
             {
-                UiErrors.MissingApp(logger, json);
                 return 1;
             }
 
@@ -127,42 +163,8 @@ internal class UiRecordCommand : Command, IShortDescription
             _stdinMonitorStopped = false;
             try
             {
-                // Resolve output path inside error handling so path errors produce structured output.
-                string filePath;
-                string? framesDirectory = null;
                 try
                 {
-                    // Avoid collisions between concurrent recordings using the default path.
-                    filePath = Path.GetFullPath(
-                        output ?? $"recording-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.mp4");
-                    framesDirectory = frames ? GetFramesDirectory(filePath) : null;
-
-                    if (framesDirectory is not null)
-                    {
-                        if (Path.Exists(filePath))
-                        {
-                            UiJsonError.Emit(
-                                json,
-                                UiJsonError.CodeOutputExists,
-                                $"MP4 output already exists: {filePath}",
-                                errorOut: parseResult.InvocationConfiguration.Error,
-                                recoveryHint: "Choose a new --output path; recording never replaces existing artifacts.");
-                            logger.LogError("{Symbol} MP4 output already exists: {Path}", UiSymbols.Error, filePath);
-                            return 1;
-                        }
-                        if (Path.Exists(framesDirectory))
-                        {
-                            UiJsonError.Emit(
-                                json,
-                                UiJsonError.CodeOutputExists,
-                                $"Frame artifact output already exists: {framesDirectory}",
-                                errorOut: parseResult.InvocationConfiguration.Error,
-                                recoveryHint: "Choose a new --output path; the derived frame directory already exists and is never replaced.");
-                            logger.LogError("{Symbol} Frame artifact output already exists: {Path}", UiSymbols.Error, framesDirectory);
-                            return 1;
-                        }
-                    }
-
                     var dir = Path.GetDirectoryName(filePath);
                     if (dir is not null)
                     {
@@ -176,7 +178,7 @@ internal class UiRecordCommand : Command, IShortDescription
                     return 1;
                 }
 
-                var uiTarget = await targetResolver.ResolveAsync(app, window, cancellationToken);
+                var uiTarget = await ResolveSubjectAsync(parseResult, cancellationToken);
 
                 var isStdinRedirected = s_isInputRedirectedOverride?.Invoke() ?? Console.IsInputRedirected;
 
@@ -188,7 +190,7 @@ internal class UiRecordCommand : Command, IShortDescription
                     var destinations = framesDirectory is null
                         ? filePath
                         : $"{filePath}; frame artifacts: {framesDirectory}";
-                    ansiConsole.MarkupLine($"[grey]Recording \"{Markup.Escape(uiTarget.WindowTitle ?? "")}\" (PID {uiTarget.ProcessId}) to {Markup.Escape(destinations)} — until {until}, {fps} fps…[/]");
+                    ansiConsole.MarkupLine($"[grey]Recording {Markup.Escape(DescribeSubject(uiTarget))} to {Markup.Escape(destinations)} — until {until}, {fps} fps…[/]");
                 }
 
                 // Stops received before the first frame wait for encoder readiness.
@@ -229,6 +231,7 @@ internal class UiRecordCommand : Command, IShortDescription
                     MaxEdge = maxEdge,
                     CaptureScreen = captureScreen,
                     FramesDirectory = framesDirectory,
+                    NoActivation = NoActivation(parseResult),
                 };
 
                 var result = await recordingService.RecordAsync(uiTarget, selector, options, linkedCts.Token, OnRecordingStarted);
@@ -252,6 +255,7 @@ internal class UiRecordCommand : Command, IShortDescription
                         StopReason = result.StopReason,
                         FrameArtifacts = result.FrameArtifacts,
                         Warnings = result.Warnings,
+                        ExecutionTarget = Scope,
                     };
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(payload, UiJsonContext.Default.UiRecordResult));
