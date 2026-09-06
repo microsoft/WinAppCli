@@ -53,52 +53,76 @@ internal partial class RunCommand
             DirectoryInfo layout;
             MsixIdentityResult? identity = null;
 
+            // Held from materialization until the guest deployment has finished consuming the layout.
+            // Releasing it after materialization would leave a window in which a second run could
+            // rewrite the directory, and this run would then deploy the other run's files.
+            //
+            // It is released at the same points as the guest mutation lease, and for the same reason:
+            // once the layout has been copied into the guest and registered there, nothing this run
+            // does afterward reads the host directory again, and a long-running app must never keep
+            // another winapp workflow waiting on it.
+            LayoutLease? layoutLease = null;
+
             try
             {
-                resolvedManifest = ResolveManifestForSandbox(inputFolder, manifest);
-                layout = outputAppXDirectory ?? new DirectoryInfo(
-                    TargetPathSafety.CombineInsideRoot(inputFolder.FullName, "AppX"));
-
-                LongPathHelper.ValidatePathLength(resolvedManifest.FullName);
-                LongPathHelper.ValidatePathLength(layout.FullName);
-
-                var materializeError = (string?)null;
-                var materialized = await statusService.ExecuteWithStatusAsync(
-                    "Preparing application layout...",
-                    async (taskContext, ct) =>
-                    {
-                        try
-                        {
-                            identity = await msixService.MaterializeLooseLayoutAsync(
-                                resolvedManifest, inputFolder, layout, taskContext,
-                                executable, projectFile, framework, noRestore, ct);
-                            return (0, $"{identity.PackageName} ready to deploy");
-                        }
-                        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                        {
-                            throw;
-                        }
-                        catch (Exception ex) when (ex is not OperationCanceledException)
-                        {
-                            materializeError = ex.Message;
-                            return (1, $"{UiSymbols.Error} Failed to prepare the application: {ex.Message}");
-                        }
-                    },
-                    cancellationToken);
-
-                if (materialized != 0 || identity is null)
+                try
                 {
-                    return Fail(materializeError ?? "Failed to prepare the application.", isJson);
+                    resolvedManifest = ResolveManifestForSandbox(inputFolder, manifest);
+
+                    // Only the AppX directory winapp generates for itself may have files removed from
+                    // it. A directory the caller named is theirs, and is only ever added to.
+                    var layoutReconciliation = outputAppXDirectory is null
+                        ? LayoutReconciliation.Exact
+                        : LayoutReconciliation.Additive;
+
+                    layout = outputAppXDirectory ?? new DirectoryInfo(
+                        TargetPathSafety.CombineInsideRoot(inputFolder.FullName, "AppX"));
+
+                    LongPathHelper.ValidatePathLength(resolvedManifest.FullName);
+                    LongPathHelper.ValidatePathLength(layout.FullName);
+
+                    layoutLease = LayoutLease.Acquire(
+                        winappDirectoryService.GetGlobalWinappDirectory(),
+                        layout,
+                        cancellationToken);
+
+                    var materializeError = (string?)null;
+                    var materialized = await statusService.ExecuteWithStatusAsync(
+                        "Preparing application layout...",
+                        async (taskContext, ct) =>
+                        {
+                            try
+                            {
+                                identity = await msixService.MaterializeLooseLayoutAsync(
+                                    resolvedManifest, inputFolder, layout, taskContext, layoutReconciliation,
+                                    executable, projectFile, framework, noRestore, ct);
+                                return (0, $"{identity.PackageName} ready to deploy");
+                            }
+                            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                            {
+                                throw;
+                            }
+                            catch (Exception ex) when (ex is not OperationCanceledException)
+                            {
+                                materializeError = ex.Message;
+                                return (1, $"{UiSymbols.Error} Failed to prepare the application: {ex.Message}");
+                            }
+                        },
+                        cancellationToken);
+
+                    if (materialized != 0 || identity is null)
+                    {
+                        return Fail(materializeError ?? "Failed to prepare the application.", isJson);
+                    }
                 }
-            }
-            catch (OperationCanceledException)
-            {
-                return -1;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or FileNotFoundException)
-            {
-                return Fail(ex.Message, isJson);
-            }
+                catch (OperationCanceledException)
+                {
+                    return -1;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or FileNotFoundException or TimeoutException)
+                {
+                    return Fail(ex.Message, isJson);
+                }
 
             var options = new GuestRunOptions(
                 noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, isJson, appArgs);
@@ -152,7 +176,13 @@ internal partial class RunCommand
                 // --with-alias is documented as running the app "in the current terminal with
                 // inherited stdin/stdout/stderr". Output already came back; without this, stdin did
                 // not, so a console app launched this way could never be driven.
-                forwardStandardInput: withAlias);
+                forwardStandardInput: withAlias,
+                layoutLease: layoutLease);
+            }
+            finally
+            {
+                layoutLease?.Dispose();
+            }
         }
 
         /// <summary>
@@ -268,7 +298,8 @@ internal partial class RunCommand
             Func<GuestDeployment, Dictionary<string, string>, GuestExecRequest> buildRequest,
             CancellationToken cancellationToken,
             bool guestProducesRunResult = true,
-            bool forwardStandardInput = false)
+            bool forwardStandardInput = false,
+            LayoutLease? layoutLease = null)
         {
             try
             {
@@ -361,6 +392,10 @@ internal partial class RunCommand
                             // exactly as an unsplit call's success would have been.
                             target.ReleaseMutationLease();
 
+                            // The layout has been deployed and registered -- consumed -- so this run
+                            // no longer depends on the host directory holding still.
+                            layoutLease?.Dispose();
+
                             if (isJson && registration.CapturedOutput is not null)
                             {
                                 PublishGuestJson(registration.CapturedOutput, target);
@@ -381,6 +416,11 @@ internal partial class RunCommand
                 // cover: a long-running app would otherwise block every other winapp workflow
                 // against this target.
                 target.ReleaseMutationLease();
+
+                // Same boundary for the host layout: deployment copied it into the guest and
+                // registration consumed it there. Holding it across the application's lifetime would
+                // block every other run against this build output for as long as the app stays open.
+                layoutLease?.Dispose();
 
                 var ownerEnvironment = GuestOwnerContext.WithOwner(
                     environment: null,

@@ -79,7 +79,7 @@ internal partial class RunCommand : Command, IShortDescription, ITargetAwareComm
 
         OutputAppXDirectoryOption = new Option<DirectoryInfo?>("--output-appx-directory")
         {
-            Description = "Output directory for the loose layout package. If not specified, a directory named AppX inside the input directory will be used. Files winapp staged there are kept matching the build, so a file your app no longer contains is removed on the next run; files winapp did not put there are left alone."
+            Description = "Output directory for the loose layout package. If not specified, a directory named AppX inside the input directory is used, and winapp keeps it matching the build — a file your app no longer contains is removed from it on the next run. A directory you name here is only ever added to: winapp never deletes anything from it, so point it at a fresh path when files removed from your app must disappear from the layout."
         };
 
         ArgsOption = new Option<string>("--args")
@@ -217,6 +217,7 @@ internal partial class RunCommand : Command, IShortDescription, ITargetAwareComm
         ExecutionTargetOrchestrator executionTargetOrchestrator,
         GuestApplicationRunner guestApplicationRunner,
         TargetRuntimeService targetRuntimeService,
+        IWinappDirectoryService winappDirectoryService,
         ILogger<RunCommand> logger) : AsynchronousCommandLineAction
     {
         // Test seams for the execution-alias launch path. They isolate the two operating-system
@@ -603,12 +604,29 @@ internal partial class RunCommand : Command, IShortDescription, ITargetAwareComm
                         }
                     }
 
+                    // Whether winapp generated this directory decides whether it may later delete
+                    // files from it, and this is the only place that knows. Once the default is
+                    // filled in, the two cases are indistinguishable from the path alone.
+                    var layoutReconciliation = outputAppXDirectory is null
+                        ? LayoutReconciliation.Exact
+                        : LayoutReconciliation.Additive;
+
                     outputAppXDirectory ??= new DirectoryInfo(Path.Combine(inputFolder.FullName, "AppX"));
                     resolvedOutputDir = outputAppXDirectory;
 
                     // Validate that the manifest and output paths are usable (check long path support if needed)
                     LongPathHelper.ValidatePathLength(resolvedManifest.FullName);
                     LongPathHelper.ValidatePathLength(outputAppXDirectory.FullName);
+
+                    // Held from materialization through registration -- the point at which Windows has
+                    // taken its own copy of the layout's contents. A second run against the same
+                    // directory could otherwise replace its contents in between, and this run would
+                    // register the other one's app. It is released before the run waits on the
+                    // application, so an open app never blocks another run against this build output.
+                    using var layoutLease = LayoutLease.Acquire(
+                        winappDirectoryService.GetGlobalWinappDirectory(),
+                        outputAppXDirectory,
+                        cancellationToken);
 
                     // Step 2: Create and register the debug identity
                     taskContext.AddDebugMessage($"{UiSymbols.Package} Creating debug identity...");
@@ -617,6 +635,7 @@ internal partial class RunCommand : Command, IShortDescription, ITargetAwareComm
                         inputFolder,
                         outputAppXDirectory,
                         taskContext,
+                        layoutReconciliation,
                         clean,
                         executable,
                         runtimeArch,

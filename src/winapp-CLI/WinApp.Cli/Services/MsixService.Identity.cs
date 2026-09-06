@@ -114,12 +114,12 @@ internal partial class MsixService
         return new MsixIdentityResult(debugIdentity.PackageName, debugIdentity.Publisher, debugIdentity.ApplicationId);
     }
 
-    public Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, bool clean = false, string? executable = null, string? runtimeArch = null, FileInfo? projectFile = null, string? framework = null, bool noRestore = false, CancellationToken cancellationToken = default)
-        => BuildLooseLayoutAsync(appxManifestPath, inputDirectory, outputAppXDirectory, taskContext, LooseLayoutOutcome.Registered, clean, executable, runtimeArch, projectFile, framework, noRestore, cancellationToken);
+    public Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, LayoutReconciliation reconciliation, bool clean = false, string? executable = null, string? runtimeArch = null, FileInfo? projectFile = null, string? framework = null, bool noRestore = false, CancellationToken cancellationToken = default)
+        => BuildLooseLayoutAsync(appxManifestPath, inputDirectory, outputAppXDirectory, taskContext, LooseLayoutOutcome.Registered, reconciliation, clean, executable, runtimeArch, projectFile, framework, noRestore, cancellationToken);
 
     /// <inheritdoc/>
-    public Task<MsixIdentityResult> MaterializeLooseLayoutAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, string? executable = null, FileInfo? projectFile = null, string? framework = null, bool noRestore = false, CancellationToken cancellationToken = default)
-        => BuildLooseLayoutAsync(appxManifestPath, inputDirectory, outputAppXDirectory, taskContext, LooseLayoutOutcome.Materialized, clean: false, executable, runtimeArch: null, projectFile, framework, noRestore, cancellationToken);
+    public Task<MsixIdentityResult> MaterializeLooseLayoutAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, LayoutReconciliation reconciliation, string? executable = null, FileInfo? projectFile = null, string? framework = null, bool noRestore = false, CancellationToken cancellationToken = default)
+        => BuildLooseLayoutAsync(appxManifestPath, inputDirectory, outputAppXDirectory, taskContext, LooseLayoutOutcome.Materialized, reconciliation, clean: false, executable, runtimeArch: null, projectFile, framework, noRestore, cancellationToken);
 
     /// <summary>How far <see cref="BuildLooseLayoutAsync"/> takes a loose layout.</summary>
     private enum LooseLayoutOutcome
@@ -147,7 +147,7 @@ internal partial class MsixService
     /// to reproduce locally.
     /// </para>
     /// </remarks>
-    private async Task<MsixIdentityResult> BuildLooseLayoutAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, LooseLayoutOutcome outcome, bool clean, string? executable, string? runtimeArch, FileInfo? projectFile, string? framework, bool noRestore, CancellationToken cancellationToken)
+    private async Task<MsixIdentityResult> BuildLooseLayoutAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, LooseLayoutOutcome outcome, LayoutReconciliation reconciliation, bool clean, string? executable, string? runtimeArch, FileInfo? projectFile, string? framework, bool noRestore, CancellationToken cancellationToken)
     {
         // Validate inputs
         if (!appxManifestPath.Exists)
@@ -191,20 +191,13 @@ internal partial class MsixService
             {
                 taskContext.AddDebugMessage($"{UiSymbols.Files} Using appxrecipe for layout: {recipeFile.Name}");
 
-                // winapp generates `<build output>\AppX` itself, so it can be reconciled exactly. Any
-                // other path came from --output-appx-directory and may hold files that are not
-                // winapp's, so there only previously staged files may be removed.
-                var reconciliation = IsGeneratedDefaultLayout(inputDirectory, outputAppXDirectory)
-                    ? LayoutReconciliation.Exact
-                    : LayoutReconciliation.Attributed;
-
                 await CopyFilesFromRecipeAsync(recipeFile, outputAppXDirectory, taskContext, reconciliation, cancellationToken);
             }
             else
             {
                 // No recipe — fall back to incremental copy from input directory
                 taskContext.AddDebugMessage($"{UiSymbols.Warning} No .appxrecipe found, falling back to file copy");
-                SyncFilesToOutputDirectory(inputDirectory, outputAppXDirectory, appxManifestPath, taskContext);
+                SyncFilesToOutputDirectory(inputDirectory, outputAppXDirectory, appxManifestPath, taskContext, reconciliation);
             }
 
             var identity = ParseAppxManifestAsync(manifestContent);
@@ -261,7 +254,7 @@ internal partial class MsixService
         // Snapshot the previously-registered manifest BEFORE Sync overwrites it (issue #537).
         var previousRawManifestBytes = TryReadExistingLayoutManifestBytes(outputAppXDirectory);
 
-        SyncFilesToOutputDirectory(inputDirectory, outputAppXDirectory, appxManifestPath, taskContext);
+        SyncFilesToOutputDirectory(inputDirectory, outputAppXDirectory, appxManifestPath, taskContext, reconciliation);
 
         // SyncFilesToOutputDirectory renames Package.appxmanifest → appxmanifest.xml
         var copiedManifestName = string.Equals(appxManifestPath.Name, "Package.appxmanifest", StringComparison.OrdinalIgnoreCase)
@@ -394,23 +387,6 @@ internal partial class MsixService
     }
 
     /// <summary>
-    /// True when the layout is the <c>AppX</c> directory winapp creates next to the build output —
-    /// the path both <c>winapp run</c> and its execution-target variant default to when the caller
-    /// did not supply <c>--output-appx-directory</c>.
-    /// </summary>
-    /// <remarks>
-    /// Ownership is decided from the path rather than from a flag threaded down from the command,
-    /// so a caller that explicitly passes the same directory gets identical treatment — it is the
-    /// same directory with the same history either way.
-    /// </remarks>
-    private static bool IsGeneratedDefaultLayout(DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory)
-    {
-        var generated = LayoutAttributionStore.CanonicalizeLayoutPath(Path.Combine(inputDirectory.FullName, "AppX"));
-        var actual = LayoutAttributionStore.CanonicalizeLayoutPath(outputAppXDirectory.FullName);
-        return string.Equals(generated, actual, StringComparison.OrdinalIgnoreCase);
-    }
-
-    /// <summary>
     /// Layout files that are never pruned, even when the recipe does not name them.
     /// </summary>
     /// <remarks>
@@ -423,28 +399,6 @@ internal partial class MsixService
         "appxmanifest.xml",
         "resources.pri",
     };
-
-    /// <summary>How much of an existing layout directory a materialization is allowed to remove.</summary>
-    internal enum LayoutReconciliation
-    {
-        /// <summary>
-        /// A staging directory winapp just created for this operation. Nothing in it predates the
-        /// run, so there is nothing to reconcile and no attribution worth recording.
-        /// </summary>
-        None,
-
-        /// <summary>
-        /// winapp's own generated <c>AppX</c> layout. winapp creates this directory, MSBuild never
-        /// cleans it, and nothing else writes to it, so it can be made to match the build exactly.
-        /// </summary>
-        Exact,
-
-        /// <summary>
-        /// A directory the user named. It may hold files winapp never staged — those must survive,
-        /// so only paths winapp previously recorded as staged are removable.
-        /// </summary>
-        Attributed,
-    }
 
     /// <summary>One validated recipe entry: an existing source file and where it goes in the layout.</summary>
     private readonly record struct RecipeEntry(string SourcePath, string PackagePath);
@@ -597,32 +551,38 @@ internal partial class MsixService
     }
 
     /// <summary>
-    /// Copies the files a <c>.build.appxrecipe</c> lists into the AppX layout directory, then removes
-    /// layout files the app no longer contains.
+    /// Copies the files a <c>.build.appxrecipe</c> lists into the AppX layout directory, then — for a
+    /// layout winapp generated itself — removes layout files the app no longer contains.
     /// </summary>
     /// <remarks>
-    /// The layout is winapp's artifact — winapp creates it and MSBuild never sees it, so
-    /// <c>dotnet clean</c> does not empty it. Copying without reconciling therefore turned the layout
-    /// into an ever-growing union of every build ever materialized into it: a file deleted from the
-    /// project stayed in the package and, because an execution target mirrors this layout exactly,
-    /// stayed in the guest too.
+    /// The generated layout is winapp's artifact: winapp creates it and MSBuild never sees it, so
+    /// <c>dotnet clean</c> does not empty it. Copying without reconciling therefore turned it into an
+    /// ever-growing union of every build ever materialized into it — a file deleted from the project
+    /// stayed in the package and, because an execution target mirrors this layout exactly, stayed in
+    /// the guest too.
     /// <para>
-    /// How much may be removed depends on who owns the directory. winapp's own generated layout can be
-    /// made to match the build exactly. A directory the user named may contain files winapp never put
-    /// there, so only paths recorded in <see cref="LayoutAttributionStore"/> as previously staged are
-    /// removable and anything unrecognized survives.
+    /// Deletion is confined to that generated layout. A directory the caller named may hold files
+    /// winapp never put there and cannot recognize, so it is only ever copied into.
     /// </para>
     /// </remarks>
-    private async Task CopyFilesFromRecipeAsync(
+    private static async Task CopyFilesFromRecipeAsync(
         FileInfo recipeFile,
         DirectoryInfo outputDir,
         TaskContext taskContext,
         LayoutReconciliation reconciliation,
         CancellationToken cancellationToken)
     {
-        // Validate the destination before creating anything, so a layout path that is refused never
-        // gets a directory created for it as a side effect.
-        EnsureLayoutPathHasNoReparsePoint(outputDir);
+        // A `None` layout is a staging directory winapp just created, commonly under the system temp
+        // directory, which on some machines is reached through a junction. Nothing there is pruned,
+        // so the link checks that make deletion safe would only reject a legitimate path.
+        var enforceRealPaths = reconciliation != LayoutReconciliation.None;
+
+        if (enforceRealPaths)
+        {
+            // Validated before anything is created, so a layout path that is refused never gets a
+            // directory created for it as a side effect.
+            EnsureLayoutPathHasNoReparsePoint(outputDir);
+        }
 
         string recipeContent;
         try
@@ -643,12 +603,12 @@ internal partial class MsixService
         // NOT for the build output it copies from: a .pdb, .deps.json or the recipe itself are absent
         // from it. If the layout contains the build output, treating the recipe as the complete
         // desired set would delete the build, so nothing is reconciled in that shape.
-        if (reconciliation != LayoutReconciliation.None && IsPathInsideDirectory(recipeFile.DirectoryName, outputDir.FullName))
+        if (reconciliation == LayoutReconciliation.Exact && IsPathInsideDirectory(recipeFile.DirectoryName, outputDir.FullName))
         {
             taskContext.AddDebugMessage(
                 $"{UiSymbols.Warning} Layout directory contains the build output; leaving files the recipe does not list in place. " +
                 "Use a separate --output-appx-directory if files removed from the app must disappear from the layout.");
-            reconciliation = LayoutReconciliation.None;
+            reconciliation = LayoutReconciliation.Additive;
         }
 
         if (!outputDir.Exists)
@@ -657,42 +617,25 @@ internal partial class MsixService
             outputDir.Refresh();
         }
 
-        // Re-check after Create: the path may have been a link created between the first check and now.
-        EnsureLayoutPathHasNoReparsePoint(outputDir);
-
-        if (reconciliation == LayoutReconciliation.None)
+        if (enforceRealPaths)
         {
-            var staged = CopyRecipeEntries(entries, outputDir, out var stagedCopied, out var stagedSkipped);
+            // Re-checked after Create: the path may have been swapped for a link since the first check.
+            EnsureLayoutPathHasNoReparsePoint(outputDir);
+        }
+
+        var desired = CopyRecipeEntries(entries, outputDir, enforceRealPaths, out var copied, out var skipped);
+
+        if (reconciliation != LayoutReconciliation.Exact)
+        {
             taskContext.AddDebugMessage(
-                $"{UiSymbols.Check} AppX layout from recipe: {stagedCopied} copied, {stagedSkipped} unchanged, 0 removed");
-            _ = staged;
+                $"{UiSymbols.Check} AppX layout from recipe: {copied} copied, {skipped} unchanged, 0 removed");
             return;
         }
 
-        var store = new LayoutAttributionStore(winappDirectoryService.GetGlobalWinappDirectory());
-
-        // Held across read, copy, prune and write: two concurrent runs against one layout would
-        // otherwise race, and the loser could record a set describing neither run.
-        using var layoutLock = store.AcquireLock(outputDir.FullName, cancellationToken);
-
-        var previouslyAttributed = store.Read(outputDir.FullName);
-
-        // Copy first. A copy that throws part-way leaves the layout as complete as it was and the
-        // attribution record untouched, so the next run still knows exactly what winapp staged.
-        var desired = CopyRecipeEntries(entries, outputDir, out var copied, out var skipped);
-
+        // Re-checked immediately before the destructive phase, for the same reason as above.
         EnsureLayoutPathHasNoReparsePoint(outputDir);
 
-        var (removed, unremovable) = PruneLayout(outputDir, desired, previouslyAttributed, reconciliation, taskContext);
-
-        // Anything winapp staged and could not remove is still winapp's, still present, and must stay
-        // attributed so the next run retries it rather than adopting it as an unknown file.
-        var nowAttributed = new HashSet<string>(desired, StringComparer.OrdinalIgnoreCase);
-        nowAttributed.UnionWith(unremovable);
-
-        // Published only after copy and prune both finished, so the record always describes a layout
-        // that actually exists on disk.
-        store.Write(outputDir.FullName, nowAttributed);
+        var (removed, unremovable) = PruneLayout(outputDir, desired, taskContext);
 
         if (unremovable.Count > 0)
         {
@@ -713,7 +656,13 @@ internal partial class MsixService
     /// Copies every validated entry into the layout and returns the set of package-relative paths
     /// that now make up the app, which is both the copy result and the desired state to reconcile to.
     /// </summary>
-    private static HashSet<string> CopyRecipeEntries(List<RecipeEntry> entries, DirectoryInfo outputDir, out int copied, out int skipped)
+    /// <remarks>
+    /// Each destination is re-checked for links immediately before it is written. Validating only the
+    /// layout root is not enough: a junction at <c>Assets</c> inside the layout would send
+    /// <c>Assets\logo.png</c> through to whatever it points at, so a copy the caller believes is
+    /// confined to the layout could overwrite a file anywhere on the machine.
+    /// </remarks>
+    private static HashSet<string> CopyRecipeEntries(List<RecipeEntry> entries, DirectoryInfo outputDir, bool enforceRealPaths, out int copied, out int skipped)
     {
         var desired = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         copied = 0;
@@ -738,11 +687,63 @@ internal partial class MsixService
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+
+            if (enforceRealPaths)
+            {
+                EnsureDestinationIsInsideLayout(outputDir, destPath);
+            }
+
             File.Copy(entry.SourcePath, destPath, overwrite: true);
             copied++;
         }
 
         return desired;
+    }
+
+    /// <summary>
+    /// Rejects a destination whose own path, or any directory between it and the layout root, is a
+    /// link out of the layout — checked after the directories are created and before the write.
+    /// </summary>
+    private static void EnsureDestinationIsInsideLayout(DirectoryInfo outputDir, string destPath)
+    {
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(outputDir.FullName));
+        var current = Path.GetFullPath(destPath);
+
+        while (true)
+        {
+            if (IsReparsePoint(current))
+            {
+                throw new InvalidOperationException(
+                    $"Refusing to write '{destPath}' because '{current}' is a symbolic link or junction. " +
+                    "A link inside an AppX layout points writes outside it. Remove the link and try again.");
+            }
+
+            var parent = Path.GetDirectoryName(current);
+
+            if (parent is null || string.Equals(Path.TrimEndingDirectorySeparator(parent), root, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            current = parent;
+        }
+    }
+
+    /// <summary>
+    /// True when the path exists and is a link. Attributes are read by path rather than through
+    /// <see cref="FileInfo"/>, whose <c>Exists</c> is false for a directory and would silently skip
+    /// every intermediate directory in a destination path.
+    /// </summary>
+    private static bool IsReparsePoint(string path)
+    {
+        try
+        {
+            return File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return false;
+        }
     }
 
     /// <summary>Normalizes a recipe PackagePath to the form <see cref="Path.GetRelativePath"/> produces.</summary>
@@ -756,9 +757,9 @@ internal partial class MsixService
     /// Returns how many were removed and which ones could not be.
     /// </summary>
     /// <remarks>
-    /// What counts as removable depends on <paramref name="reconciliation"/>: winapp's own layout is
-    /// reconciled to <paramref name="desired"/> exactly, while a user-named directory only gives up
-    /// paths in <paramref name="previouslyAttributed"/>, so files winapp never staged survive.
+    /// Only ever called for <see cref="LayoutReconciliation.Exact"/> — the <c>AppX</c> directory
+    /// winapp generates for itself — which is reconciled to <paramref name="desired"/> exactly. A
+    /// directory the caller named is never pruned at all, so files winapp never staged survive.
     /// <para>
     /// Directory reparse points are never descended into, so a junction placed in the layout cannot
     /// make this delete files outside it. Files that cannot be deleted are collected rather than
@@ -769,8 +770,6 @@ internal partial class MsixService
     private static (int Removed, List<string> Unremovable) PruneLayout(
         DirectoryInfo outputDir,
         HashSet<string> desired,
-        HashSet<string> previouslyAttributed,
-        LayoutReconciliation reconciliation,
         TaskContext taskContext)
     {
         var removed = 0;
@@ -786,12 +785,6 @@ internal partial class MsixService
                 continue;
             }
 
-            if (reconciliation == LayoutReconciliation.Attributed && !previouslyAttributed.Contains(relativePath))
-            {
-                // Not something winapp staged, so not winapp's to delete.
-                continue;
-            }
-
             // Revalidate immediately before the destructive call: containment is what makes this safe,
             // and the tree can change between enumeration and deletion.
             file.Refresh();
@@ -804,8 +797,12 @@ internal partial class MsixService
                 || file.Attributes.HasFlag(FileAttributes.ReparsePoint)
                 || IsUnderReparsePoint(file, outputDir))
             {
+                // Deleting through a link would reach outside the layout, so it is not deleted — but
+                // it is stale content in a layout about to be registered or deployed, so it is
+                // reported as unremovable and fails the materialization rather than shipping.
                 taskContext.AddDebugMessage(
-                    $"{UiSymbols.Warning} Skipping '{relativePath}': it is a link or no longer inside the layout directory.");
+                    $"{UiSymbols.Warning} Cannot remove '{relativePath}': it is a link or no longer inside the layout directory.");
+                unremovable.Add(relativePath);
                 continue;
             }
 
@@ -928,10 +925,17 @@ internal partial class MsixService
     }
 
     /// <summary>
-    /// Syncs files from the input directory to the output AppX directory using IncrementalCopyHelper.
-    /// Also handles manifest copy and rename.
+    /// Copies the input directory into the layout when there is no recipe to work from, then copies
+    /// and normalizes the manifest.
     /// </summary>
-    private static void SyncFilesToOutputDirectory(DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, FileInfo appxManifestPath, TaskContext taskContext)
+    /// <remarks>
+    /// Without a recipe the input directory is the only description of what the layout should hold,
+    /// and it is a weaker one: it is whatever the build happened to leave on disk. That is good
+    /// enough to copy from and not good enough to delete by, so files are only removed from a layout
+    /// winapp generated itself (<see cref="LayoutReconciliation.Exact"/>). For a directory the caller
+    /// named, the copy is purely additive.
+    /// </remarks>
+    private static void SyncFilesToOutputDirectory(DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, FileInfo appxManifestPath, TaskContext taskContext, LayoutReconciliation reconciliation)
     {
         if (!outputAppXDirectory.Exists)
         {
@@ -941,15 +945,28 @@ internal partial class MsixService
         if (inputDirectory != null && !string.Equals(inputDirectory.FullName.TrimEnd(Path.DirectorySeparatorChar),
             outputAppXDirectory.FullName.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
         {
-            var protectedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            if (reconciliation == LayoutReconciliation.Exact)
             {
-                "appxmanifest.xml",
-                "Package.appxmanifest",
-                "resources.pri"
-            };
+                var protectedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    "appxmanifest.xml",
+                    "Package.appxmanifest",
+                    "resources.pri"
+                };
 
-            var result = IncrementalCopyHelper.SyncDirectory(inputDirectory, outputAppXDirectory, protectedFiles);
-            taskContext.AddDebugMessage($"{UiSymbols.Check} Sync to output directory: {result.Copied} copied, {result.Skipped} unchanged, {result.Deleted} deleted");
+                var result = IncrementalCopyHelper.SyncDirectory(inputDirectory, outputAppXDirectory, protectedFiles);
+                taskContext.AddDebugMessage($"{UiSymbols.Check} Sync to output directory: {result.Copied} copied, {result.Skipped} unchanged, {result.Deleted} deleted");
+            }
+            else
+            {
+                var files = inputDirectory
+                    .EnumerateFiles("*", SearchOption.AllDirectories)
+                    .Select(file => (SourceFile: file, RelativePath: Path.GetRelativePath(inputDirectory.FullName, file.FullName)))
+                    .ToList();
+
+                var result = IncrementalCopyHelper.CopyFiles(files, outputAppXDirectory);
+                taskContext.AddDebugMessage($"{UiSymbols.Check} Copy to output directory: {result.Copied} copied, {result.Skipped} unchanged, 0 deleted");
+            }
         }
 
         // Copy the appxmanifest to the output directory

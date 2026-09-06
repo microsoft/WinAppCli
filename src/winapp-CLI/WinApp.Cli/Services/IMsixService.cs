@@ -80,11 +80,18 @@ internal interface IMsixService
         TaskContext taskContext,
         CancellationToken cancellationToken = default);
 
+    /// <param name="reconciliation">
+    /// Who owns <paramref name="outputAppXDirectory"/>, and therefore whether files it already holds
+    /// may be removed. Callers must pass <see cref="LayoutReconciliation.Exact"/> only for the layout
+    /// directory winapp generated itself; a path the user supplied is
+    /// <see cref="LayoutReconciliation.Additive"/> and is never pruned.
+    /// </param>
     public Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(
         FileInfo appxManifestPath,
         DirectoryInfo inputDirectory,
         DirectoryInfo outputAppXDirectory,
         TaskContext taskContext,
+        LayoutReconciliation reconciliation,
         bool clean = false,
         string? executable = null,
         string? runtimeArch = null,
@@ -103,11 +110,13 @@ internal interface IMsixService
     /// those things are not merely skipped by the caller — they are not reachable from here.
     /// Developer Mode is likewise not required, because nothing is registered.
     /// </remarks>
+    /// <param name="reconciliation">See <see cref="AddLooseLayoutIdentityAsync"/>.</param>
     public Task<MsixIdentityResult> MaterializeLooseLayoutAsync(
         FileInfo appxManifestPath,
         DirectoryInfo inputDirectory,
         DirectoryInfo outputAppXDirectory,
         TaskContext taskContext,
+        LayoutReconciliation reconciliation,
         string? executable = null,
         FileInfo? projectFile = null,
         string? framework = null,
