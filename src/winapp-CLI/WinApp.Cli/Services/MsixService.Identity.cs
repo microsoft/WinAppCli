@@ -988,6 +988,10 @@ internal partial class MsixService
     /// That exclusion compares paths as they are spelled, so an input reached through a link is
     /// refused: the layout could then be inside it without either path saying so.
     /// </para>
+    /// <para>
+    /// A link inside the input is refused too, in every mode, because winapp will not copy through
+    /// one and a layout quietly missing whatever was behind it is not a success worth reporting.
+    /// </para>
     /// </remarks>
     private static void SyncFilesToOutputDirectory(DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, FileInfo appxManifestPath, TaskContext taskContext, LayoutReconciliation reconciliation)
     {
@@ -1048,7 +1052,7 @@ internal partial class MsixService
                     $"('{inputDirectory.FullName}'). Point --output-appx-directory at a directory outside it.");
             }
 
-            var sourceFiles = EnumerateInputFilesForLayout(inputDirectory, outputAppXDirectory, reconciliation, taskContext);
+            var sourceFiles = EnumerateInputFilesForLayout(inputDirectory, outputAppXDirectory);
 
             // The same copier and pruner the recipe path uses, so a layout built without a recipe
             // gets the same per-destination link checks and the same reconciliation.
@@ -1086,17 +1090,19 @@ internal partial class MsixService
 
     /// <summary>
     /// Every file in the build output that belongs in the layout: the whole tree, minus the layout
-    /// itself, and never descending through a directory link.
+    /// itself. Refuses the whole run if any of it is reached through a link.
     /// </summary>
     /// <remarks>
-    /// A directory link in the build output is not descended into, so the copy cannot be walked out
-    /// of the input and back into the layout. Skipping it means the layout will not hold anything
-    /// under that link, which is a visible warning for a layout the caller named and a failure for
-    /// one winapp reconciles exactly — there it would also have to decide which of the layout's own
-    /// files the app still contains, from a description it knows is incomplete.
+    /// winapp never copies through a symbolic link or junction: following one leads outside the
+    /// folder being packaged, and can lead back into the layout. Not following one means the layout
+    /// silently lacks whatever was behind it, which is the same class of bug as the stale content
+    /// this reconciliation exists to remove — an app that registers and runs while missing files.
+    /// Neither is acceptable, so a link in the build output fails the run and says which one, for a
+    /// layout winapp generated and for one the caller named alike. Nothing is copied or deleted
+    /// first: the whole tree is walked before the first write, so the previous layout survives.
     /// </remarks>
     private static List<RecipeEntry> EnumerateInputFilesForLayout(
-        DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, LayoutReconciliation reconciliation, TaskContext taskContext)
+        DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory)
     {
         var entries = new List<RecipeEntry>();
         var pending = new Stack<DirectoryInfo>();
@@ -1115,21 +1121,7 @@ internal partial class MsixService
 
                 if (subdirectory.Attributes.HasFlag(FileAttributes.ReparsePoint))
                 {
-                    if (reconciliation == LayoutReconciliation.Exact)
-                    {
-                        throw new InvalidOperationException(
-                            $"'{subdirectory.FullName}' is a symbolic link or junction. winapp does not copy through " +
-                            "links, so the layout would be missing everything under it, and winapp cannot then tell " +
-                            "which of the layout's own files the app still contains. Replace the link with a real " +
-                            "directory holding those files.");
-                    }
-
-                    taskContext.AddStatusMessage(
-                        $"{UiSymbols.Warning} Skipped '{subdirectory.FullName}' because it is a symbolic link or " +
-                        $"junction: nothing under it was staged into '{outputAppXDirectory.FullName}', so the app " +
-                        "will run without those files. Replace the link with a real directory holding them.");
-
-                    continue;
+                    throw new InvalidOperationException(ThisIsALinkMessage(subdirectory.FullName, inputDirectory));
                 }
 
                 pending.Push(subdirectory);
@@ -1137,12 +1129,28 @@ internal partial class MsixService
 
             foreach (var file in directory.EnumerateFiles())
             {
+                // A linked file is refused for the same reason a linked directory is: its content
+                // comes from outside the folder being packaged, so the layout would not be built
+                // from the app it claims to describe.
+                if (file.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                {
+                    throw new InvalidOperationException(ThisIsALinkMessage(file.FullName, inputDirectory));
+                }
+
                 entries.Add(new RecipeEntry(file.FullName, Path.GetRelativePath(inputDirectory.FullName, file.FullName)));
             }
         }
 
         return entries;
     }
+
+    /// <summary>
+    /// Why a link in the folder being packaged stops the run, and what to do about it.
+    /// </summary>
+    private static string ThisIsALinkMessage(string linkPath, DirectoryInfo inputDirectory) =>
+        $"'{linkPath}' is a symbolic link or junction. winapp will not build an AppX layout through a link, " +
+        $"because the layout would not hold what '{inputDirectory.FullName}' appears to contain and the app " +
+        "would register and run with those files missing. Replace it with the real file or directory.";
 
     /// <summary>
     /// Public entry point for the project-mode <b>unpackaged</b> path: resolves the project's package

@@ -642,6 +642,48 @@ public class RunCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task RunCommand_LayoutFailure_WithJson_NamesTheLinkInTheErrorField()
+    {
+        // winapp refuses to build a layout through a symbolic link or junction, because a layout
+        // quietly missing whatever was behind the link registers and runs with files absent. That
+        // refusal has to reach the caller in every output mode -- a machine-readable run that saw
+        // only success would be the same silence, one level up. This is the --json half.
+        await CreateTestManifestAsync();
+        var linkPath = Path.Combine(_tempDirectory.FullName, "Plugins");
+        _fakeMsixService.ExceptionToThrow = new InvalidOperationException(
+            $"'{linkPath}' is a symbolic link or junction. winapp will not build an AppX layout through a link.");
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--no-launch", "--json"]);
+
+        Assert.AreNotEqual(0, exitCode, "A layout winapp will not build must fail the run");
+
+        var json = ParseJsonOutput();
+        StringAssert.Contains(json.GetProperty("Error").GetString(), linkPath, StringComparison.OrdinalIgnoreCase);
+        Assert.IsFalse(json.TryGetProperty("AUMID", out _),
+            "nothing may be registered when the layout was refused");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_LayoutFailure_WithQuiet_StillFailsAndNamesTheLink()
+    {
+        // The --quiet half. Quiet suppresses progress, not the reason a run produced no app.
+        await CreateTestManifestAsync();
+        var linkPath = Path.Combine(_tempDirectory.FullName, "Plugins");
+        _fakeMsixService.ExceptionToThrow = new InvalidOperationException(
+            $"'{linkPath}' is a symbolic link or junction. winapp will not build an AppX layout through a link.");
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--no-launch", "--quiet"]);
+
+        Assert.AreNotEqual(0, exitCode, "A layout winapp will not build must fail the run");
+        StringAssert.Contains(ConsoleStdErr.ToString(), linkPath, StringComparison.OrdinalIgnoreCase,
+            "quiet suppresses progress, not the reason the run produced no app");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count,
+            "nothing may be launched when the layout was refused");
+    }
+
+    [TestMethod]
     public void ParseOptions_JsonOption_IsParsedCorrectly()
     {
         // Arrange

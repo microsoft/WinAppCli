@@ -1285,20 +1285,25 @@ public class MsixServiceIdentityTests : BaseCommandTests
 
     /// <summary>
     /// A directory link in the build output cannot be walked -- following it could lead anywhere,
-    /// including back into the layout. That leaves an exact layout unable to say what the app
-    /// contains, and it must not delete on a description it knows is partial.
+    /// including back into the layout -- and a layout quietly missing whatever was behind it is the
+    /// same bug as stale content: an app that registers and runs with files missing. Both the
+    /// generated layout and one the caller named refuse it, and say which link stopped them.
     /// </summary>
     [TestMethod]
-    public async Task SyncFilesToOutputDirectory_LinkInTheInput_FailsAnExactLayout()
+    [DataRow("Exact", DisplayName = "the layout winapp generates")]
+    [DataRow("Additive", DisplayName = "a layout the caller named")]
+    public async Task SyncFilesToOutputDirectory_DirectoryLinkInTheInput_IsRefused(string reconciliation)
     {
-        var input = _tempDirectory.CreateSubdirectory("linked-input");
+        var input = _tempDirectory.CreateSubdirectory($"linked-input-{reconciliation}");
         var manifest = new FileInfo(Path.Combine(input.FullName, "AppxManifest.xml"));
         await File.WriteAllTextAsync(manifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(input.FullName, "App.exe"), "exe", TestContext.CancellationToken);
 
-        var outside = _tempDirectory.CreateSubdirectory("linked-input-target");
-        await File.WriteAllTextAsync(Path.Combine(outside.FullName, "elsewhere.txt"), "elsewhere", TestContext.CancellationToken);
+        var outside = _tempDirectory.CreateSubdirectory($"linked-input-target-{reconciliation}");
+        var outsideFile = Path.Combine(outside.FullName, "elsewhere.txt");
+        await File.WriteAllTextAsync(outsideFile, "elsewhere", TestContext.CancellationToken);
 
-        var junction = Path.Combine(input.FullName, "linked");
+        var junction = Path.Combine(input.FullName, "Plugins");
         if (!TryCreateJunction(junction, outside.FullName))
         {
             Assert.Inconclusive("Could not create a directory junction on this machine.");
@@ -1307,22 +1312,24 @@ public class MsixServiceIdentityTests : BaseCommandTests
 
         try
         {
-            var exactLayout = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "linked-exact-layout"));
+            var layout = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, $"linked-layout-{reconciliation}"));
 
             var failure = Assert.ThrowsExactly<TargetInvocationException>(
-                () => InvokeSyncFilesToOutputDirectory(input, exactLayout, manifest));
+                () => InvokeSyncFilesToOutputDirectory(input, layout, manifest, reconciliation));
+
             Assert.IsInstanceOfType<InvalidOperationException>(failure.InnerException);
 
             var message = failure.InnerException!.Message;
             StringAssert.Contains(message, junction, StringComparison.OrdinalIgnoreCase);
 
             // Naming --output-appx-directory here would read as a lossless way out, and it is not:
-            // that layout is missing everything behind the link too, it just does not say so by failing.
+            // that layout is missing everything behind the link too.
             Assert.IsFalse(message.Contains("--output-appx-directory", StringComparison.OrdinalIgnoreCase),
                 $"the error must not offer an explicit layout as a workaround, because it loses the same files: {message}");
 
-            Assert.IsTrue(File.Exists(Path.Combine(outside.FullName, "elsewhere.txt")),
-                "nothing behind the link may be touched");
+            Assert.IsTrue(File.Exists(outsideFile), "nothing behind the link may be touched");
+            Assert.IsFalse(File.Exists(Path.Combine(layout.FullName, "App.exe")),
+                "the run fails before anything is staged");
         }
         finally
         {
@@ -1338,22 +1345,66 @@ public class MsixServiceIdentityTests : BaseCommandTests
     }
 
     /// <summary>
-    /// The same link, staged into a layout the caller named. Nothing is deleted there, so the run
-    /// continues -- but it produces a layout that is quietly missing a whole subtree of the app,
-    /// which is exactly the kind of silence this work exists to remove. It says so, and names the
-    /// subtree it left out.
+    /// The same for a linked file. Copying it would read straight through the link, so the layout
+    /// would be built from content that is not in the folder being packaged at all.
     /// </summary>
     [TestMethod]
-    public async Task SyncFilesToOutputDirectory_LinkInTheInput_WarnsAndLeavesTheSubtreeOutOfAnAdditiveLayout()
+    [DataRow("Exact", DisplayName = "the layout winapp generates")]
+    [DataRow("Additive", DisplayName = "a layout the caller named")]
+    public async Task SyncFilesToOutputDirectory_FileLinkInTheInput_IsRefusedAndItsTargetIsUntouched(string reconciliation)
     {
-        var input = _tempDirectory.CreateSubdirectory("warned-input");
+        var input = _tempDirectory.CreateSubdirectory($"filelink-input-{reconciliation}");
         var manifest = new FileInfo(Path.Combine(input.FullName, "AppxManifest.xml"));
         await File.WriteAllTextAsync(manifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
         await File.WriteAllTextAsync(Path.Combine(input.FullName, "App.exe"), "exe", TestContext.CancellationToken);
 
-        var outside = _tempDirectory.CreateSubdirectory("warned-input-target");
-        await File.WriteAllTextAsync(Path.Combine(outside.FullName, "elsewhere.txt"), "elsewhere", TestContext.CancellationToken);
+        var outside = _tempDirectory.CreateSubdirectory($"filelink-target-{reconciliation}");
+        var target = Path.Combine(outside.FullName, "shared.dll");
+        await File.WriteAllTextAsync(target, "the-real-bytes", TestContext.CancellationToken);
 
+        var link = Path.Combine(input.FullName, "shared.dll");
+        if (!TryCreateFileSymbolicLink(link, target))
+        {
+            Assert.Inconclusive("Could not create a file symbolic link on this machine (needs Developer Mode).");
+            return;
+        }
+
+        var layout = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, $"filelink-layout-{reconciliation}"));
+
+        var failure = Assert.ThrowsExactly<TargetInvocationException>(
+            () => InvokeSyncFilesToOutputDirectory(input, layout, manifest, reconciliation));
+
+        Assert.IsInstanceOfType<InvalidOperationException>(failure.InnerException);
+        StringAssert.Contains(failure.InnerException!.Message, link, StringComparison.OrdinalIgnoreCase);
+
+        Assert.AreEqual("the-real-bytes", await File.ReadAllTextAsync(target, TestContext.CancellationToken),
+            "the link's target must not be written to");
+        Assert.IsFalse(File.Exists(Path.Combine(layout.FullName, "shared.dll")),
+            "nothing may be copied through the link");
+        Assert.IsFalse(File.Exists(Path.Combine(layout.FullName, "App.exe")),
+            "the run fails before anything is staged");
+    }
+
+    /// <summary>
+    /// The failure has to arrive before the first write, or a layout that was registerable a moment
+    /// ago is left half-rebuilt. The previous layout is still exactly what it was.
+    /// </summary>
+    [TestMethod]
+    public async Task SyncFilesToOutputDirectory_LinkAppearingLater_LeavesTheWorkingLayoutIntact()
+    {
+        var input = _tempDirectory.CreateSubdirectory("late-link-input");
+        var manifest = new FileInfo(Path.Combine(input.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(manifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(input.FullName, "App.exe"), "v1", TestContext.CancellationToken);
+
+        var layout = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "late-link-layout"));
+
+        InvokeSyncFilesToOutputDirectory(input, layout, manifest);
+        Assert.AreEqual("v1", await File.ReadAllTextAsync(Path.Combine(layout.FullName, "App.exe"), TestContext.CancellationToken));
+
+        // The next build changes the app and introduces a link.
+        await File.WriteAllTextAsync(Path.Combine(input.FullName, "App.exe"), "v2", TestContext.CancellationToken);
+        var outside = _tempDirectory.CreateSubdirectory("late-link-target");
         var junction = Path.Combine(input.FullName, "Plugins");
         if (!TryCreateJunction(junction, outside.FullName))
         {
@@ -1363,26 +1414,11 @@ public class MsixServiceIdentityTests : BaseCommandTests
 
         try
         {
-            var layout = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "warned-layout"));
+            Assert.ThrowsExactly<TargetInvocationException>(
+                () => InvokeSyncFilesToOutputDirectory(input, layout, manifest));
 
-            InvokeSyncFilesToOutputDirectory(input, layout, manifest, "Additive");
-
-            Assert.IsFalse(Directory.Exists(Path.Combine(layout.FullName, "Plugins")),
-                "an additive run does not follow the link either");
-            Assert.IsFalse(File.Exists(Path.Combine(layout.FullName, "Plugins", "elsewhere.txt")),
-                "the subtree behind the link is absent from the layout");
-            Assert.IsTrue(File.Exists(Path.Combine(layout.FullName, "App.exe")),
-                "everything else is still staged");
-            Assert.IsTrue(File.Exists(Path.Combine(outside.FullName, "elsewhere.txt")),
-                "nothing behind the link may be touched");
-
-            var messages = TestTask.SubTasks.OfType<StatusMessageTask>().Select(t => t.CompletedMessage ?? string.Empty).ToList();
-            var warning = messages.FirstOrDefault(m => m.Contains(junction, StringComparison.OrdinalIgnoreCase));
-
-            Assert.IsNotNull(warning,
-                $"the skipped subtree must be named: {string.Join(" | ", messages)}");
-            StringAssert.Contains(warning!, "symbolic link or junction", StringComparison.OrdinalIgnoreCase);
-            StringAssert.Contains(warning!, layout.FullName, StringComparison.OrdinalIgnoreCase);
+            Assert.AreEqual("v1", await File.ReadAllTextAsync(Path.Combine(layout.FullName, "App.exe"), TestContext.CancellationToken),
+                "the layout that worked before must not be half-rebuilt into one that does not");
         }
         finally
         {
@@ -1546,6 +1582,24 @@ public class MsixServiceIdentityTests : BaseCommandTests
 
         Assert.IsTrue(File.Exists(Path.Combine(realTemp.FullName, "staging", "TestApp.dll")),
             "Fresh staging under a junction-backed temp directory must succeed");
+    }
+
+    /// <summary>
+    /// A file symbolic link, which unlike a junction needs Developer Mode or elevation, so callers
+    /// treat a false return as "cannot test this here".
+    /// </summary>
+    private static bool TryCreateFileSymbolicLink(string linkPath, string target)
+    {
+        try
+        {
+            File.CreateSymbolicLink(linkPath, target);
+            return File.Exists(linkPath)
+                && new FileInfo(linkPath).Attributes.HasFlag(FileAttributes.ReparsePoint);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>Junction creation needs no elevation, unlike a symbolic link.</summary>
