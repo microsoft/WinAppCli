@@ -145,6 +145,30 @@ function Assert-True {
     }
 }
 
+function Test-PathInsideRoot {
+    param(
+        [string]$Candidate,
+        [string]$Root
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Candidate)) {
+        return $false
+    }
+
+    try {
+        $relative = [System.IO.Path]::GetRelativePath(
+            [System.IO.Path]::GetFullPath($Root),
+            [System.IO.Path]::GetFullPath($Candidate))
+        return -not [System.IO.Path]::IsPathRooted($relative) -and
+            $relative -ne ".." -and
+            -not $relative.StartsWith("..$([System.IO.Path]::DirectorySeparatorChar)", [System.StringComparison]::Ordinal) -and
+            -not $relative.StartsWith("..$([System.IO.Path]::AltDirectorySeparatorChar)", [System.StringComparison]::Ordinal)
+    }
+    catch {
+        return $false
+    }
+}
+
 function Assert-VerifiedResult {
     param(
         [object]$Result,
@@ -258,6 +282,20 @@ System.Threading.Thread.Sleep(System.Threading.Timeout.Infinite);
 finally {
     foreach ($processId in $createdProcessIds) {
         Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+    }
+
+    # JSON parsing is part of the acceptance contract. If it fails after winapp launched the app,
+    # the PID was never recorded above. Recover by terminating only processes whose executable is
+    # inside this invocation's unique temporary tree.
+    Get-Process -ErrorAction SilentlyContinue | ForEach-Object {
+        try {
+            if (Test-PathInsideRoot $_.Path $tempRoot) {
+                Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+            }
+        }
+        catch {
+            # Access to another process path may be denied; ignore unrelated processes.
+        }
     }
 
     if ($packagedManifest -and (Test-Path -LiteralPath $packagedManifest)) {

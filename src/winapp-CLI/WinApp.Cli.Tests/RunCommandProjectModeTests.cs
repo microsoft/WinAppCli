@@ -601,6 +601,8 @@ public class RunCommandProjectModeTests : BaseCommandTests
         Assert.AreEqual("Build", root.GetProperty("Operation").GetString());
         Assert.IsFalse(root.GetProperty("Executed").GetBoolean());
         Assert.IsFalse(root.GetProperty("Ready").GetBoolean());
+        Assert.IsFalse(root.TryGetProperty("RuntimeIdentifier", out _));
+        Assert.IsFalse(root.TryGetProperty("Platform", out _));
         Assert.AreEqual(csproj.FullName, root.GetProperty("ProjectPath").GetString());
         Assert.AreEqual("InvalidArchitecture", root.GetProperty("ErrorCode").GetString());
     }
@@ -908,6 +910,43 @@ public class RunCommandProjectModeTests : BaseCommandTests
        Assert.AreEqual(projectAssetsFile, runtimeCall.ProjectAssetsFile);
        Assert.AreEqual("arm64", runtimeCall.Architecture);
        Assert.AreEqual("net10.0-windows10.0.26100.0", runtimeCall.Framework);
+    }
+
+    [TestMethod]
+    public async Task ProjectMode_ApphostFreePublishReportsDotnetAsProcessPath()
+    {
+       var csproj = CreateCsproj();
+       var publishDirectory = CreateTargetDir(withManifest: false);
+       var managedAssembly = ChildPath(publishDirectory.FullName, "App.dll");
+       File.WriteAllText(managedAssembly, "fixture");
+       var dotnetHost = Path.Join(
+           Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+           "dotnet",
+           "dotnet.exe");
+       _fakeProjectRunService.PreparationOutcome = new ProjectPreparationOutcome(
+           new ProjectRunResolution(
+               csproj,
+               publishDirectory.FullName,
+               dotnetHost,
+               ProjectPackaging.Unpackaged,
+               SelfContained: true,
+               Architecture: "x64",
+               RunArguments: $"exec \"{managedAssembly}\"",
+               Operation: ProjectPreparationOperation.Publish,
+               PublishDirectory: publishDirectory.FullName,
+               PublishAot: false,
+               SourceExecutable: managedAssembly),
+           0);
+       var command = GetRequiredService<RunCommand>();
+
+       var exitCode = await ParseAndInvokeWithCaptureAsync(
+           command,
+           [csproj.FullName, "--publish", "--detach", "--json"]);
+
+       Assert.AreEqual(0, exitCode);
+       using var json = System.Text.Json.JsonDocument.Parse(TestAnsiConsole.Output);
+       Assert.AreEqual(dotnetHost, json.RootElement.GetProperty("ProcessPath").GetString());
+       Assert.AreEqual(managedAssembly, json.RootElement.GetProperty("SourceExecutable").GetString());
     }
 
     [TestMethod]

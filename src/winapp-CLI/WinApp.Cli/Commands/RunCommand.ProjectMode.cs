@@ -230,8 +230,6 @@ internal partial class RunCommand
                 return Fail(archError!, isJson, earlyReport, "InvalidArchitecture");
             }
             earlyReport.Architecture = architecture;
-            earlyReport.RuntimeIdentifier = RunArchHelper.ToRuntimeIdentifier(architecture);
-            earlyReport.Platform = architecture;
 
             // Immediate, persistent context line (UX): the pre-build steps below each spawn dotnet and can
             // take several silent seconds. Print WHAT we're about to run — and, when the input was
@@ -825,7 +823,7 @@ internal partial class RunCommand
             {
                 var processId = launched.ProcessId;
                 report.ProcessId = processId;
-                report.ProcessPath = resolution.SourceExecutable ?? exePath;
+                report.ProcessPath = exePath;
 
                 if (verifyNativeAot)
                 {
