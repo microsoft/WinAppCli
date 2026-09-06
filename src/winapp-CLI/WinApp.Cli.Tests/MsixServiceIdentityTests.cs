@@ -1289,7 +1289,7 @@ public class MsixServiceIdentityTests : BaseCommandTests
     /// contains, and it must not delete on a description it knows is partial.
     /// </summary>
     [TestMethod]
-    public async Task SyncFilesToOutputDirectory_LinkInTheInput_FailsExactAndIsSkippedAdditively()
+    public async Task SyncFilesToOutputDirectory_LinkInTheInput_FailsAnExactLayout()
     {
         var input = _tempDirectory.CreateSubdirectory("linked-input");
         var manifest = new FileInfo(Path.Combine(input.FullName, "AppxManifest.xml"));
@@ -1313,12 +1313,14 @@ public class MsixServiceIdentityTests : BaseCommandTests
                 () => InvokeSyncFilesToOutputDirectory(input, exactLayout, manifest));
             Assert.IsInstanceOfType<InvalidOperationException>(failure.InnerException);
 
-            var additiveLayout = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "linked-additive-layout"));
+            var message = failure.InnerException!.Message;
+            StringAssert.Contains(message, junction, StringComparison.OrdinalIgnoreCase);
 
-            InvokeSyncFilesToOutputDirectory(input, additiveLayout, manifest, "Additive");
+            // Naming --output-appx-directory here would read as a lossless way out, and it is not:
+            // that layout is missing everything behind the link too, it just does not say so by failing.
+            Assert.IsFalse(message.Contains("--output-appx-directory", StringComparison.OrdinalIgnoreCase),
+                $"the error must not offer an explicit layout as a workaround, because it loses the same files: {message}");
 
-            Assert.IsFalse(Directory.Exists(Path.Combine(additiveLayout.FullName, "linked")),
-                "an additive run does not follow the link either");
             Assert.IsTrue(File.Exists(Path.Combine(outside.FullName, "elsewhere.txt")),
                 "nothing behind the link may be touched");
         }
@@ -1327,6 +1329,137 @@ public class MsixServiceIdentityTests : BaseCommandTests
             try
             {
                 Directory.Delete(junction, recursive: false);
+            }
+            catch
+            {
+                // Best-effort cleanup; the temp root is removed anyway.
+            }
+        }
+    }
+
+    /// <summary>
+    /// The same link, staged into a layout the caller named. Nothing is deleted there, so the run
+    /// continues -- but it produces a layout that is quietly missing a whole subtree of the app,
+    /// which is exactly the kind of silence this work exists to remove. It says so, and names the
+    /// subtree it left out.
+    /// </summary>
+    [TestMethod]
+    public async Task SyncFilesToOutputDirectory_LinkInTheInput_WarnsAndLeavesTheSubtreeOutOfAnAdditiveLayout()
+    {
+        var input = _tempDirectory.CreateSubdirectory("warned-input");
+        var manifest = new FileInfo(Path.Combine(input.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(manifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(input.FullName, "App.exe"), "exe", TestContext.CancellationToken);
+
+        var outside = _tempDirectory.CreateSubdirectory("warned-input-target");
+        await File.WriteAllTextAsync(Path.Combine(outside.FullName, "elsewhere.txt"), "elsewhere", TestContext.CancellationToken);
+
+        var junction = Path.Combine(input.FullName, "Plugins");
+        if (!TryCreateJunction(junction, outside.FullName))
+        {
+            Assert.Inconclusive("Could not create a directory junction on this machine.");
+            return;
+        }
+
+        try
+        {
+            var layout = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "warned-layout"));
+
+            InvokeSyncFilesToOutputDirectory(input, layout, manifest, "Additive");
+
+            Assert.IsFalse(Directory.Exists(Path.Combine(layout.FullName, "Plugins")),
+                "an additive run does not follow the link either");
+            Assert.IsFalse(File.Exists(Path.Combine(layout.FullName, "Plugins", "elsewhere.txt")),
+                "the subtree behind the link is absent from the layout");
+            Assert.IsTrue(File.Exists(Path.Combine(layout.FullName, "App.exe")),
+                "everything else is still staged");
+            Assert.IsTrue(File.Exists(Path.Combine(outside.FullName, "elsewhere.txt")),
+                "nothing behind the link may be touched");
+
+            var messages = TestTask.SubTasks.OfType<StatusMessageTask>().Select(t => t.CompletedMessage ?? string.Empty).ToList();
+            var warning = messages.FirstOrDefault(m => m.Contains(junction, StringComparison.OrdinalIgnoreCase));
+
+            Assert.IsNotNull(warning,
+                $"the skipped subtree must be named: {string.Join(" | ", messages)}");
+            StringAssert.Contains(warning!, "symbolic link or junction", StringComparison.OrdinalIgnoreCase);
+            StringAssert.Contains(warning!, layout.FullName, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(junction, recursive: false);
+            }
+            catch
+            {
+                // Best-effort cleanup; the temp root is removed anyway.
+            }
+        }
+    }
+
+    /// <summary>
+    /// The layout is kept out of its own input by comparing paths as they are spelled, which a link
+    /// defeats: an input named through a junction and a layout named by its real path are the same
+    /// tree, and neither path says so. Left alone, the layout is walked as part of its own input and
+    /// grows a copy of itself on every run -- the very shape the exclusion exists to prevent.
+    /// </summary>
+    [TestMethod]
+    public async Task SyncFilesToOutputDirectory_InputNamedThroughALink_IsRefusedRatherThanNestedIntoItself()
+    {
+        var real = _tempDirectory.CreateSubdirectory("alias-real");
+        var manifest = new FileInfo(Path.Combine(real.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(manifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(real.FullName, "App.exe"), "exe", TestContext.CancellationToken);
+
+        var alias = Path.Combine(_tempDirectory.FullName, "alias-link");
+        if (!TryCreateJunction(alias, real.FullName))
+        {
+            Assert.Inconclusive("Could not create a directory junction on this machine.");
+            return;
+        }
+
+        try
+        {
+            // The layout by its real path; the input by the alias. Spelled this way the layout looks
+            // like it is outside the input, and it is not.
+            var layout = new DirectoryInfo(Path.Combine(real.FullName, "AppX"));
+            var aliasedInput = new DirectoryInfo(alias);
+
+            for (var run = 1; run <= 2; run++)
+            {
+                var failure = Assert.ThrowsExactly<TargetInvocationException>(
+                    () => InvokeSyncFilesToOutputDirectory(aliasedInput, layout, manifest, "Additive"));
+
+                Assert.IsInstanceOfType<InvalidOperationException>(failure.InnerException);
+                StringAssert.Contains(failure.InnerException!.Message, alias, StringComparison.OrdinalIgnoreCase);
+            }
+
+            Assert.IsFalse(Directory.Exists(Path.Combine(layout.FullName, "AppX")),
+                "the layout must never have been staged into itself");
+
+            // An ancestor link is the same problem one level up, and is refused for the same reason.
+            var nestedInput = new DirectoryInfo(Path.Combine(alias, "Nested"));
+            Directory.CreateDirectory(Path.Combine(real.FullName, "Nested"));
+
+            var ancestorFailure = Assert.ThrowsExactly<TargetInvocationException>(
+                () => InvokeSyncFilesToOutputDirectory(nestedInput, layout, manifest, "Additive"));
+            Assert.IsInstanceOfType<InvalidOperationException>(ancestorFailure.InnerException);
+            StringAssert.Contains(ancestorFailure.InnerException!.Message, alias, StringComparison.OrdinalIgnoreCase);
+
+            // The control that matters: the ordinary project directory, with no link anywhere in its
+            // path, is still packaged exactly as before.
+            InvokeSyncFilesToOutputDirectory(real, layout, manifest, "Additive");
+            InvokeSyncFilesToOutputDirectory(real, layout, manifest, "Additive");
+
+            Assert.IsTrue(File.Exists(Path.Combine(layout.FullName, "App.exe")));
+            Assert.IsFalse(Directory.Exists(Path.Combine(layout.FullName, "AppX")),
+                "the real path still keeps the layout out of its own input");
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(alias, recursive: false);
             }
             catch
             {

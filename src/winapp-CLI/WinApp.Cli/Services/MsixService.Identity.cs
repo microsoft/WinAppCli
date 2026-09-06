@@ -416,7 +416,23 @@ internal partial class MsixService
     /// </remarks>
     private static void EnsureLayoutPathHasNoReparsePoint(DirectoryInfo layout)
     {
-        var current = new DirectoryInfo(Path.GetFullPath(layout.FullName));
+        var link = FindReparsePointComponent(layout.FullName);
+
+        if (link is not null)
+        {
+            throw new InvalidOperationException(
+                $"Refusing to use '{layout.FullName}' as an AppX layout directory because '{link.FullName}' " +
+                "is a symbolic link or junction. Point --output-appx-directory at a real directory instead.");
+        }
+    }
+
+    /// <summary>
+    /// The first component of <paramref name="path"/> that is a symbolic link or junction, walking
+    /// from the path itself up to the drive root, or <see langword="null"/> when there is none.
+    /// </summary>
+    private static DirectoryInfo? FindReparsePointComponent(string path)
+    {
+        var current = new DirectoryInfo(Path.GetFullPath(path));
 
         while (current is not null)
         {
@@ -426,13 +442,13 @@ internal partial class MsixService
 
             if (current.Exists && current.Attributes.HasFlag(FileAttributes.ReparsePoint))
             {
-                throw new InvalidOperationException(
-                    $"Refusing to use '{layout.FullName}' as an AppX layout directory because '{current.FullName}' " +
-                    "is a symbolic link or junction. Point --output-appx-directory at a real directory instead.");
+                return current;
             }
 
             current = current.Parent;
         }
+
+        return null;
     }
 
     /// <summary>
@@ -969,6 +985,8 @@ internal partial class MsixService
     /// The layout is very often a subdirectory of the input (<c>winapp run . --output-appx-directory
     /// .\AppX</c>), so it is excluded from the walk of the input. Copying it into itself would leave
     /// a copy of the layout inside the layout, and a copy of that on the run after, without limit.
+    /// That exclusion compares paths as they are spelled, so an input reached through a link is
+    /// refused: the layout could then be inside it without either path saying so.
     /// </para>
     /// </remarks>
     private static void SyncFilesToOutputDirectory(DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, FileInfo appxManifestPath, TaskContext taskContext, LayoutReconciliation reconciliation)
@@ -1002,6 +1020,24 @@ internal partial class MsixService
 
         if (inputDirectory is not null && !layoutIsTheInput)
         {
+            if (enforceRealPaths)
+            {
+                // Both nesting checks below compare paths as they are spelled. A link anywhere in
+                // the input's path makes that spelling name a different tree than the one on disk,
+                // so a layout reached by its real path can sit inside the input while looking like
+                // it does not — and the walk then stages the layout into itself on every run.
+                var linkedInput = FindReparsePointComponent(inputDirectory.FullName);
+
+                if (linkedInput is not null)
+                {
+                    throw new InvalidOperationException(
+                        $"Refusing to build an AppX layout from '{inputDirectory.FullName}' because " +
+                        $"'{linkedInput.FullName}' is a symbolic link or junction, so winapp cannot tell whether " +
+                        $"the layout directory '{outputAppXDirectory.FullName}' sits inside it. Package the real " +
+                        "directory the link points at instead.");
+                }
+            }
+
             // The supported nesting is the layout inside the build output. The reverse cannot be
             // made to work: every input file would land beside the input's own copy of it, and an
             // exact layout would then judge the build itself to be content the app dropped.
@@ -1012,7 +1048,7 @@ internal partial class MsixService
                     $"('{inputDirectory.FullName}'). Point --output-appx-directory at a directory outside it.");
             }
 
-            var sourceFiles = EnumerateInputFilesForLayout(inputDirectory, outputAppXDirectory, reconciliation);
+            var sourceFiles = EnumerateInputFilesForLayout(inputDirectory, outputAppXDirectory, reconciliation, taskContext);
 
             // The same copier and pruner the recipe path uses, so a layout built without a recipe
             // gets the same per-destination link checks and the same reconciliation.
@@ -1054,12 +1090,13 @@ internal partial class MsixService
     /// </summary>
     /// <remarks>
     /// A directory link in the build output is not descended into, so the copy cannot be walked out
-    /// of the input and back into the layout. That leaves an exact layout unable to say what the app
-    /// contains, so it fails rather than reconcile against a description it knows is partial. An
-    /// additive layout deletes nothing, so the link is simply not followed.
+    /// of the input and back into the layout. Skipping it means the layout will not hold anything
+    /// under that link, which is a visible warning for a layout the caller named and a failure for
+    /// one winapp reconciles exactly — there it would also have to decide which of the layout's own
+    /// files the app still contains, from a description it knows is incomplete.
     /// </remarks>
     private static List<RecipeEntry> EnumerateInputFilesForLayout(
-        DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, LayoutReconciliation reconciliation)
+        DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, LayoutReconciliation reconciliation, TaskContext taskContext)
     {
         var entries = new List<RecipeEntry>();
         var pending = new Stack<DirectoryInfo>();
@@ -1081,10 +1118,16 @@ internal partial class MsixService
                     if (reconciliation == LayoutReconciliation.Exact)
                     {
                         throw new InvalidOperationException(
-                            $"'{subdirectory.FullName}' is a symbolic link or junction, so winapp cannot tell what the app " +
-                            "contains and must not remove files from the layout on that basis. Remove the link, or pass " +
-                            "--output-appx-directory to build the layout without removing anything from it.");
+                            $"'{subdirectory.FullName}' is a symbolic link or junction. winapp does not copy through " +
+                            "links, so the layout would be missing everything under it, and winapp cannot then tell " +
+                            "which of the layout's own files the app still contains. Replace the link with a real " +
+                            "directory holding those files.");
                     }
+
+                    taskContext.AddStatusMessage(
+                        $"{UiSymbols.Warning} Skipped '{subdirectory.FullName}' because it is a symbolic link or " +
+                        $"junction: nothing under it was staged into '{outputAppXDirectory.FullName}', so the app " +
+                        "will run without those files. Replace the link with a real directory holding them.");
 
                     continue;
                 }
