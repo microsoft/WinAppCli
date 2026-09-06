@@ -231,6 +231,27 @@ public class RunCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task FolderMode_AllowsInPlaceOutputDirectory()
+    {
+        var manifest = await CreateTestManifestAsync();
+        File.WriteAllText(Path.Join(_tempDirectory.FullName, "TestApp.exe"), "fixture");
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command,
+            [
+                _tempDirectory.FullName,
+                "--manifest",
+                manifest.FullName,
+                "--output-appx-directory",
+                _tempDirectory.FullName,
+                "--no-launch",
+            ]);
+
+        Assert.AreEqual(0, exitCode);
+    }
+
+    [TestMethod]
     public void ParseOptions_Clean_IsParsedCorrectly()
     {
         // Arrange

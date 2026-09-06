@@ -978,6 +978,12 @@ public class RunCommandProjectModeTests : BaseCommandTests
        var generatedManifest = ChildPath(targetDirectory.FullName, "appxmanifest.xml");
        var projectAssetsFile = ChildPath(targetDirectory.FullName, "project.assets.json");
        File.WriteAllText(projectAssetsFile, "{}");
+       var defaultStaging = Directory.CreateDirectory(
+           Path.Join(publishDirectory.FullName, "AppX"));
+       File.WriteAllText(ChildPath(defaultStaging.FullName, "TestApp.exe"), "fixture");
+       File.WriteAllText(
+           ChildPath(defaultStaging.FullName, "appxmanifest.xml"),
+           TestManifestContent);
        _fakeProjectRunService.PreparationOutcome = new ProjectPreparationOutcome(
            new ProjectRunResolution(
                csproj,
@@ -1007,6 +1013,61 @@ public class RunCommandProjectModeTests : BaseCommandTests
        Assert.IsTrue(_fakeMsixService.AddLooseLayoutDeploymentCalls.Single().RequireExactRuntimeDependency);
        Assert.IsTrue(_fakeMsixService.AddLooseLayoutDeploymentCalls.Single().ExcludeSymbolsFromLayout);
        Assert.IsFalse(_fakeMsixService.AddLooseLayoutDeploymentCalls.Single().SelfContained);
+    }
+
+    [TestMethod]
+    public async Task ProjectMode_PackagedPublishJsonReportsStagedProcessPath()
+    {
+       var csproj = CreateCsproj();
+       var targetDirectory = CreateTargetDir(withManifest: true);
+       var publishDirectory = CreateTargetDir(withManifest: false);
+       var sourceExecutable = ChildPath(publishDirectory.FullName, "TestApp.exe");
+       File.WriteAllText(sourceExecutable, "fixture");
+       var generatedManifest = ChildPath(targetDirectory.FullName, "appxmanifest.xml");
+       var stagingDirectory = _tempDirectory.CreateSubdirectory("json-stage");
+       var stagedExecutable = ChildPath(stagingDirectory.FullName, "TestApp.exe");
+       File.WriteAllText(stagedExecutable, "fixture");
+       File.WriteAllText(ChildPath(stagingDirectory.FullName, "appxmanifest.xml"), TestManifestContent);
+       _fakeProjectRunService.PreparationOutcome = new ProjectPreparationOutcome(
+           new ProjectRunResolution(
+               csproj,
+               targetDirectory.FullName,
+               null,
+               ProjectPackaging.Packaged,
+               SelfContained: true,
+               Architecture: "x64",
+               Operation: ProjectPreparationOperation.Publish,
+               PublishDirectory: publishDirectory.FullName,
+               PublishAot: false,
+               RuntimeIdentifier: "win-x64",
+               SourceExecutable: sourceExecutable,
+               FinalAppxManifestPath: generatedManifest),
+           0);
+       var command = GetRequiredService<RunCommand>();
+
+       var exitCode = await ParseAndInvokeWithCaptureAsync(
+           command,
+           [
+               csproj.FullName,
+               "--publish",
+               "--detach",
+               "--json",
+               "--output-appx-directory",
+               stagingDirectory.FullName,
+           ]);
+
+       Assert.AreEqual(0, exitCode);
+           var output = TestAnsiConsole.Output;
+           var jsonStart = output.IndexOf('{');
+           var jsonEnd = output.LastIndexOf('}');
+           using var json = System.Text.Json.JsonDocument.Parse(
+               output[jsonStart..(jsonEnd + 1)]);
+       Assert.AreEqual(
+           stagedExecutable,
+           json.RootElement.GetProperty("ProcessPath").GetString());
+       Assert.AreEqual(
+           sourceExecutable,
+           json.RootElement.GetProperty("SourceExecutable").GetString());
     }
 
     [TestMethod]

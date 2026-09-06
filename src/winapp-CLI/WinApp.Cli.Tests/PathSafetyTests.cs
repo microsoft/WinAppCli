@@ -200,16 +200,18 @@ public class PathSafetyTests
         }
         finally
         {
-            try { Directory.Delete(junctionDir, recursive: false); } catch { /* ignore */ }
+            try { Directory.Delete(junctionDir, recursive: false); }
+            catch (IOException) { /* ignore */ }
+            catch (UnauthorizedAccessException) { /* ignore */ }
         }
     }
 
     [TestMethod]
     public void HasReparsePointOnExistingPath_ParentJunction_ReturnsTrue()
     {
-        var real = Path.Combine(_tempDir.FullName, "real-parent");
+        var real = Path.Join(_tempDir.FullName, "real-parent");
         Directory.CreateDirectory(real);
-        var junction = Path.Combine(_tempDir.FullName, "linked-parent");
+        var junction = Path.Join(_tempDir.FullName, "linked-parent");
         if (!TryCreateJunction(junction, real))
         {
             Assert.Inconclusive("Could not create a junction (CI may lack the privilege).");
@@ -218,14 +220,16 @@ public class PathSafetyTests
 
         try
         {
-            var child = Path.Combine(junction, "staging");
+            var child = Path.Join(junction, "staging");
             Assert.IsTrue(
                 PathSafety.HasReparsePointOnExistingPath(child),
                 "a junction in an existing parent segment must be refused");
         }
         finally
         {
-            try { Directory.Delete(junction, recursive: false); } catch { /* ignore */ }
+            try { Directory.Delete(junction, recursive: false); }
+            catch (IOException) { /* ignore */ }
+            catch (UnauthorizedAccessException) { /* ignore */ }
         }
     }
 

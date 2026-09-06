@@ -20,7 +20,15 @@ internal static class PathSafety
         {
             fullPath = Path.GetFullPath(path);
         }
-        catch
+        catch (ArgumentException)
+        {
+            return true;
+        }
+        catch (NotSupportedException)
+        {
+            return true;
+        }
+        catch (PathTooLongException)
         {
             return true;
         }

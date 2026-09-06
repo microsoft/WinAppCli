@@ -621,7 +621,12 @@ internal partial class RunCommand : Command, IShortDescription
                     }
 
                     outputAppXDirectory ??= new DirectoryInfo(Path.Combine(inputFolder.FullName, "AppX"));
-                    if (DirectoryRelationship.IsSameOrAncestor(outputAppXDirectory, inputFolder))
+                    var sameInputAndOutput = string.Equals(
+                        Path.TrimEndingDirectorySeparator(Path.GetFullPath(outputAppXDirectory.FullName)),
+                        Path.TrimEndingDirectorySeparator(Path.GetFullPath(inputFolder.FullName)),
+                        StringComparison.OrdinalIgnoreCase);
+                    if (!sameInputAndOutput &&
+                        DirectoryRelationship.IsSameOrAncestor(outputAppXDirectory, inputFolder))
                     {
                         throw new InvalidOperationException(
                             $"The AppX output directory '{outputAppXDirectory.FullName}' cannot be the input directory '{inputFolder.FullName}' or one of its ancestors. " +
@@ -696,6 +701,10 @@ internal partial class RunCommand : Command, IShortDescription
                     if (projectReport is not null)
                     {
                        projectReport.ProcessId = processId;
+                       if (projectResolution?.Operation == ProjectPreparationOperation.Publish)
+                       {
+                           projectReport.ProcessPath = ResolveStagedExecutable(outputAppXDirectory);
+                       }
                     }
 
                     if (verifyNativeAot)
@@ -711,7 +720,8 @@ internal partial class RunCommand : Command, IShortDescription
                                "Native AOT verification requires a project-mode result envelope.");
                        }
 
-                       var stagedExecutable = ResolveStagedExecutable(outputAppXDirectory);
+                       var stagedExecutable = projectReport.ProcessPath
+                           ?? ResolveStagedExecutable(outputAppXDirectory);
                        projectReport.ProcessPath = stagedExecutable;
                        runtimeVerification = await nativeAotVerifier.VerifyRuntimeAsync(
                            new NativeAotRuntimeVerificationRequest(
