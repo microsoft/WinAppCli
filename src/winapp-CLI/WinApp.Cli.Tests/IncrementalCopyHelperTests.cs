@@ -177,6 +177,35 @@ public class IncrementalCopyHelperTests
     }
 
     [TestMethod]
+    public void SyncDirectory_DestinationAncestorOfSource_ThrowsWithoutDeletingFiles()
+    {
+        var dest = CreateSubDir("project");
+        var source = new DirectoryInfo(Path.Join(dest.FullName, "publish"));
+        source.Create();
+        var projectFile = WriteFile(dest, "App.csproj", "<Project />");
+        var publishedApp = WriteFile(source, "App.exe", "exe");
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            IncrementalCopyHelper.SyncDirectory(source, dest));
+
+        StringAssert.Contains(exception.Message, "cannot be the source directory");
+        Assert.IsTrue(projectFile.Exists, "The guard must run before stale-file deletion.");
+        Assert.IsTrue(publishedApp.Exists, "The guard must not delete files from the source subtree.");
+    }
+
+    [TestMethod]
+    public void SyncDirectory_DestinationEqualsSource_ThrowsWithoutDeletingFiles()
+    {
+        var directory = CreateSubDir("same");
+        var file = WriteFile(directory, "App.exe", "exe");
+
+        Assert.Throws<InvalidOperationException>(() =>
+            IncrementalCopyHelper.SyncDirectory(directory, directory));
+
+        Assert.IsTrue(file.Exists);
+    }
+
+    [TestMethod]
     public void SyncDirectory_CreatesDestDirectory_IfNotExists()
     {
         var source = CreateSubDir("source");

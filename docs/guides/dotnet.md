@@ -195,6 +195,9 @@ winapp run .
 
 # ...or run a specific project / configuration / architecture
 winapp run .\dotnet-app.csproj -c Debug --arch x64
+
+# Publish and run the exact PublishDir artifact
+winapp run .\dotnet-app.csproj --publish -c Release -r win-x64 --detach
 ```
 
 You can still point `winapp run` at a pre-built output folder if you prefer (folder mode):
@@ -205,6 +208,30 @@ winapp run .\bin\Debug\net10.0-windows10.0.26100.0
 ```
 
 Project mode supports both **packaged** and **unpackaged** WinUI apps — it detects which from the project's `WindowsPackageType` and installs the matching-architecture Windows App Runtime automatically. To force an unpackaged run of a packaged project, add `-p WindowsPackageType=None`.
+
+To enforce a Native AOT publish, set the property in the runnable app project so it does not propagate to referenced libraries:
+
+```xml
+<PropertyGroup>
+  <PublishAot>true</PublishAot>
+</PropertyGroup>
+```
+
+Then run:
+
+```powershell
+winapp run .\dotnet-app.csproj --verify-native-aot -c Release -r win-x64 --detach
+```
+
+Before a long publish, check the project settings and restored Native AOT pack without changing anything:
+
+```powershell
+winapp run .\dotnet-app.csproj --verify-native-aot -c Release -r win-x64 --dry-run
+```
+
+If the dry run says `RestoreRequired`, run the printed `dotnet restore` command and repeat it. Windows Native AOT supports `win-x64` and `win-arm64` and requires Desktop development with C++ in Visual Studio or Visual Studio Build Tools. Dry run validates the requested linker on either an x64 or ARM64 host and checks the matching Windows SDK libraries. If `vswhere.exe` is installed in the standard Visual Studio Installer directory but is not on `PATH`, WinApp adds that directory only for the publish process. WinApp does not install missing workloads. `--no-build` keeps .NET CLI semantics: it skips the build in normal mode, but with `--publish` it is forwarded to `dotnet publish --no-build`.
+
+WinApp rejects .NET single-file bundles during Native AOT verification. A self-contained single-file JIT app can contain CoreCLR inside the executable and omit the usual runtime sidecars, so missing DLLs alone are not accepted as proof. If startup verification reports an exit code, re-run without `--verify-native-aot` and `--detach`, then add `--debug-output --symbols`.
 
 **Multi-project apps** (an app referencing class libraries) build correctly: winapp negotiates each project reference's platform automatically, so referencing an `AnyCPU`/`netstandard2.0` library doesn't fail with `CS0006` "metadata file could not be found".
 

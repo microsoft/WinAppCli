@@ -3,6 +3,7 @@
 
 using System.Security;
 using System.Text;
+using System.Text.Json;
 using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
 using WinApp.Cli.ConsoleTasks;
@@ -110,7 +111,22 @@ internal partial class MsixService
         return new MsixIdentityResult(debugIdentity.PackageName, debugIdentity.Publisher, debugIdentity.ApplicationId);
     }
 
-    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, bool clean = false, string? executable = null, string? runtimeArch = null, FileInfo? projectFile = null, string? framework = null, bool noRestore = false, CancellationToken cancellationToken = default)
+    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(
+        FileInfo appxManifestPath,
+        DirectoryInfo inputDirectory,
+        DirectoryInfo outputAppXDirectory,
+        TaskContext taskContext,
+        bool clean = false,
+        string? executable = null,
+        string? runtimeArch = null,
+        FileInfo? projectFile = null,
+        FileInfo? projectAssetsFile = null,
+        string? framework = null,
+        bool noRestore = false,
+        bool windowsAppSdkSelfContained = false,
+        bool requireExactRuntimeDependency = false,
+        bool excludeSymbolsFromLayout = false,
+        CancellationToken cancellationToken = default)
     {
         // Validate inputs
         if (!appxManifestPath.Exists)
@@ -150,13 +166,23 @@ internal partial class MsixService
             if (recipeFile != null)
             {
                 taskContext.AddDebugMessage($"{UiSymbols.Files} Using appxrecipe for layout: {recipeFile.Name}");
-                await CopyFilesFromRecipeAsync(recipeFile, outputAppXDirectory, taskContext, cancellationToken);
+                await CopyFilesFromRecipeAsync(
+                    recipeFile,
+                    outputAppXDirectory,
+                    taskContext,
+                    cancellationToken,
+                    excludeSymbolsFromLayout);
             }
             else
             {
                 // No recipe — fall back to incremental copy from input directory
                 taskContext.AddDebugMessage($"{UiSymbols.Warning} No .appxrecipe found, falling back to file copy");
-                SyncFilesToOutputDirectory(inputDirectory, outputAppXDirectory, appxManifestPath, taskContext);
+                SyncFilesToOutputDirectory(
+                    inputDirectory,
+                    outputAppXDirectory,
+                    appxManifestPath,
+                    taskContext,
+                    excludeSymbolsFromLayout);
             }
 
             var identity = ParseAppxManifestAsync(manifestContent);
@@ -166,14 +192,37 @@ internal partial class MsixService
             // divergent Windows App SDK version (M2). This loose-layout pipeline is shared with folder mode
             // (which always restores) and packaged project mode (which honors the run's --no-restore), so
             // thread the caller's setting through instead of forcing a restore during discovery.
-            var msbuildPackageList = await ResolveDotNetPackageListAsync(projectFile, framework, noRestore, cancellationToken);
-            await EnsureWindowsAppRuntimeInstalledAsync(msbuildPackageList, runtimeArch, taskContext, cancellationToken);
+            var msbuildPackageList = requireExactRuntimeDependency && projectAssetsFile is not null
+                ? ReadPackageListFromAssetsFile(projectAssetsFile, framework, runtimeArch)
+                : await ResolveDotNetPackageListAsync(projectFile, framework, noRestore, cancellationToken);
 
             // Resolve the manifest that would be registered (issue #537 / TrySkipRegistration).
             // ManifestHelper.FindManifest already probes both canonical filenames; if it
             // returns a non-existent FileInfo, downstream RegisterLooseLayoutPackageAsync
             // will surface the missing-manifest error.
             var registrationManifest = ManifestHelper.FindManifest(outputAppXDirectory.FullName);
+
+            if (windowsAppSdkSelfContained)
+            {
+               ValidateSelfContainedManifest(registrationManifest);
+            }
+            else if (requireExactRuntimeDependency)
+            {
+               await EnsureFrameworkDependentPublishRuntimeAsync(
+                   msbuildPackageList,
+                   runtimeArch,
+                   registrationManifest,
+                   taskContext,
+                   cancellationToken);
+            }
+            else
+            {
+               await EnsureWindowsAppRuntimeInstalledAsync(
+                   msbuildPackageList,
+                   runtimeArch,
+                   taskContext,
+                   cancellationToken);
+            }
 
             var skipResult = TrySkipRegistration(
                 identity.PackageName, identity.Publisher, identity.ApplicationId,
@@ -185,7 +234,11 @@ internal partial class MsixService
             }
 
             // Unregister any existing package first (preserving app data by default)
-            await UnregisterExistingPackageAsync(identity.PackageName, taskContext, preserveAppData: !clean, cancellationToken);
+            await UnregisterExistingPackageAsync(
+                identity.PackageName,
+                taskContext,
+                preserveAppData: !clean,
+                cancellationToken);
 
             // Register from the AppX layout directory
             await RegisterLooseLayoutPackageAsync(registrationManifest, taskContext, cancellationToken);
@@ -281,7 +334,7 @@ internal partial class MsixService
         // ProcessorArchitecture auto-detection, and build metadata
         (manifestContent, _) = await UpdateAppxManifestContentAsync(
             manifestContent, null, null, executableMatch.FullName,
-            sparse: false, selfContained: false,
+            sparse: false, selfContained: windowsAppSdkSelfContained,
             dotNetPackageList, taskContext, cancellationToken);
 
         await File.WriteAllTextAsync(copiedAppxManifestPath.FullName, manifestContent, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
@@ -302,8 +355,27 @@ internal partial class MsixService
         {
             var identity = ParseAppxManifestAsync(manifestContent);
 
-            // Install the Windows App Runtime framework packages if not already present
-            await EnsureWindowsAppRuntimeInstalledAsync(dotNetPackageList, runtimeArch, taskContext, cancellationToken);
+            if (windowsAppSdkSelfContained)
+            {
+                ValidateSelfContainedManifest(copiedAppxManifestPath);
+            }
+            else if (requireExactRuntimeDependency)
+            {
+                await EnsureFrameworkDependentPublishRuntimeAsync(
+                    dotNetPackageList,
+                    runtimeArch,
+                    copiedAppxManifestPath,
+                    taskContext,
+                    cancellationToken);
+            }
+            else
+            {
+                await EnsureWindowsAppRuntimeInstalledAsync(
+                    dotNetPackageList,
+                    runtimeArch,
+                    taskContext,
+                    cancellationToken);
+            }
 
             // See MSBuild branch above for the rationale (issue #537).
             var skipResult = TrySkipRegistration(
@@ -316,7 +388,11 @@ internal partial class MsixService
             }
 
             // Unregister any existing package first (preserving app data by default)
-            await UnregisterExistingPackageAsync(identity.PackageName, taskContext, preserveAppData: !clean, cancellationToken);
+            await UnregisterExistingPackageAsync(
+                identity.PackageName,
+                taskContext,
+                preserveAppData: !clean,
+                cancellationToken);
 
             // Register the new debug manifest with external location
             await RegisterLooseLayoutPackageAsync(copiedAppxManifestPath, taskContext, cancellationToken);
@@ -325,12 +401,106 @@ internal partial class MsixService
         }
     }
 
+    private async Task EnsureFrameworkDependentPublishRuntimeAsync(
+       DotNetPackageListJson? packageList,
+       string? runtimeArch,
+       FileInfo registrationManifest,
+       TaskContext taskContext,
+       CancellationToken cancellationToken)
+    {
+       if (packageList is null)
+       {
+           throw new InvalidOperationException(
+               "The packaged publish is framework-dependent, but the restored Windows App SDK package graph could not be resolved. " +
+               "Run 'dotnet restore' for the selected runtime and retry, or publish with WindowsAppSDKSelfContained=true.");
+       }
+
+       if (!ReferencesWindowsAppSdk(packageList))
+       {
+           taskContext.AddDebugMessage(
+               $"{UiSymbols.Note} No Windows App SDK reference found; no Microsoft.WindowsAppRuntime package dependency is required.");
+           return;
+       }
+
+       var manifestContent = await File.ReadAllTextAsync(
+           registrationManifest.FullName,
+           Encoding.UTF8,
+           cancellationToken);
+       var updatedManifest = await UpdateWindowsAppSdkDependencyAsync(
+           manifestContent,
+           packageList,
+           taskContext,
+           cancellationToken);
+
+       var updatedDocument = AppxManifestDocument.Parse(updatedManifest);
+       var hasRuntimeDependency = updatedDocument.Document
+           .Descendants(AppxManifestDocument.DefaultNs + "PackageDependency")
+           .Any(element => element.Attribute("Name")?.Value
+               ?.StartsWith("Microsoft.WindowsAppRuntime.", StringComparison.OrdinalIgnoreCase) == true);
+       if (!hasRuntimeDependency)
+       {
+           throw new InvalidOperationException(
+               "The packaged publish depends on the Windows App SDK, but the Microsoft.WindowsAppRuntime package dependency could not be resolved. " +
+               "Restore the project for the selected runtime and retry, or publish with WindowsAppSDKSelfContained=true.");
+       }
+
+       if (!string.Equals(updatedManifest, manifestContent, StringComparison.Ordinal))
+       {
+           await File.WriteAllTextAsync(
+               registrationManifest.FullName,
+               updatedManifest,
+               new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+               cancellationToken);
+       }
+
+       var expectedRuntimePackages = await EnsureWindowsAppRuntimeInstalledAsync(
+           packageList,
+           runtimeArch,
+           taskContext,
+           cancellationToken,
+           requireExactVersion: true);
+       if (expectedRuntimePackages.Count == 0)
+       {
+           throw new InvalidOperationException(
+               "The exact Windows App Runtime required by this packaged publish could not be located. " +
+               "Restore the project for the selected runtime and retry, install that runtime manually, or publish with WindowsAppSDKSelfContained=true.");
+       }
+
+       if (!windowsAppRuntimeService.IsWindowsAppRuntimeRegistered(runtimeArch, expectedRuntimePackages))
+       {
+           var arch = runtimeArch ?? WorkspaceSetupService.GetSystemArchitecture();
+           throw new InvalidOperationException(
+               $"The exact Windows App Runtime required by this packaged publish is not registered for '{arch}'. " +
+               "Install the matching Framework and DDLM packages, or publish with WindowsAppSDKSelfContained=true.");
+       }
+    }
+
+    private static void ValidateSelfContainedManifest(FileInfo registrationManifest)
+    {
+       var document = AppxManifestDocument.Load(registrationManifest.FullName);
+       var runtimeDependency = document.Document
+           .Descendants(AppxManifestDocument.DefaultNs + "PackageDependency")
+           .FirstOrDefault(element => element.Attribute("Name")?.Value
+               ?.StartsWith("Microsoft.WindowsAppRuntime.", StringComparison.OrdinalIgnoreCase) == true);
+       if (runtimeDependency is not null)
+       {
+           throw new InvalidOperationException(
+               "The project evaluated WindowsAppSDKSelfContained=true, but the generated manifest still declares a Microsoft.WindowsAppRuntime framework dependency. " +
+               "Clean and republish the project so its deployment mode and manifest agree.");
+       }
+    }
+
     /// <summary>
     /// Copies files to the AppX layout directory using the .build.appxrecipe file.
     /// The recipe is generated by MSBuild and lists all files with their correct source
     /// paths and target PackagePaths. This preserves file metadata that .NET's CopyTo may lose.
     /// </summary>
-    private static async Task CopyFilesFromRecipeAsync(FileInfo recipeFile, DirectoryInfo outputDir, TaskContext taskContext, CancellationToken cancellationToken)
+    private static async Task CopyFilesFromRecipeAsync(
+        FileInfo recipeFile,
+        DirectoryInfo outputDir,
+        TaskContext taskContext,
+        CancellationToken cancellationToken,
+        bool excludeSymbols = false)
     {
         if (!outputDir.Exists)
         {
@@ -351,7 +521,7 @@ internal partial class MsixService
             var packagePath = entry.Element(msbuildNs + "PackagePath")?.Value;
             if (sourcePath != null && packagePath != null && File.Exists(sourcePath))
             {
-                var destPath = Path.Combine(outputDir.FullName, packagePath);
+                var destPath = ResolveRecipeDestination(outputDir, packagePath);
                 Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
                 File.Copy(sourcePath, destPath, overwrite: true);
                 copied++;
@@ -369,7 +539,15 @@ internal partial class MsixService
                 continue;
             }
 
-            var destPath = Path.Combine(outputDir.FullName, packagePath);
+            var destPath = ResolveRecipeDestination(outputDir, packagePath);
+            if (excludeSymbols &&
+                string.Equals(Path.GetExtension(packagePath), ".pdb", StringComparison.OrdinalIgnoreCase))
+            {
+                File.Delete(destPath);
+                skipped++;
+                continue;
+            }
+
             var destFile = new FileInfo(destPath);
 
             // Skip unchanged files (same size and timestamp)
@@ -391,11 +569,44 @@ internal partial class MsixService
         taskContext.AddDebugMessage($"{UiSymbols.Check} AppX layout from recipe: {copied} copied, {skipped} unchanged");
     }
 
+    private static string ResolveRecipeDestination(DirectoryInfo outputDir, string packagePath)
+    {
+        string destination;
+        try
+        {
+            destination = Path.GetFullPath(packagePath, outputDir.FullName);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            throw new InvalidDataException(
+                $"The appx recipe PackagePath '{packagePath}' is invalid.",
+                ex);
+        }
+
+        if (!IsPathInsideDirectory(destination, outputDir.FullName))
+        {
+            throw new InvalidDataException(
+                $"The appx recipe PackagePath '{packagePath}' resolves outside the output directory '{outputDir.FullName}'.");
+        }
+        if (PathSafety.HasReparsePointOnPath(destination, outputDir.FullName))
+        {
+            throw new InvalidDataException(
+                $"The appx recipe PackagePath '{packagePath}' crosses a symbolic link or junction in the output directory.");
+        }
+
+        return destination;
+    }
+
     /// <summary>
     /// Syncs files from the input directory to the output AppX directory using IncrementalCopyHelper.
     /// Also handles manifest copy and rename.
     /// </summary>
-    private static void SyncFilesToOutputDirectory(DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, FileInfo appxManifestPath, TaskContext taskContext)
+    private static void SyncFilesToOutputDirectory(
+        DirectoryInfo inputDirectory,
+        DirectoryInfo outputAppXDirectory,
+        FileInfo appxManifestPath,
+        TaskContext taskContext,
+        bool excludeSymbols = false)
     {
         if (!outputAppXDirectory.Exists)
         {
@@ -412,7 +623,13 @@ internal partial class MsixService
                 "resources.pri"
             };
 
-            var result = IncrementalCopyHelper.SyncDirectory(inputDirectory, outputAppXDirectory, protectedFiles);
+            var result = IncrementalCopyHelper.SyncDirectory(
+                inputDirectory,
+                outputAppXDirectory,
+                protectedFiles,
+                excludeSymbols
+                    ? static file => !string.Equals(file.Extension, ".pdb", StringComparison.OrdinalIgnoreCase)
+                    : null);
             taskContext.AddDebugMessage($"{UiSymbols.Check} Sync to output directory: {result.Copied} copied, {result.Skipped} unchanged, {result.Deleted} deleted");
         }
 
@@ -434,9 +651,18 @@ internal partial class MsixService
     /// list (or falls back to a cwd glob) and installs the Windows App Runtime framework packages for
     /// the given architecture. Callers gate on <c>WindowsAppSDKSelfContained</c> before calling.
     /// </summary>
-    public async Task<bool> EnsureWindowsAppRuntimeInstalledAsync(FileInfo? projectFile, string? architecture, string? framework, bool noRestore, TaskContext taskContext, CancellationToken cancellationToken = default)
+    public async Task<bool> EnsureWindowsAppRuntimeInstalledAsync(
+        FileInfo? projectFile,
+        FileInfo? projectAssetsFile,
+        string? architecture,
+        string? framework,
+        bool noRestore,
+        TaskContext taskContext,
+        CancellationToken cancellationToken = default)
     {
-        var packageList = await ResolveDotNetPackageListAsync(projectFile, framework, noRestore, cancellationToken);
+        var packageList = projectAssetsFile is not null
+            ? ReadPackageListFromAssetsFile(projectAssetsFile, framework, architecture)
+            : await ResolveDotNetPackageListAsync(projectFile, framework, noRestore, cancellationToken);
 
         // A framework-dependent app needs the Windows App Runtime only if it actually uses the Windows
         // App SDK. A plain console/desktop Exe doesn't — preparing the runtime for it is wasted work and
@@ -519,6 +745,96 @@ internal partial class MsixService
             : await FetchDotNetPackageListAsync(cancellationToken);
 
         return FilterPackageListToFramework(packageList, framework);
+    }
+
+    internal static DotNetPackageListJson? ReadPackageListFromAssetsFile(
+        FileInfo projectAssetsFile,
+        string? framework,
+        string? runtimeArch)
+    {
+        if (!projectAssetsFile.Exists)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(projectAssetsFile.FullName));
+            if (!document.RootElement.TryGetProperty("targets", out var targets) ||
+                targets.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            var runtimeIdentifier = string.IsNullOrWhiteSpace(runtimeArch)
+                ? null
+                : RunArchHelper.ToRuntimeIdentifier(runtimeArch);
+            var candidates = targets.EnumerateObject().ToArray();
+            JsonProperty? selected = null;
+
+            if (!string.IsNullOrWhiteSpace(framework) && runtimeIdentifier is not null)
+            {
+                selected = candidates
+                    .Where(target =>
+                        target.Name.Equals($"{framework}/{runtimeIdentifier}", StringComparison.OrdinalIgnoreCase))
+                    .Select(static target => (JsonProperty?)target)
+                    .FirstOrDefault();
+            }
+            if (selected is null && !string.IsNullOrWhiteSpace(framework))
+            {
+                selected = candidates
+                    .Where(target => target.Name.Equals(framework, StringComparison.OrdinalIgnoreCase))
+                    .Select(static target => (JsonProperty?)target)
+                    .FirstOrDefault();
+            }
+            if (selected is null && runtimeIdentifier is not null)
+            {
+                var ridSuffix = $"/{runtimeIdentifier}";
+                var ridMatches = candidates
+                    .Where(target => target.Name.EndsWith(ridSuffix, StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
+                if (ridMatches.Length == 1)
+                {
+                    selected = ridMatches[0];
+                }
+            }
+            if (selected is null && candidates.Length == 1)
+            {
+                selected = candidates[0];
+            }
+            if (selected is null || selected.Value.Value.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            var packages = new List<DotNetPackage>();
+            foreach (var dependency in selected.Value.Value.EnumerateObject())
+            {
+                if (!dependency.Value.TryGetProperty("type", out var type) ||
+                    !string.Equals(type.GetString(), "package", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var separator = dependency.Name.LastIndexOf('/');
+                if (separator <= 0 || separator == dependency.Name.Length - 1)
+                {
+                    continue;
+                }
+
+                var id = dependency.Name[..separator];
+                var version = dependency.Name[(separator + 1)..];
+                packages.Add(new DotNetPackage(id, version, version));
+            }
+
+            var selectedFramework = selected.Value.Name.Split('/')[0];
+            return new DotNetPackageListJson(
+                [new DotNetProject([new DotNetFramework(selectedFramework, [], packages)])]);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -1054,7 +1370,11 @@ internal partial class MsixService
     /// <param name="preserveAppData">When true, preserves the package's application data during removal</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>True if package was found and unregistered, false if no package was found</returns>
-    public async Task<bool> UnregisterExistingPackageAsync(string packageName, TaskContext taskContext, bool preserveAppData = true, CancellationToken cancellationToken = default)
+    public async Task<bool> UnregisterExistingPackageAsync(
+        string packageName,
+        TaskContext taskContext,
+        bool preserveAppData = true,
+        CancellationToken cancellationToken = default)
     {
         taskContext.AddDebugMessage($"{UiSymbols.Trash} Checking for existing package...");
 
@@ -1076,18 +1396,11 @@ internal partial class MsixService
 
             var cwd = Path.GetFullPath(currentDirectoryProvider.GetCurrentDirectory());
 
-            // First pass: classify packages and refuse the whole operation if any
-            // out-of-tree non-dev install is present. Doing this up front (instead of
-            // mid-loop) prevents the first removal from racing ahead and wiping data
-            // that the safety check on a *later* package was meant to protect.
+            // Classify every package before removing any of them so an unsafe production
+            // registration prevents all removals.
             foreach (var pkg in installed)
             {
-                if (pkg.IsDevelopmentMode)
-                {
-                    continue;
-                }
-
-                if (!IsPathInsideDirectory(pkg.InstallLocation, cwd))
+                if (!pkg.IsDevelopmentMode && !IsPathInsideDirectory(pkg.InstallLocation, cwd))
                 {
                     var locationDescription = string.IsNullOrEmpty(pkg.InstallLocation)
                         ? "."

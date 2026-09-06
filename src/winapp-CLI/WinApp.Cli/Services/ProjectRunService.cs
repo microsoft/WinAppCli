@@ -23,6 +23,17 @@ internal sealed partial class ProjectRunService(
     private static readonly string[] RequestedProperties =
     [
         "TargetDir",
+        "PublishDir",
+        "PublishAot",
+        "RuntimeIdentifier",
+        "Platform",
+        "AssemblyName",
+        "TargetName",
+        "TargetFileName",
+        "FinalAppxManifestName",
+        "ProjectAssetsFile",
+        "BundledNETCoreAppPackageVersion",
+        "PublishProfile",
         "RunCommand",
         "RunArguments",
         "WindowsPackageType",
@@ -49,6 +60,9 @@ internal sealed partial class ProjectRunService(
     /// only because that gate reads process-global state that is always false under the test host.
     /// </summary>
     internal Func<bool>? NativeTerminalGateOverrideForTests { get; set; }
+
+    internal Func<string, NativeAotToolchainSetup>? NativeAotToolchainSetupOverrideForTests { get; set; }
+    internal Func<VsWhereEnvironmentSetup>? VsWhereEnvironmentSetupOverrideForTests { get; set; }
 
     /// <inheritdoc />
     public async Task<string?> CheckSdkAsync(DirectoryInfo workingDirectory, CancellationToken cancellationToken)
@@ -134,7 +148,8 @@ internal sealed partial class ProjectRunService(
             ProjectRunOptions options,
             DirectoryInfo workingDir,
             Action<string>? setStatus,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool requireConcreteRid = false)
     {
         // Pin an effective single TFM for a multi-targeted project (default = first declared) BEFORE any
         // pass so build/evaluate/packaging/provisioning all agree. No-op when single-targeted / --framework set.
@@ -154,7 +169,7 @@ internal sealed partial class ProjectRunService(
         // only when the target AND its whole ProjectReference closure declare a <Platforms> including the
         // arch, so it can't desync a no-<Platforms> reference (MSB3030/PRI252). Threaded into every pass
         // below (restore/build/evaluate) via `options`, keeping them in lock-step.
-        options = ResolvePlatformInjection(csproj, options);
+        options = ResolvePlatformInjection(csproj, options, requireConcreteRid);
         var buildOptions = options;
 
         // When the target lives in a solution, restore the whole solution's managed projects up front so
@@ -193,8 +208,7 @@ internal sealed partial class ProjectRunService(
         return (options, buildOptions, csWinRTMetadata);
     }
 
-    /// <inheritdoc />
-    public async Task<ProjectBuildOutcome> BuildAndResolveAsync(
+    private async Task<ProjectBuildOutcome> BuildAndResolveCoreAsync(
         FileInfo csproj,
         ProjectRunOptions options,
         CancellationToken cancellationToken)
@@ -382,7 +396,9 @@ internal sealed partial class ProjectRunService(
             options.Architecture,
             options.Framework,
             options.NoRestore,
-            string.IsNullOrEmpty(runArguments) ? null : runArguments);
+            string.IsNullOrEmpty(runArguments) ? null : runArguments,
+            RuntimeIdentifier: NullIfEmpty(GetProp(props, "RuntimeIdentifier")),
+            EvaluatedPlatform: NullIfEmpty(GetProp(props, "Platform")));
 
         return new ProjectBuildOutcome(resolution, 0);
     }

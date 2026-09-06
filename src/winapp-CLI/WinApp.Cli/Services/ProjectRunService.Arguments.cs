@@ -135,6 +135,114 @@ internal sealed partial class ProjectRunService
     }
 
     /// <summary>
+    /// Builds the tokenized <c>dotnet publish</c> invocation. Unlike build mode,
+    /// <see cref="ProjectRunOptions.NoBuild"/> does not skip this operation; it is forwarded as
+    /// <c>--no-build</c>, matching the .NET CLI contract.
+    /// </summary>
+    internal static IReadOnlyList<string> BuildPublishPassArguments(
+        FileInfo csproj,
+        ProjectRunOptions options,
+        string verbosity,
+        string? csWinRTMetadataFolder = null)
+    {
+        var tokens = new List<string>
+        {
+            "publish",
+            csproj.FullName,
+            "-c",
+            options.Configuration,
+        };
+
+        if (!options.OmitRuntimeIdentifier)
+        {
+            tokens.Add("-r");
+            tokens.Add(RunArchHelper.ToRuntimeIdentifier(options.Architecture));
+        }
+
+        if (options.NoBuild)
+        {
+            tokens.Add("--no-build");
+        }
+
+        if (options.NoRestore)
+        {
+            tokens.Add("--no-restore");
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.Framework))
+        {
+            tokens.Add("-f");
+            tokens.Add(options.Framework);
+        }
+
+        tokens.Add("-v");
+        tokens.Add(verbosity);
+        tokens.Add("-tl:off");
+
+        foreach (var property in ForwardableProperties(options.Properties))
+        {
+            tokens.Add($"-p:{property}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.Platform))
+        {
+            tokens.Add($"-p:Platform={options.Platform}");
+        }
+
+        AppendSolutionProperties(tokens, options);
+
+        if (!string.IsNullOrEmpty(csWinRTMetadataFolder))
+        {
+            tokens.Add($"-p:CsWinRTWindowsMetadata={csWinRTMetadataFolder}");
+        }
+
+        return tokens;
+    }
+
+    /// <summary>
+    /// Builds the exact restore command suggested by an indeterminate Native AOT dry run.
+    /// It mirrors publish globals and explicitly carries <c>PublishAot=true</c> when that value was
+    /// evaluated rather than supplied by the caller.
+    /// </summary>
+    internal static string BuildDryRunRestoreArguments(
+        FileInfo csproj,
+        ProjectRunOptions options,
+        bool publishAot)
+    {
+        var tokens = new List<string>
+        {
+            "restore",
+            csproj.FullName,
+        };
+
+        if (publishAot || !options.OmitRuntimeIdentifier)
+        {
+            tokens.Add("-r");
+            tokens.Add(RunArchHelper.ToRuntimeIdentifier(options.Architecture));
+        }
+        tokens.Add($"-p:Configuration={options.Configuration}");
+
+        if (!string.IsNullOrWhiteSpace(options.Framework))
+        {
+            tokens.Add($"-p:TargetFramework={options.Framework}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.Platform))
+        {
+            tokens.Add($"-p:Platform={options.Platform}");
+        }
+
+        var forwarded = ForwardableProperties(options.Properties).ToList();
+        foreach (var property in forwarded)
+        {
+            tokens.Add($"-p:{property}");
+        }
+
+        AppendSolutionProperties(tokens, options);
+        return WindowsCommandLine.JoinArguments(tokens) ?? string.Empty;
+    }
+
+    /// <summary>
     /// Builds the arguments for the EVALUATE pass: a fast, side-effect-free <c>dotnet msbuild
     /// --getProperty</c> returning resolved output paths as JSON. Fed the SAME effective build inputs as
     /// the build pass (including a resolved <c>-p:Platform</c>, when any) so its <c>TargetDir</c>/
@@ -151,7 +259,8 @@ internal sealed partial class ProjectRunService
         ProjectRunOptions options,
         string? csWinRTMetadataFolder = null,
         bool includeRuntimeIdentifier = true,
-        bool includePlatform = true)
+        bool includePlatform = true,
+        bool forceRuntimeIdentifier = false)
     {
         var rid = RunArchHelper.ToRuntimeIdentifier(options.Architecture);
 
@@ -171,7 +280,7 @@ internal sealed partial class ProjectRunService
         AppendSolutionProperties(tokens, options);
 
         tokens.Add($"-p:Configuration={options.Configuration}");
-        if (includeRuntimeIdentifier && !options.OmitRuntimeIdentifier)
+        if (includeRuntimeIdentifier && (forceRuntimeIdentifier || !options.OmitRuntimeIdentifier))
         {
             tokens.Add($"-p:RuntimeIdentifier={rid}");
         }

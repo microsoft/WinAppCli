@@ -29,6 +29,16 @@ internal enum ProjectPackaging
     Unpackaged,
 }
 
+/// <summary>The project preparation operation selected by <c>winapp run</c>.</summary>
+internal enum ProjectPreparationOperation
+{
+    /// <summary>Build and launch from the evaluated <c>TargetDir</c>.</summary>
+    Build,
+
+    /// <summary>Publish and launch from the evaluated <c>PublishDir</c>.</summary>
+    Publish,
+}
+
 /// <summary>
 /// The outcome of resolving a <c>.csproj</c> input to a concrete run mode.
 /// Either <see cref="Mode"/> is <see cref="WinAppRunMode.Folder"/> (fall back to the existing
@@ -68,7 +78,25 @@ internal sealed record ProjectRunResolution(
     string Architecture,
     string? Framework = null,
     bool NoRestore = false,
-    string? RunArguments = null);
+    string? RunArguments = null,
+    ProjectPreparationOperation Operation = ProjectPreparationOperation.Build,
+    string? PublishDirectory = null,
+    bool PublishAot = false,
+    string? RuntimeIdentifier = null,
+    string? SourceExecutable = null,
+    string? FinalAppxManifestPath = null,
+    string? ProjectAssetsFile = null,
+    string? DotnetSdk = null,
+    string? PublishProfile = null,
+    string? EvaluatedPlatform = null,
+    string? BundledNetCoreAppPackageVersion = null)
+{
+    /// <summary>The payload directory selected by the operation.</summary>
+    public string OutputDirectory =>
+        Operation == ProjectPreparationOperation.Publish
+            ? PublishDirectory ?? TargetDir
+            : TargetDir;
+}
 
 /// <summary>
 /// User-provided build inputs for project mode, forwarded to <c>dotnet build</c> / <c>dotnet msbuild</c>.
@@ -78,7 +106,7 @@ internal sealed record ProjectRunResolution(
 /// <param name="Framework">Optional target framework moniker for multi-targeted projects.</param>
 /// <param name="NoBuild">Skip the build and evaluate the existing output only.</param>
 /// <param name="NoRestore">Pass <c>--no-restore</c> to the build.</param>
-/// <param name="Properties">Raw repeatable <c>-p Name=Value</c> passthrough, forwarded to both build and evaluation.</param>
+/// <param name="Properties">Raw repeatable <c>-p Name=Value</c> passthrough, forwarded to build or publish and evaluation.</param>
 /// <param name="Json">When true, suppress human-readable stdout (banner) and route build diagnostics to stderr so stdout stays pure JSON.</param>
 /// <param name="Solution">The solution the target was resolved from; when set, the build/evaluate passes define <c>$(SolutionDir)</c> and sibling <c>Solution*</c> properties so referencing projects build as they do in VS. Null for a bare <c>.csproj</c>.</param>
 /// <param name="Platform">The MSBuild <c>Platform</c> winapp injects (<c>-p:Platform=…</c>) into every pass when the target — and its whole <c>ProjectReference</c> closure — declares a <c>&lt;Platforms&gt;</c> that includes the target arch. A RESOLVED input (see <c>ResolvePlatformInjection</c>), never user-supplied; null means arch is conveyed by the RID alone (the safe default). Older WindowsAppSDK targets hard-reject the default <c>Platform=AnyCPU</c> for self-contained / packaged builds, so the explicit Platform is what makes those projects build.</param>
@@ -93,7 +121,9 @@ internal sealed record ProjectRunOptions(
     bool Json = false,
     FileInfo? Solution = null,
     string? Platform = null,
-    bool OmitRuntimeIdentifier = false);
+    bool OmitRuntimeIdentifier = false,
+    bool DryRun = false,
+    bool VerifyNativeAot = false);
 
 /// <summary>
 /// The effective build inputs used to classify runnable candidates (multi-<c>.csproj</c> directory or
@@ -112,8 +142,24 @@ internal sealed record ProjectClassificationInputs(
     IReadOnlyList<string> Properties);
 
 /// <summary>
-/// Outcome of <see cref="Services.IProjectRunService.BuildAndResolveAsync"/>. On success,
+/// Compatibility outcome for the build operation of <see cref="Services.IProjectRunService.PrepareAndResolveAsync"/>. On success,
 /// <see cref="Resolution"/> is set and <see cref="ExitCode"/> is 0. On a build failure, the dotnet
 /// errors have already been surfaced and <see cref="ExitCode"/> is the non-zero dotnet exit code.
 /// </summary>
 internal sealed record ProjectBuildOutcome(ProjectRunResolution? Resolution, int ExitCode);
+
+/// <summary>
+/// Outcome of operation-aware project preparation. A dry run sets <see cref="Executed"/> to
+/// <see langword="false"/> and may set <see cref="Ready"/> to <see langword="null"/> when restore is
+/// required before MSBuild can evaluate the requested publish graph.
+/// </summary>
+internal sealed record ProjectPreparationOutcome(
+    ProjectRunResolution? Resolution,
+    int ExitCode,
+    bool Executed = true,
+    bool? Ready = true,
+    string? Reason = null,
+    string? SuggestedCommand = null,
+    string? ErrorCode = null,
+    string? Error = null,
+    NativeAotToolchainInfo? Toolchain = null);

@@ -202,15 +202,25 @@ winapp run ./src/MyApp/MyApp.csproj -c Release --arch arm64
 # Force an unpackaged run of a packaged project
 winapp run . -p WindowsPackageType=None
 
+# Publish and run the evaluated PublishDir artifact
+winapp run . --publish -c Release -r win-x64 --detach
+
+# Enforce Native AOT, or validate project settings and restored assets
+winapp run . --verify-native-aot -c Release -r win-x64 --detach
+winapp run . --verify-native-aot -c Release -r win-x64 --dry-run
+
 # Show winapp's build decision traces (dotnet build stays at minimal verbosity)
 winapp run . --verbose
 ```
 
 Project mode supports both **packaged** and **unpackaged** WinUI apps, detected from the project's effective `WindowsPackageType` (`MSIX` ⇒ loose-layout register + AUMID launch; `None` ⇒ launch the built `.exe`), and installs the matching-architecture Windows App Runtime before launching. Requires .NET SDK 8.0.100+.
 
-- **Build inputs:** `-c/--configuration`, `--arch`, `-r/--runtime`, `-f/--framework`, `--no-build`, `--no-restore`, `-p/--property` (repeatable).
+- **Preparation inputs:** `-c/--configuration`, `--arch`, `-r/--runtime`, `-f/--framework`, `--publish`, `--verify-native-aot`, `--dry-run`, `--no-build`, `--no-restore`, `-p/--property` (repeatable).
 - **Packaged-only options:** `--manifest`, `--no-launch`, `--with-alias`, `--clean`, `--unregister-on-exit`, `--output-appx-directory`, `--executable` — rejected for unpackaged apps.
-- **Output:** winapp prints the exact `dotnet build …` invocation, then streams build output live (warnings included on success). Under `--json`/`--quiet` both go to **stderr** so stdout stays clean.
+- **Publish:** `--publish` launches the evaluated `PublishDir`; `--verify-native-aot` also enforces `PublishAot=true`, rejects .NET single-file bundles, and checks static payload, startup liveness, loaded modules, and process/staging provenance. Set `PublishAot` in the runnable app project rather than passing it with `-p`, which can propagate to referenced libraries. Windows Native AOT supports x64 and ARM64 and requires Desktop development with C++. WinApp temporarily adds the standard Visual Studio Installer directory to the publish process's `PATH` when it contains `vswhere.exe`; it does not install the C++ workload.
+- **Dry run:** `--dry-run` does not restore, build, publish, register, or launch. For Native AOT it validates the requested x64/ARM64 linker and Windows SDK on either an x64 or ARM64 host. If assets are missing, run the exact restore command it prints and repeat the dry run.
+- **`--no-build`:** skips `dotnet build` in normal mode; with `--publish`, it is forwarded to `dotnet publish --no-build`.
+- **Output:** default output shows material phases and remediation; `--verbose` adds exact commands, evaluated paths/properties, staging, and verification evidence. Under `--json`/`--quiet`, child build/publish output goes to **stderr** so stdout stays clean.
 
 #### Choosing between `run` and `create-debug-identity`
 

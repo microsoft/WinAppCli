@@ -761,7 +761,7 @@ winapp run ./bin/Debug --clean
 
 #### Project mode (.NET SDK projects)
 
-When the input is a `.csproj`, a `.sln`/`.slnx` solution, or a directory containing one (including `.`), `winapp run` **builds the project** with `dotnet build` and then launches it. It supports both packaged and unpackaged WinUI apps, and installs the matching-architecture Windows App Runtime the app needs before launching.
+When the input is a `.csproj`, a `.sln`/`.slnx` solution, or a directory containing one (including `.`), `winapp run` builds with `dotnet build` and launches the evaluated `TargetDir` by default. Add `--publish` to run `dotnet publish` and launch the evaluated `PublishDir` instead. It supports both packaged and unpackaged WinUI apps and installs the matching-architecture Windows App Runtime the app needs before launching.
 
 **Solution input:** point `winapp run` at a `.sln`/`.slnx` (or a directory containing one — a solution is preferred over loose `.csproj` files) and it resolves the runnable app project, then builds it with `$(SolutionDir)` and the sibling `Solution*` properties defined, so projects that depend on them build as they do in Visual Studio. Resolution rules:
 
@@ -771,23 +771,34 @@ When the input is a `.csproj`, a `.sln`/`.slnx` solution, or a directory contain
 
 Packaged vs. unpackaged is detected automatically from the project's effective `WindowsPackageType` MSBuild property (never from manifest presence):
 
-- **Packaged** (`WindowsPackageType=MSIX`, the WinUI packaged default) — builds, then registers the build output as a loose-layout package and launches via AUMID (the same pipeline as folder mode).
-- **Unpackaged** (`WindowsPackageType=None`) — builds, ensures the framework-dependent Windows App Runtime is installed, then launches the built `.exe` directly. Force this for a packaged project with `-p WindowsPackageType=None`.
+- **Packaged** (`WindowsPackageType=MSIX`, the WinUI packaged default) — stages the selected build or publish payload with the evaluated generated manifest, registers it as a development loose-layout package, and launches via AUMID.
+- **Unpackaged** (`WindowsPackageType=None`) — ensures the framework-dependent Windows App Runtime is installed, then launches the selected build or publish executable directly. Force this for a packaged project with `-p WindowsPackageType=None`.
 
 Project mode requires the **.NET SDK 8.0.100 or newer** (for MSBuild `--getProperty`).
 
-**Project-mode options** (ignored in folder mode):
+**Project-mode options:**
 
 - `-c, --configuration <name>` - Build configuration. Default: `Debug`.
 - `--arch <x64|arm64|x86>` - Target architecture. Default: the current process architecture. Determines both the build RID and the architecture of the Windows App Runtime that gets installed.
 - `-r, --runtime <rid>` - Target .NET runtime identifier (e.g. `win-x64`). Project mode uses only the RID's architecture, always builds the canonical `win-<arch>`, and rejects non-Windows RIDs (e.g. `linux-x64`). Its architecture overrides `--arch`.
 - `-f, --framework <tfm>` - Target framework moniker for multi-targeted projects (e.g. `net10.0-windows10.0.26100.0`).
 - `--project <name-or-path>` - When the input is a solution (`.sln`/`.slnx`) or a directory with multiple runnable app projects, selects which project to launch (by project name or path).
-- `--no-build` - Skip building and run the existing build output (still evaluates output properties).
-- `--no-restore` - Skip restoring the project before building.
-- `-p, --property <Name=Value>` - MSBuild property, forwarded to both the build and the property evaluation. Repeatable (e.g. `-p WindowsPackageType=None`).
+- `--publish` - Run `dotnet publish`, evaluate `PublishDir` with the same configuration, RID, framework, platform, publish profile, and `-p` properties, then launch that published artifact.
+- `--verify-native-aot` - Implies `--publish`. Requires `PublishAot=true`, a `win-x64` or `win-arm64` RID, a payload without CoreCLR/JIT artifacts or a .NET single-file bundle, and a running process whose modules and image path pass Native AOT provenance checks.
+- `--dry-run` - Evaluate the build or publish plan and validate settings without restoring, building, publishing, registering, or launching. For Native AOT, it also validates the requested target's MSVC linker and Windows SDK on x64 and ARM64 hosts. If restored Native AOT assets are missing, it reports an indeterminate result and prints the exact `dotnet restore` command to run.
+- `--no-build` - Without `--publish`, skip `dotnet build` and use existing `TargetDir` output. With `--publish`, invoke `dotnet publish --no-build` and resolve its `PublishDir`; it does not mean “skip publish.”
+- `--no-restore` - Skip restoring during `dotnet build` or `dotnet publish`.
+- `-p, --property <Name=Value>` - MSBuild property, forwarded consistently to build or publish and property evaluation. Repeatable (e.g. `-p WindowsPackageType=None` or `-p PublishProfile=Custom`).
 
-**Build output & verbosity:** the project is built in two steps — a `dotnet build` whose output **streams live** to your console, followed by a fast property-evaluation pass. winapp prints the exact `dotnet build …` invocation before the output, and streams warnings even on a successful build. Verbosity:
+`--publish`, `--verify-native-aot`, and `--dry-run` require project mode. Passing one when the input resolves to a build-output folder is a usage error.
+
+**Native AOT prerequisites:** Windows Native AOT publishing requires .NET SDK 8.0.100 or newer plus Visual Studio or Visual Studio Build Tools with Desktop development with C++. WinApp validates the host/target linker combination (`HostX64` or `HostArm64` to `x64` or `arm64`) and matching Windows SDK libraries before reporting readiness or starting publish. If `vswhere.exe` exists in the standard Visual Studio Installer directory but is missing from `PATH`, WinApp adds that directory only to the `dotnet publish` child process. WinApp does not install missing workloads.
+
+For `--verify-native-aot`, WinApp also checks that the process remains alive during a short internal startup window. A self-contained single-file JIT app can hide CoreCLR inside its executable, so WinApp rejects the official .NET single-file bundle marker rather than certifying it from missing sidecar files. Packaged output must be registered in development mode at this invocation's staging directory; unpackaged output must run directly from the evaluated `PublishDir`. JSON output includes the resolved Native AOT toolchain, source executable, staging/process paths, package identity, PID, exit code when available, window information, and layered verification results.
+
+If the app exits during verification, the error reports its exit code when available. Re-run without `--verify-native-aot` and `--detach`, then add `--debug-output`; add `--symbols` for native crash details.
+
+**Build or publish output & verbosity:** project preparation runs in two steps — `dotnet build` or `dotnet publish`, whose output **streams live** to your console, followed by a fast property-evaluation pass. winapp prints the exact `dotnet …` invocation before the output and streams warnings even on success. Verbosity:
 
 | Flag | dotnet verbosity | Adds |
 |------|------------------|------|
@@ -822,6 +833,15 @@ winapp run . -p WindowsPackageType=None
 
 # Run the existing build output without rebuilding, and capture crash diagnostics
 winapp run . --no-build --debug-output
+
+# Publish and run the evaluated PublishDir artifact
+winapp run . --publish -c Release -r win-x64 --detach
+
+# Publish, launch, and enforce Native AOT
+winapp run . --verify-native-aot -c Release -r win-x64 --detach
+
+# Check settings and restored runtime packs without changing anything
+winapp run . --verify-native-aot -c Release -r win-x64 --dry-run
 
 # Show winapp's build decision traces (dotnet build stays at minimal verbosity)
 winapp run . --verbose

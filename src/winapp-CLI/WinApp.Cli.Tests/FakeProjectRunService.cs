@@ -36,6 +36,9 @@ internal sealed class FakeProjectRunService : IProjectRunService
     public List<ProjectClassificationInputs?> ResolveInputClassificationInputs { get; } = [];
     public List<FileInfo> BuildAndResolveCalls { get; } = [];
     public List<ProjectRunOptions> BuildOptions { get; } = [];
+    public List<ProjectPreparationOperation> PreparationOperations { get; } = [];
+
+    public ProjectPreparationOutcome? PreparationOutcome { get; set; }
 
     /// <summary>Records each <see cref="IsDefinitivelyUnpackagedAsync"/> invocation (for asserting the pre-flight probe fired or was skipped).</summary>
     public List<FileInfo> IsDefinitivelyUnpackagedCalls { get; } = [];
@@ -67,17 +70,45 @@ internal sealed class FakeProjectRunService : IProjectRunService
     public Task<string?> CheckSdkAsync(DirectoryInfo workingDirectory, CancellationToken cancellationToken)
         => Task.FromResult(SdkError);
 
-    public Task<ProjectBuildOutcome> BuildAndResolveAsync(FileInfo csproj, ProjectRunOptions options, CancellationToken cancellationToken)
+    public Task<ProjectPreparationOutcome> PrepareAndResolveAsync(
+       FileInfo csproj,
+       ProjectRunOptions options,
+       ProjectPreparationOperation operation,
+       CancellationToken cancellationToken)
     {
         BuildAndResolveCalls.Add(csproj);
         BuildOptions.Add(options);
+       PreparationOperations.Add(operation);
         if (BuildThrows != null)
         {
             throw BuildThrows;
         }
 
-        return Task.FromResult(BuildOutcome
-            ?? throw new InvalidOperationException("FakeProjectRunService.BuildOutcome was not configured."));
+       if (PreparationOutcome is not null)
+       {
+           return Task.FromResult(PreparationOutcome);
+       }
+
+       var build = BuildOutcome
+           ?? throw new InvalidOperationException("FakeProjectRunService.BuildOutcome was not configured.");
+       return Task.FromResult(new ProjectPreparationOutcome(
+           build.Resolution,
+           build.ExitCode,
+           Executed: !options.DryRun,
+           Ready: build.Resolution is not null));
+    }
+
+    public async Task<ProjectBuildOutcome> BuildAndResolveAsync(
+       FileInfo csproj,
+       ProjectRunOptions options,
+       CancellationToken cancellationToken)
+    {
+       var outcome = await PrepareAndResolveAsync(
+           csproj,
+           options,
+           ProjectPreparationOperation.Build,
+           cancellationToken);
+       return new ProjectBuildOutcome(outcome.Resolution, outcome.ExitCode);
     }
 
     public Task<bool> IsDefinitivelyUnpackagedAsync(FileInfo csproj, ProjectRunOptions options, CancellationToken cancellationToken)

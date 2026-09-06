@@ -611,6 +611,8 @@ export interface RunOptions extends CommonOptions {
   debugOutput?: boolean;
   /** Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). */
   detach?: boolean;
+  /** Project mode: evaluate and validate the selected build or publish plan without building, publishing, registering, or launching. */
+  dryRun?: boolean;
   /** Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder. */
   executable?: string;
   /** Project mode: target framework moniker for multi-targeted projects (e.g. net10.0-windows10.0.26100.0). Ignored in folder mode. */
@@ -619,24 +621,28 @@ export interface RunOptions extends CommonOptions {
   json?: boolean;
   /** Path to the Package.appxmanifest (default: auto-detect from input folder or current directory) */
   manifest?: string;
-  /** Project mode: skip building and run the existing build output (still evaluates output properties). Ignored in folder mode. */
+  /** Project mode: without --publish, skip dotnet build and run existing TargetDir output; with --publish, pass --no-build to dotnet publish. */
   noBuild?: boolean;
   /** Only create the debug identity and register the package without launching the application */
   noLaunch?: boolean;
-  /** Project mode: skip restoring the project before building. Ignored in folder mode. */
+  /** Project mode: skip restoring during dotnet build or dotnet publish. */
   noRestore?: boolean;
   /** Output directory for the loose layout package. If not specified, a directory named AppX inside the input directory will be used. */
   outputAppxDirectory?: string;
   /** Project mode: when the input is a solution (.sln/.slnx) or a directory with multiple runnable app projects, selects which project to launch (by name or path). Ignored in folder mode. */
   project?: string;
-  /** Project mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode. */
+  /** Project mode: MSBuild property as Name=Value, forwarded to build or publish and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode. */
   property?: string | string[];
+  /** Project mode: run dotnet publish and launch the exact evaluated PublishDir artifact instead of build output. */
+  publish?: boolean;
   /** Project mode: target .NET runtime identifier (RID), e.g. win-x64. Project mode uses only the RID's architecture, always builds the canonical win-<arch>, and rejects non-Windows RIDs (e.g. linux-x64); it overrides --arch. Ignored in folder mode. */
   runtime?: string;
   /** Download symbols from Microsoft Symbol Server for richer native crash analysis, including the WinUI stowed-exception dispatch stack. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. */
   symbols?: boolean;
   /** Unregister the development package after the application exits. Only removes packages registered in development mode. */
   unregisterOnExit?: boolean;
+  /** Project mode: implies --publish and fails unless the published payload and running process are verified as Native AOT. */
+  verifyNativeAot?: boolean;
   /** Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use "winapp manifest add-alias" to add an execution alias to the manifest. */
   withAlias?: boolean;
   /** Arguments to pass to the launched application (forwarded after --). */
@@ -644,7 +650,7 @@ export interface RunOptions extends CommonOptions {
 }
 
 /**
- * Builds and runs a Windows app from a .csproj/.sln or a build-output folder. In project mode, invokes dotnet build then launches the app (packaged or unpackaged); in folder mode, creates a debug-signed layout, registers the package, and launches it.
+ * Builds or publishes and runs a Windows app from a .csproj/.sln, or runs a build-output folder. Project mode launches packaged or unpackaged output; folder mode creates a debug-signed layout, registers it, and launches it.
  */
 export async function run(options: RunOptions = {}): Promise<WinappResult> {
   const args: string[] = ['run'];
@@ -656,6 +662,7 @@ export async function run(options: RunOptions = {}): Promise<WinappResult> {
   if (options.configuration) args.push('--configuration', options.configuration);
   if (options.debugOutput) args.push('--debug-output');
   if (options.detach) args.push('--detach');
+  if (options.dryRun) args.push('--dry-run');
   if (options.executable) args.push('--executable', options.executable);
   if (options.framework) args.push('--framework', options.framework);
   if (options.json) args.push('--json');
@@ -669,9 +676,11 @@ export async function run(options: RunOptions = {}): Promise<WinappResult> {
     const propertyArr = Array.isArray(options.property) ? options.property : [options.property];
     for (const v of propertyArr) args.push('--property', v);
   }
+  if (options.publish) args.push('--publish');
   if (options.runtime) args.push('--runtime', options.runtime);
   if (options.symbols) args.push('--symbols');
   if (options.unregisterOnExit) args.push('--unregister-on-exit');
+  if (options.verifyNativeAot) args.push('--verify-native-aot');
   if (options.withAlias) args.push('--with-alias');
   if (options.appArgs !== undefined) {
     const appArgsArr = Array.isArray(options.appArgs) ? options.appArgs : [options.appArgs];

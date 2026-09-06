@@ -89,8 +89,12 @@ internal interface IMsixService
         string? executable = null,
         string? runtimeArch = null,
         FileInfo? projectFile = null,
+        FileInfo? projectAssetsFile = null,
         string? framework = null,
         bool noRestore = false,
+        bool windowsAppSdkSelfContained = false,
+        bool requireExactRuntimeDependency = false,
+        bool excludeSymbolsFromLayout = false,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -114,6 +118,7 @@ internal interface IMsixService
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<bool> EnsureWindowsAppRuntimeInstalledAsync(
         FileInfo? projectFile,
+        FileInfo? projectAssetsFile,
         string? architecture,
         string? framework,
         bool noRestore,

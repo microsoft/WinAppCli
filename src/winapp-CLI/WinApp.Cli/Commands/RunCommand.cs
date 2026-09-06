@@ -19,7 +19,7 @@ namespace WinApp.Cli.Commands;
 
 internal partial class RunCommand : Command, IShortDescription
 {
-    public string ShortDescription => "Run a Windows app: build and launch from a .csproj/.sln, or launch an existing build-output folder.";
+    public string ShortDescription => "Run a Windows app: build or publish and launch from a .csproj/.sln, or launch an existing build-output folder.";
 
     public static Argument<FileSystemInfo> InputArgument { get; }
     public static Option<FileInfo> ManifestOption { get; }
@@ -41,6 +41,9 @@ internal partial class RunCommand : Command, IShortDescription
     public static Option<string?> FrameworkOption { get; }
     public static Option<bool> NoBuildOption { get; }
     public static Option<bool> NoRestoreOption { get; }
+    public static Option<bool> PublishOption { get; }
+    public static Option<bool> VerifyNativeAotOption { get; }
+    public static Option<bool> DryRunOption { get; }
     public static Option<string[]> PropertyOption { get; }
     public static Option<string?> ProjectOption { get; }
 
@@ -152,17 +155,32 @@ internal partial class RunCommand : Command, IShortDescription
 
         NoBuildOption = new Option<bool>("--no-build")
         {
-            Description = "Project mode: skip building and run the existing build output (still evaluates output properties). Ignored in folder mode."
+           Description = "Project mode: without --publish, skip dotnet build and run existing TargetDir output; with --publish, pass --no-build to dotnet publish."
         };
 
         NoRestoreOption = new Option<bool>("--no-restore")
         {
-            Description = "Project mode: skip restoring the project before building. Ignored in folder mode."
+           Description = "Project mode: skip restoring during dotnet build or dotnet publish."
+        };
+
+        PublishOption = new Option<bool>("--publish")
+        {
+           Description = "Project mode: run dotnet publish and launch the exact evaluated PublishDir artifact instead of build output."
+        };
+
+        VerifyNativeAotOption = new Option<bool>("--verify-native-aot")
+        {
+           Description = "Project mode: implies --publish and fails unless the published payload and running process are verified as Native AOT."
+        };
+
+        DryRunOption = new Option<bool>("--dry-run")
+        {
+           Description = "Project mode: evaluate and validate the selected build or publish plan without building, publishing, registering, or launching."
         };
 
         PropertyOption = new Option<string[]>("--property")
         {
-            Description = "Project mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode.",
+            Description = "Project mode: MSBuild property as Name=Value, forwarded to build or publish and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode.",
             // ZeroOrMore (not OneOrMore) so a valueless '-p' reaches the handler, which emits a
             // --json-aware error; OneOrMore would raise a plain-text parser error, bypassing --json.
             Arity = ArgumentArity.ZeroOrMore,
@@ -176,7 +194,7 @@ internal partial class RunCommand : Command, IShortDescription
         };
     }
 
-    public RunCommand() : base("run", "Builds and runs a Windows app from a .csproj/.sln or a build-output folder. In project mode, invokes dotnet build then launches the app (packaged or unpackaged); in folder mode, creates a debug-signed layout, registers the package, and launches it.")
+    public RunCommand() : base("run", "Builds or publishes and runs a Windows app from a .csproj/.sln, or runs a build-output folder. Project mode launches packaged or unpackaged output; folder mode creates a debug-signed layout, registers it, and launches it.")
     {
         Arguments.Add(InputArgument);
         Arguments.Add(PassthroughArgument);
@@ -197,6 +215,9 @@ internal partial class RunCommand : Command, IShortDescription
         Options.Add(FrameworkOption);
         Options.Add(NoBuildOption);
         Options.Add(NoRestoreOption);
+        Options.Add(PublishOption);
+        Options.Add(VerifyNativeAotOption);
+        Options.Add(DryRunOption);
         Options.Add(PropertyOption);
         Options.Add(ProjectOption);
         Options.Add(WinAppRootCommand.JsonOption);
@@ -211,6 +232,7 @@ internal partial class RunCommand : Command, IShortDescription
         IAnsiConsole ansiConsole,
         IStatusService statusService,
         IProjectRunService projectRunService,
+        INativeAotVerifier nativeAotVerifier,
         IProjectContextDetector projectContextDetector,
         ILogger<RunCommand> logger) : AsynchronousCommandLineAction
     {
@@ -243,6 +265,9 @@ internal partial class RunCommand : Command, IShortDescription
             var useSymbols = parseResult.GetValue(SymbolsOption);
             var executable = parseResult.GetValue(ExecutableOption);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
+            var publish = parseResult.GetValue(PublishOption);
+            var verifyNativeAot = parseResult.GetValue(VerifyNativeAotOption);
+            var dryRun = parseResult.GetValue(DryRunOption);
 
             // Reject a valueless -p/--property. The option uses ZeroOrMore arity so a bare
             // '-p' (no Name=Value) parses without a value instead of raising a System.CommandLine
@@ -459,6 +484,26 @@ internal partial class RunCommand : Command, IShortDescription
                 return await RunProjectModeAsync(parseResult, inputResolution.Csproj!, inputResolution.Solution, inputResolution.SelectionReason, appArgs, isJson, cancellationToken);
             }
 
+            var projectOnlyOptions = new List<string>();
+            if (publish)
+            {
+               projectOnlyOptions.Add("--publish");
+            }
+            if (verifyNativeAot)
+            {
+               projectOnlyOptions.Add("--verify-native-aot");
+            }
+            if (dryRun)
+            {
+               projectOnlyOptions.Add("--dry-run");
+            }
+            if (projectOnlyOptions.Count > 0)
+            {
+               return Fail(
+                   $"{string.Join(", ", projectOnlyOptions)} can only be used with a .csproj, solution, or source directory that resolves to project mode.",
+                   isJson);
+            }
+
             // Folder mode: the FileSystemInfo converter yields a DirectoryInfo for an existing
             // directory. Delegate to the shared pipeline with no project-mode runtime hints, so
             // behavior is identical to before project mode existed.
@@ -480,7 +525,15 @@ internal partial class RunCommand : Command, IShortDescription
             return await ExecuteRunPipelineAsync(
                 inputFolder, manifest, outputAppXDirectory, appArgs,
                 noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, isJson,
-                runtimeArch: null, projectFile: null, framework: null, noRestore: false, cancellationToken);
+               runtimeArch: null,
+               projectFile: null,
+               framework: null,
+               noRestore: false,
+               projectResolution: null,
+               projectReport: null,
+               verifyNativeAot: false,
+               staticVerification: null,
+               cancellationToken);
         }
 
         /// <summary>
@@ -508,6 +561,10 @@ internal partial class RunCommand : Command, IShortDescription
             FileInfo? projectFile,
             string? framework,
             bool noRestore,
+            ProjectRunResolution? projectResolution,
+            ProjectRunCommandResult? projectReport,
+            bool verifyNativeAot,
+            NativeAotStaticVerification? staticVerification,
             CancellationToken cancellationToken)
         {
             uint processId = 0;
@@ -519,6 +576,7 @@ internal partial class RunCommand : Command, IShortDescription
             string? aumid = null;
             string? errorMessage = null;
             DirectoryInfo? resolvedOutputDir = null;
+            NativeAotRuntimeVerification? runtimeVerification = null;
             var statusMessage = noLaunch ? "Registering packaged application..." : "Launching packaged application...";
             var success = await statusService.ExecuteWithStatusAsync(statusMessage, async (taskContext, cancellationToken) =>
             {
@@ -563,6 +621,17 @@ internal partial class RunCommand : Command, IShortDescription
                     }
 
                     outputAppXDirectory ??= new DirectoryInfo(Path.Combine(inputFolder.FullName, "AppX"));
+                    var sameInputAndOutput = string.Equals(
+                        Path.TrimEndingDirectorySeparator(Path.GetFullPath(outputAppXDirectory.FullName)),
+                        Path.TrimEndingDirectorySeparator(Path.GetFullPath(inputFolder.FullName)),
+                        StringComparison.OrdinalIgnoreCase);
+                    if (!sameInputAndOutput &&
+                        DirectoryRelationship.IsSameOrAncestor(outputAppXDirectory, inputFolder))
+                    {
+                        throw new InvalidOperationException(
+                            $"The AppX output directory '{outputAppXDirectory.FullName}' cannot be the input directory '{inputFolder.FullName}' or one of its ancestors. " +
+                            "Choose a separate directory or a child directory such as 'AppX'.");
+                    }
                     resolvedOutputDir = outputAppXDirectory;
 
                     // Validate that the manifest and output paths are usable (check long path support if needed)
@@ -580,8 +649,16 @@ internal partial class RunCommand : Command, IShortDescription
                         executable,
                         runtimeArch,
                         projectFile,
+                        string.IsNullOrWhiteSpace(projectResolution?.ProjectAssetsFile)
+                            ? null
+                            : new FileInfo(projectResolution.ProjectAssetsFile),
                         framework,
                         noRestore,
+                        windowsAppSdkSelfContained: projectResolution?.SelfContained == true,
+                        requireExactRuntimeDependency:
+                           projectResolution?.Operation == ProjectPreparationOperation.Publish,
+                        excludeSymbolsFromLayout:
+                           projectResolution?.Operation == ProjectPreparationOperation.Publish,
                         cancellationToken);
 
                     packageFamilyName = appLauncherService.ComputePackageFamilyName(
@@ -592,6 +669,13 @@ internal partial class RunCommand : Command, IShortDescription
                     publisher = identityResult.Publisher;
                     applicationId = identityResult.ApplicationId;
                     aumid = $"{packageFamilyName}!{applicationId}";
+
+                    if (projectReport is not null)
+                    {
+                       projectReport.StagingDirectory = outputAppXDirectory.FullName;
+                       projectReport.PackageIdentity = identityResult.PackageName;
+                       projectReport.AUMID = aumid;
+                    }
 
                     taskContext.AddDebugMessage($"{UiSymbols.Package} Package: {identityResult.PackageName}");
                     taskContext.AddDebugMessage($"{UiSymbols.User} Publisher: {publisher}");
@@ -614,29 +698,150 @@ internal partial class RunCommand : Command, IShortDescription
                     taskContext.AddDebugMessage($"{UiSymbols.Rocket} Launching application...");
                     processId = appLauncherService.LaunchByAumid(aumid, appArgs);
 
+                    if (projectReport is not null)
+                    {
+                       projectReport.ProcessId = processId;
+                       if (projectResolution?.Operation == ProjectPreparationOperation.Publish)
+                       {
+                           projectReport.ProcessPath = ResolveStagedExecutable(outputAppXDirectory);
+                       }
+                    }
+
+                    if (verifyNativeAot)
+                    {
+                       if (projectResolution?.SourceExecutable is null)
+                       {
+                           throw new InvalidOperationException(
+                               "Native AOT verification could not identify the published source executable.");
+                       }
+                       if (projectReport is null)
+                       {
+                           throw new InvalidOperationException(
+                               "Native AOT verification requires a project-mode result envelope.");
+                       }
+
+                       var stagedExecutable = projectReport.ProcessPath
+                           ?? ResolveStagedExecutable(outputAppXDirectory);
+                       projectReport.ProcessPath = stagedExecutable;
+                       runtimeVerification = await nativeAotVerifier.VerifyRuntimeAsync(
+                           new NativeAotRuntimeVerificationRequest(
+                               processId,
+                               projectResolution.SourceExecutable,
+                               stagedExecutable,
+                               ProjectPackaging.Packaged,
+                               outputAppXDirectory.FullName,
+                               identityResult.PackageName),
+                           cancellationToken);
+                       PopulateRuntimeVerificationReport(
+                           projectReport,
+                           staticVerification,
+                           runtimeVerification);
+                        LogNativeAotVerification(runtimeVerification);
+
+                       if (!runtimeVerification.Succeeded)
+                       {
+                           errorMessage = runtimeVerification.Error ?? "Native AOT runtime verification failed.";
+                           projectReport.ErrorCode = NativeAotRuntimeErrorCode(runtimeVerification);
+                           projectReport.Ready = false;
+                           projectReport.Error =
+                               $"{errorMessage} Launched process PID {processId} was terminated or had already exited.";
+                           appLauncherService.TerminatePackageProcesses(packageFullName, processId);
+                           return (1, $"{UiSymbols.Error} {projectReport.Error}");
+                       }
+                    }
+
                     return (0, $"{packageFamilyName} launched (PID: {processId})");
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    if (processId != 0)
+                    {
+                        appLauncherService.TerminatePackageProcesses(packageFullName, processId);
+                    }
+                    if (unregisterOnExit && packageName != null)
+                    {
+                        await UnregisterOnExitAsync(
+                            packageName,
+                            packageFullName,
+                            resolvedOutputDir,
+                            strictCurrentRegistration: projectResolution?.Operation == ProjectPreparationOperation.Publish,
+                            CancellationToken.None);
+                    }
+                    throw;
                 }
                 catch (Exception error)
                 {
                     errorMessage = error.Message;
-                    return (1, $"{UiSymbols.Error} Failed to launch application: {error.Message}");
+                    if (verifyNativeAot && processId != 0)
+                    {
+                        appLauncherService.TerminatePackageProcesses(packageFullName, processId);
+                        errorMessage += $" Launched process PID {processId} was terminated or had already exited.";
+                        if (projectReport is not null)
+                        {
+                            projectReport.ProcessId = processId;
+                            projectReport.ErrorCode = "NativeAotVerificationFailed";
+                            projectReport.Ready = false;
+                            projectReport.Error = errorMessage;
+                        }
+                    }
+                    return (1, $"{UiSymbols.Error} Failed to launch application: {errorMessage}");
                 }
             }, cancellationToken);
 
             if (success != 0)
             {
+                if (unregisterOnExit && packageName != null)
+                {
+                    var cleanupError = await UnregisterOnExitAsync(
+                        packageName,
+                        packageFullName,
+                        resolvedOutputDir,
+                        strictCurrentRegistration: projectResolution?.Operation == ProjectPreparationOperation.Publish,
+                        cancellationToken);
+                    if (!string.IsNullOrWhiteSpace(cleanupError))
+                    {
+                        errorMessage = $"{errorMessage} Cleanup failed: {cleanupError}";
+                        if (projectReport is not null)
+                        {
+                            projectReport.Error = errorMessage;
+                        }
+                    }
+                }
+
                 if (isJson)
                 {
-                    PrintJson(aumid, processId: null, errorMessage);
+                   if (projectReport is not null)
+                   {
+                       projectReport.Error ??= errorMessage;
+                       projectReport.ErrorCode ??= PackagedLaunchErrorCode(errorMessage);
+                       projectReport.Ready = false;
+                       PrintJson(projectReport);
+                   }
+                   else
+                   {
+                       PrintJson(aumid, processId: null, errorMessage);
+                   }
                 }
                 return success;
+            }
+
+            if (runtimeVerification?.Succeeded == true && projectReport is not null)
+            {
+               PrintNativeAotVerificationSuccess(projectReport, isJson);
             }
 
             if (noLaunch)
             {
                 if (isJson)
                 {
-                    PrintJson(aumid, processId: null, errorMessage: null);
+                   if (projectReport is not null)
+                   {
+                       PrintJson(projectReport);
+                   }
+                   else
+                   {
+                       PrintJson(aumid, processId: null, errorMessage: null);
+                   }
                 }
                 return success;
             }
@@ -646,7 +851,14 @@ internal partial class RunCommand : Command, IShortDescription
             {
                 if (isJson)
                 {
-                    PrintJson(aumid, processId, errorMessage: null);
+                   if (projectReport is not null)
+                   {
+                       PrintJson(projectReport);
+                   }
+                   else
+                   {
+                       PrintJson(aumid, processId, errorMessage: null);
+                   }
                 }
                 else
                 {
@@ -663,14 +875,26 @@ internal partial class RunCommand : Command, IShortDescription
                 var aliasExitCode = await LaunchViaExecutionAliasAsync(resolvedOutputDir!, inputFolder, appArgs, debugOutput, useSymbols, packageFullName, cancellationToken);
                 if (unregisterOnExit && packageName != null)
                 {
-                    await UnregisterDevPackageAsync(packageName, cancellationToken);
+                    await UnregisterOnExitAsync(
+                        packageName,
+                        packageFullName,
+                        resolvedOutputDir,
+                        strictCurrentRegistration: projectResolution?.Operation == ProjectPreparationOperation.Publish,
+                        cancellationToken);
                 }
                 return aliasExitCode;
             }
 
             if (isJson)
             {
-                PrintJson(aumid, processId, errorMessage: null);
+               if (projectReport is not null)
+               {
+                   PrintJson(projectReport);
+               }
+               else
+               {
+                   PrintJson(aumid, processId, errorMessage: null);
+               }
             }
 
             // --debug-output: run the debug event loop instead of plain WaitForExit.
@@ -685,7 +909,12 @@ internal partial class RunCommand : Command, IShortDescription
                 }
                 if (unregisterOnExit && packageName != null)
                 {
-                    await UnregisterDevPackageAsync(packageName, cancellationToken);
+                    await UnregisterOnExitAsync(
+                        packageName,
+                        packageFullName,
+                        resolvedOutputDir,
+                        strictCurrentRegistration: projectResolution?.Operation == ProjectPreparationOperation.Publish,
+                        cancellationToken);
                 }
                 return exitCode;
             }
@@ -723,7 +952,12 @@ internal partial class RunCommand : Command, IShortDescription
 
             if (unregisterOnExit && packageName != null)
             {
-                await UnregisterDevPackageAsync(packageName, cancellationToken);
+                await UnregisterOnExitAsync(
+                    packageName,
+                    packageFullName,
+                    resolvedOutputDir,
+                    strictCurrentRegistration: projectResolution?.Operation == ProjectPreparationOperation.Publish,
+                    cancellationToken);
             }
 
             return appExitCode;
@@ -731,13 +965,16 @@ internal partial class RunCommand : Command, IShortDescription
 
         void PrintJson(string? aumid, uint? processId, string? errorMessage)
         {
-            var result = new RunCommandResult
+           PrintJson(new RunCommandResult
             {
                 AUMID = aumid,
                 ProcessId = processId,
                 Error = errorMessage
-            };
+           });
+        }
 
+        void PrintJson(RunCommandResult result)
+        {
             var json = JsonSerializer.Serialize(result, RunCommandJsonContext.Default.RunCommandResult);
 
             // Write the machine-readable payload straight to the underlying stdout writer rather than
@@ -748,7 +985,65 @@ internal partial class RunCommand : Command, IShortDescription
             ansiConsole.Profile.Out.Writer.WriteLine(json);
         }
 
+        void PrintJson(ProjectRunCommandResult result)
+        {
+           var json = JsonSerializer.Serialize(
+               result,
+               RunCommandJsonContext.Default.ProjectRunCommandResult);
+           ansiConsole.Profile.Out.Writer.WriteLine(json);
+        }
+
         private static FileInfo FindManifest(string directory) => ManifestHelper.FindManifest(directory);
+
+        private static string ResolveStagedExecutable(DirectoryInfo stagingDirectory)
+        {
+           var manifestFile = FindManifest(stagingDirectory.FullName);
+           if (!manifestFile.Exists)
+           {
+               throw new FileNotFoundException(
+                   $"The registered staging manifest was not found in '{stagingDirectory.FullName}'.");
+           }
+
+           var manifest = AppxManifestDocument.Load(manifestFile.FullName);
+           if (string.IsNullOrWhiteSpace(manifest.ApplicationExecutable))
+           {
+               throw new InvalidOperationException(
+                   $"The staged manifest '{manifestFile.FullName}' does not declare an application executable.");
+           }
+
+           var executable = Path.GetFullPath(
+               manifest.ApplicationExecutable.Replace('/', Path.DirectorySeparatorChar),
+               stagingDirectory.FullName);
+           if (!File.Exists(executable))
+           {
+               throw new FileNotFoundException(
+                   $"The staged executable declared by the manifest was not found: '{executable}'.");
+           }
+
+           return executable;
+        }
+
+        private static string PackagedLaunchErrorCode(string? error)
+        {
+           if (!string.IsNullOrWhiteSpace(error))
+           {
+              if (error.Contains("Windows App Runtime", StringComparison.OrdinalIgnoreCase) ||
+                  error.Contains("Microsoft.WindowsAppRuntime", StringComparison.OrdinalIgnoreCase) ||
+                  error.Contains("package graph", StringComparison.OrdinalIgnoreCase))
+              {
+                  return "PackagedRuntimeDependencyUnresolved";
+              }
+              if (error.Contains("register", StringComparison.OrdinalIgnoreCase))
+              {
+                  return "PackageRegistrationFailed";
+              }
+              if (error.Contains("manifest", StringComparison.OrdinalIgnoreCase))
+              {
+                  return "GeneratedManifestMissing";
+              }
+           }
+           return "PackagedLaunchFailed";
+        }
 
         /// <summary>
         /// Unregisters dev-mode packages matching the given name.
@@ -773,6 +1068,83 @@ internal partial class RunCommand : Command, IShortDescription
             catch (Exception ex)
             {
                 logger.LogDebug("Failed to unregister package on exit: {Message}", ex.Message);
+            }
+        }
+
+        private async Task<string?> UnregisterOnExitAsync(
+            string packageName,
+            string? packageFullName,
+            DirectoryInfo? expectedInstallLocation,
+            bool strictCurrentRegistration,
+            CancellationToken cancellationToken)
+        {
+            if (!strictCurrentRegistration || expectedInstallLocation is null)
+            {
+                await UnregisterDevPackageAsync(packageName, cancellationToken);
+                return null;
+            }
+
+            try
+            {
+                var registrations = packageRegistrationService.FindDevPackages(packageName);
+                foreach (var registration in registrations)
+                {
+                    if (!registration.IsDevelopmentMode ||
+                        !PathsEqual(registration.InstallLocation, expectedInstallLocation.FullName) ||
+                        (!string.IsNullOrWhiteSpace(packageFullName) &&
+                         !string.Equals(registration.FullName, packageFullName, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        continue;
+                    }
+
+                    await packageRegistrationService.UnregisterByFullNameAsync(
+                        registration.FullName,
+                        preserveAppData: false,
+                        cancellationToken);
+                    logger.LogDebug(
+                        "Unregistered current publish registration {FullName} from {InstallLocation}.",
+                        registration.FullName,
+                        expectedInstallLocation.FullName);
+                }
+                return null;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex) when (
+                ex is InvalidOperationException or
+                UnauthorizedAccessException or
+                IOException or
+                System.Runtime.InteropServices.COMException)
+            {
+                logger.LogDebug(
+                    "Failed to unregister current publish registration on exit: {Message}",
+                    ex.Message);
+                return ex.Message;
+            }
+        }
+
+        private static bool PathsEqual(string? left, string? right)
+        {
+            if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
+            {
+                return false;
+            }
+
+            try
+            {
+                return string.Equals(
+                    Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                    Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                    StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception ex) when (
+                ex is ArgumentException or
+                NotSupportedException or
+                PathTooLongException)
+            {
+                return false;
             }
         }
 
@@ -984,14 +1356,50 @@ internal partial class RunCommand : Command, IShortDescription
     }
 }
 
-internal sealed class RunCommandResult
+internal class RunCommandResult
 {
     public string? AUMID { get; set; }
     public uint? ProcessId { get; set; }
     public string? Error { get; set; }
 }
 
+internal sealed class ProjectRunCommandResult : RunCommandResult
+{
+    public int? SchemaVersion { get; set; }
+    public string? Operation { get; set; }
+    public bool? Executed { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public bool? Ready { get; set; }
+    public string? Reason { get; set; }
+    public string? SuggestedCommand { get; set; }
+    public string? Configuration { get; set; }
+    public string? RuntimeIdentifier { get; set; }
+    public string? Architecture { get; set; }
+    public string? Platform { get; set; }
+    public bool? PublishAot { get; set; }
+    public string? ProjectPath { get; set; }
+    public string? PublishDirectory { get; set; }
+    public string? SourceExecutable { get; set; }
+    public string? Packaging { get; set; }
+    public string? StagingDirectory { get; set; }
+    public string? ProcessPath { get; set; }
+    public string? PackageIdentity { get; set; }
+    public bool? Alive { get; set; }
+    public int? ProcessExitCode { get; set; }
+    public long? MainWindowHandle { get; set; }
+    public string? MainWindowTitle { get; set; }
+    public bool? NativeAotVerified { get; set; }
+    public RunVerificationResult? Verification { get; set; }
+    public NativeAotToolchainInfo? Toolchain { get; set; }
+    public string? DotnetSdk { get; set; }
+    public string? ErrorCode { get; set; }
+    public string? Details { get; set; }
+}
+
 [JsonSerializable(typeof(RunCommandResult))]
+[JsonSerializable(typeof(ProjectRunCommandResult))]
+[JsonSerializable(typeof(RunVerificationResult))]
+[JsonSerializable(typeof(NativeAotToolchainInfo))]
 [JsonSourceGenerationOptions(
     WriteIndented = true,
     NewLine = "\n",

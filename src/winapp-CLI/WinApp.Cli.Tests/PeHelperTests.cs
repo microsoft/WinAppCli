@@ -9,6 +9,14 @@ namespace WinApp.Cli.Tests;
 [TestClass]
 public class PeHelperTests
 {
+    private static readonly byte[] DotNetBundleSignature =
+    [
+        0x8b, 0x12, 0x02, 0xb9, 0x6a, 0x61, 0x20, 0x38,
+        0x72, 0x7b, 0x93, 0x02, 0x14, 0xd7, 0xa0, 0x32,
+        0x13, 0xf5, 0xb9, 0xe6, 0xef, 0xae, 0x33, 0x18,
+        0xee, 0x3b, 0x2d, 0xce, 0x24, 0xb3, 0x6a, 0xae,
+    ];
+
     // COFF machine constants.
     private const ushort I386 = 0x014C;
     private const ushort Amd64 = 0x8664;
@@ -79,14 +87,18 @@ public class PeHelperTests
     [TestMethod]
     public void DetectPeArchitecture_NonexistentFile_ReturnsNull()
     {
-        var missing = Path.Combine(Path.GetTempPath(), $"pehelper_missing_{Guid.NewGuid():N}.dll");
+        var missing = Path.GetFullPath(
+            $"pehelper_missing_{Guid.NewGuid():N}.dll",
+            Path.GetTempPath());
         Assert.IsNull(PeHelper.DetectPeArchitecture(missing));
     }
 
     [TestMethod]
     public void DetectPeArchitecture_NotAPeFile_ReturnsNull()
     {
-        var junk = Path.Combine(Path.GetTempPath(), $"pehelper_junk_{Guid.NewGuid():N}.bin");
+        var junk = Path.GetFullPath(
+            $"pehelper_junk_{Guid.NewGuid():N}.bin",
+            Path.GetTempPath());
         File.WriteAllText(junk, "this is not a PE image");
         try
         {
@@ -104,7 +116,7 @@ public class PeHelperTests
     public void DetectPeArchitecture_RealNativeSystemDll_ReturnsKnownArchitecture()
     {
         // A real native Windows DLL is classified from its COFF machine field.
-        var kernel32 = Path.Combine(Environment.SystemDirectory, "kernel32.dll");
+        var kernel32 = Path.GetFullPath("kernel32.dll", Environment.SystemDirectory);
         if (!File.Exists(kernel32))
         {
             Assert.Inconclusive("kernel32.dll not found; skipping native PE classification check.");
@@ -114,5 +126,49 @@ public class PeHelperTests
         var arch = PeHelper.DetectPeArchitecture(kernel32);
         CollectionAssert.Contains(KnownArchitectures, arch,
             $"A real native system DLL should classify to a known architecture, got '{arch}'.");
+    }
+
+    [TestMethod]
+    public void GetDotNetSingleFileBundleHeaderOffset_UnpatchedAppHostMarkerReturnsNull()
+    {
+        var path = WriteBundleMarkerFixture(headerOffset: 0);
+        try
+        {
+            Assert.IsNull(PeHelper.GetDotNetSingleFileBundleHeaderOffset(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [TestMethod]
+    public void GetDotNetSingleFileBundleHeaderOffset_PatchedMarkerReturnsOffset()
+    {
+        const long headerOffset = 160;
+        var path = WriteBundleMarkerFixture(headerOffset);
+        try
+        {
+            Assert.AreEqual(
+                headerOffset,
+                PeHelper.GetDotNetSingleFileBundleHeaderOffset(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    private static string WriteBundleMarkerFixture(long headerOffset)
+    {
+        var path = Path.GetFullPath(
+            $"pehelper_bundle_{Guid.NewGuid():N}.exe",
+            Path.GetTempPath());
+        using var stream = File.Create(path);
+        stream.SetLength(256);
+        stream.Position = 64;
+        stream.Write(BitConverter.GetBytes(headerOffset));
+        stream.Write(DotNetBundleSignature);
+        return path;
     }
 }

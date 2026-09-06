@@ -231,6 +231,27 @@ public class RunCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task FolderMode_AllowsInPlaceOutputDirectory()
+    {
+        var manifest = await CreateTestManifestAsync();
+        File.WriteAllText(Path.Join(_tempDirectory.FullName, "TestApp.exe"), "fixture");
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command,
+            [
+                _tempDirectory.FullName,
+                "--manifest",
+                manifest.FullName,
+                "--output-appx-directory",
+                _tempDirectory.FullName,
+                "--no-launch",
+            ]);
+
+        Assert.AreEqual(0, exitCode);
+    }
+
+    [TestMethod]
     public void ParseOptions_Clean_IsParsedCorrectly()
     {
         // Arrange
@@ -400,6 +421,9 @@ public class RunCommandTests : BaseCommandTests
         Assert.AreEqual("TestPackage_fakefamily!TestApp", json.GetProperty("AUMID").GetString());
         Assert.IsFalse(json.TryGetProperty("ProcessId", out _), "ProcessId should not be present in no-launch mode");
         Assert.IsFalse(json.TryGetProperty("Error", out _), "Error should not be present on success");
+       Assert.IsFalse(json.TryGetProperty("SchemaVersion", out _), "Folder-mode JSON must retain its existing shape");
+       Assert.IsFalse(json.TryGetProperty("Operation", out _), "Project provenance fields are project-mode only");
+       Assert.IsFalse(json.TryGetProperty("Ready", out _), "Project readiness fields are project-mode only");
     }
 
     [TestMethod]
@@ -516,6 +540,7 @@ public class RunCommandTests : BaseCommandTests
             GetRequiredService<IAnsiConsole>(),
             GetRequiredService<IStatusService>(),
             GetRequiredService<IProjectRunService>(),
+            GetRequiredService<INativeAotVerifier>(),
             GetRequiredService<IProjectContextDetector>(),
             GetRequiredService<ILogger<RunCommand>>());
 

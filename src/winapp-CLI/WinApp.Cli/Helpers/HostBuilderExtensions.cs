@@ -54,6 +54,7 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<ICodeIntegrityCatalogService, CodeIntegrityCatalogService>()
             .AddSingleton<IAppLauncherService, AppLauncherService>()
             .AddSingleton<IPackageRegistrationService, PackageRegistrationService>()
+            .AddSingleton<INativeAotVerifier, NativeAotVerifier>()
             .AddSingleton<IDebugOutputService, DebugOutputService>()
             .AddSingleton<IXamlTriageService, XamlTriageService>()
             .AddSingleton<ICrashDumpService, CrashDumpService>()

@@ -143,15 +143,24 @@ public class MsixServiceIdentityTests : BaseCommandTests
         return recipePath;
     }
 
-    private Task InvokeCopyFilesFromRecipeAsync(FileInfo recipe, DirectoryInfo outputDir)
+    private Task InvokeCopyFilesFromRecipeAsync(
+        FileInfo recipe,
+        DirectoryInfo outputDir,
+        bool excludeSymbols = false)
     {
         return (Task)CopyFilesFromRecipeMethod.Invoke(
-            null, [recipe, outputDir, TestTaskContext, CancellationToken.None])!;
+            null, [recipe, outputDir, TestTaskContext, CancellationToken.None, excludeSymbols])!;
     }
 
-    private void InvokeSyncFilesToOutputDirectory(DirectoryInfo input, DirectoryInfo output, FileInfo manifest)
+    private void InvokeSyncFilesToOutputDirectory(
+        DirectoryInfo input,
+        DirectoryInfo output,
+        FileInfo manifest,
+        bool excludeSymbols = false)
     {
-        SyncFilesToOutputMethod.Invoke(null, [input, output, manifest, TestTaskContext]);
+        SyncFilesToOutputMethod.Invoke(
+            null,
+            [input, output, manifest, TestTaskContext, excludeSymbols]);
     }
 
     // ---- CopyFilesFromRecipeAsync -------------------------------------------------
@@ -234,6 +243,96 @@ public class MsixServiceIdentityTests : BaseCommandTests
         Assert.IsFalse(File.Exists(Path.Combine(outputDir.FullName, "does-not-exist.dll")), "Missing source must not produce a dest file");
     }
 
+    [TestMethod]
+    public async Task CopyFilesFromRecipeAsync_ExcludesPdbFromRuntimeLayout()
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("recipe-src");
+        var srcManifest = new FileInfo(Path.Join(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        var pdb = new FileInfo(Path.Join(srcDir.FullName, "TestApp.pdb"));
+        await File.WriteAllTextAsync(pdb.FullName, "large symbols", TestContext.CancellationToken);
+        var outputDir = _tempDirectory.CreateSubdirectory("layout");
+        await File.WriteAllTextAsync(
+            Path.Join(outputDir.FullName, "TestApp.pdb"),
+            "stale symbols",
+            TestContext.CancellationToken);
+        var recipe = new FileInfo(WriteRecipe(srcManifest, (pdb.FullName, "TestApp.pdb")));
+
+        await InvokeCopyFilesFromRecipeAsync(recipe, outputDir, excludeSymbols: true);
+
+        Assert.IsFalse(
+            File.Exists(Path.Join(outputDir.FullName, "TestApp.pdb")),
+            "PDBs stay in the publish directory and should not be duplicated into the runtime layout.");
+    }
+
+    [TestMethod]
+    public async Task CopyFilesFromRecipeAsync_DefaultFlowPreservesPdb()
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("recipe-src");
+        var srcManifest = new FileInfo(Path.Join(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        var pdb = new FileInfo(Path.Join(srcDir.FullName, "TestApp.pdb"));
+        await File.WriteAllTextAsync(pdb.FullName, "symbols", TestContext.CancellationToken);
+        var outputDir = _tempDirectory.CreateSubdirectory("layout");
+        var recipe = new FileInfo(WriteRecipe(srcManifest, (pdb.FullName, "TestApp.pdb")));
+
+        await InvokeCopyFilesFromRecipeAsync(recipe, outputDir);
+
+        Assert.AreEqual(
+            "symbols",
+            await File.ReadAllTextAsync(
+                Path.Join(outputDir.FullName, "TestApp.pdb"),
+                TestContext.CancellationToken));
+    }
+
+    [TestMethod]
+    public async Task CopyFilesFromRecipeAsync_RejectsPdbPathOutsideRuntimeLayoutWithoutDeletingIt()
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("recipe-src");
+        var srcManifest = new FileInfo(Path.Join(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        var pdb = new FileInfo(Path.Join(srcDir.FullName, "TestApp.pdb"));
+        await File.WriteAllTextAsync(pdb.FullName, "source symbols", TestContext.CancellationToken);
+        var outputDir = _tempDirectory.CreateSubdirectory("layout");
+        var victim = Path.Join(_tempDirectory.FullName, "victim.pdb");
+        await File.WriteAllTextAsync(victim, "unrelated symbols", TestContext.CancellationToken);
+        var recipe = new FileInfo(WriteRecipe(srcManifest, (pdb.FullName, @"..\victim.pdb")));
+
+        var error = await Assert.ThrowsExactlyAsync<InvalidDataException>(() =>
+            InvokeCopyFilesFromRecipeAsync(recipe, outputDir, excludeSymbols: true));
+
+        StringAssert.Contains(error.Message, "resolves outside the output directory");
+        Assert.AreEqual(
+            "unrelated symbols",
+            await File.ReadAllTextAsync(victim, TestContext.CancellationToken),
+            "A malformed recipe must not delete a file outside the layout.");
+    }
+
+    [TestMethod]
+    public async Task CopyFilesFromRecipeAsync_RejectsManifestPathOutsideRuntimeLayout()
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("recipe-src");
+        var srcManifest = new FileInfo(Path.Join(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        var outputDir = _tempDirectory.CreateSubdirectory("layout");
+        var victim = Path.Join(_tempDirectory.FullName, "victim.xml");
+        await File.WriteAllTextAsync(victim, "unrelated content", TestContext.CancellationToken);
+        var recipe = new FileInfo(WriteRecipe(srcManifest));
+        var content = await File.ReadAllTextAsync(recipe.FullName, TestContext.CancellationToken);
+        content = content.Replace(
+            "<PackagePath>appxmanifest.xml</PackagePath>",
+            "<PackagePath>..\\victim.xml</PackagePath>",
+            StringComparison.Ordinal);
+        await File.WriteAllTextAsync(recipe.FullName, content, TestContext.CancellationToken);
+
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(() =>
+            InvokeCopyFilesFromRecipeAsync(recipe, outputDir));
+
+        Assert.AreEqual(
+            "unrelated content",
+            await File.ReadAllTextAsync(victim, TestContext.CancellationToken));
+    }
+
     // ---- SyncFilesToOutputDirectory -----------------------------------------------
 
     [TestMethod]
@@ -250,6 +349,44 @@ public class MsixServiceIdentityTests : BaseCommandTests
 
         Assert.IsTrue(File.Exists(Path.Combine(outputDir.FullName, "TestApp.exe")), "Input files should be synced");
         Assert.IsTrue(File.Exists(Path.Combine(outputDir.FullName, "appxmanifest.xml")), "Manifest should be copied");
+    }
+
+    [TestMethod]
+    public async Task SyncFilesToOutputDirectory_ExcludesPdbFromRuntimeLayout()
+    {
+        var inputDir = _tempDirectory.CreateSubdirectory("input");
+        await File.WriteAllTextAsync(Path.Join(inputDir.FullName, "TestApp.exe"), "exe", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Join(inputDir.FullName, "TestApp.pdb"), "symbols", TestContext.CancellationToken);
+        var manifest = new FileInfo(Path.Join(_tempDirectory.FullName, "appxmanifest.xml"));
+        await File.WriteAllTextAsync(manifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        var outputDir = _tempDirectory.CreateSubdirectory("out");
+        await File.WriteAllTextAsync(Path.Join(outputDir.FullName, "TestApp.pdb"), "stale symbols", TestContext.CancellationToken);
+
+        InvokeSyncFilesToOutputDirectory(inputDir, outputDir, manifest, excludeSymbols: true);
+
+        Assert.IsTrue(File.Exists(Path.Join(outputDir.FullName, "TestApp.exe")));
+        Assert.IsFalse(
+            File.Exists(Path.Join(outputDir.FullName, "TestApp.pdb")),
+            "PDBs stay beside the original build or publish output for diagnostics.");
+    }
+
+    [TestMethod]
+    public async Task SyncFilesToOutputDirectory_DefaultFlowPreservesPdb()
+    {
+        var inputDir = _tempDirectory.CreateSubdirectory("input");
+        await File.WriteAllTextAsync(Path.Join(inputDir.FullName, "TestApp.exe"), "exe", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Join(inputDir.FullName, "TestApp.pdb"), "symbols", TestContext.CancellationToken);
+        var manifest = new FileInfo(Path.Join(_tempDirectory.FullName, "appxmanifest.xml"));
+        await File.WriteAllTextAsync(manifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        var outputDir = _tempDirectory.CreateSubdirectory("out");
+
+        InvokeSyncFilesToOutputDirectory(inputDir, outputDir, manifest);
+
+        Assert.AreEqual(
+            "symbols",
+            await File.ReadAllTextAsync(
+                Path.Join(outputDir.FullName, "TestApp.pdb"),
+                TestContext.CancellationToken));
     }
 
     [TestMethod]
@@ -504,6 +641,68 @@ public class MsixServiceIdentityTests : BaseCommandTests
         Assert.IsTrue(File.Exists(Path.Combine(output.FullName, "appxmanifest.xml")), "Fallback sync should copy/rename manifest into the layout");
         Assert.IsTrue(File.Exists(Path.Combine(output.FullName, "TestApp.exe")), "Fallback sync should copy input files");
         Assert.HasCount(1, _fakeRegistration.RegisterLooseLayoutCalls);
+    }
+
+    [TestMethod]
+    public async Task AddLooseLayoutIdentityAsync_FrameworkDependentPublishFailsWhenRuntimeDependencyCannotResolve()
+    {
+       var srcDir = _tempDirectory.CreateSubdirectory("publish-output");
+       var srcManifest = new FileInfo(Path.GetFullPath("AppxManifest.xml", srcDir.FullName));
+       await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+       await File.WriteAllTextAsync(
+           Path.GetFullPath("TestApp.exe", srcDir.FullName),
+           "exe",
+           TestContext.CancellationToken);
+       var output = _tempDirectory.CreateSubdirectory("layout");
+
+       var error = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
+           _msixService.AddLooseLayoutIdentityAsync(
+               srcManifest,
+               srcDir,
+               output,
+               TestTaskContext,
+               projectFile: new FileInfo(Path.GetFullPath("App.csproj", srcDir.FullName)),
+               windowsAppSdkSelfContained: false,
+               requireExactRuntimeDependency: true,
+               cancellationToken: TestContext.CancellationToken));
+
+       StringAssert.Contains(error.Message, "package graph could not be resolved");
+       Assert.AreEqual(0, _fakeRegistration.RegisterLooseLayoutCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task AddLooseLayoutIdentityAsync_SelfContainedPublishRejectsFrameworkDependencyHybrid()
+    {
+       var srcDir = _tempDirectory.CreateSubdirectory("self-contained-publish");
+       var srcManifest = new FileInfo(Path.GetFullPath("AppxManifest.xml", srcDir.FullName));
+       var manifest = BuildMSBuildManifest().Replace(
+           "<Applications>",
+           """
+             <Dependencies>
+               <PackageDependency Name="Microsoft.WindowsAppRuntime.1.8" MinVersion="8000.0.0.0" Publisher="CN=Microsoft Corporation" />
+             </Dependencies>
+             <Applications>
+           """,
+           StringComparison.Ordinal);
+       await File.WriteAllTextAsync(srcManifest.FullName, manifest, TestContext.CancellationToken);
+       await File.WriteAllTextAsync(
+           Path.GetFullPath("TestApp.exe", srcDir.FullName),
+           "exe",
+           TestContext.CancellationToken);
+       var output = _tempDirectory.CreateSubdirectory("layout");
+
+       var error = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
+           _msixService.AddLooseLayoutIdentityAsync(
+               srcManifest,
+               srcDir,
+               output,
+               TestTaskContext,
+               windowsAppSdkSelfContained: true,
+               requireExactRuntimeDependency: true,
+               cancellationToken: TestContext.CancellationToken));
+
+       StringAssert.Contains(error.Message, "WindowsAppSDKSelfContained=true");
+       Assert.AreEqual(0, _fakeRegistration.RegisterLooseLayoutCalls.Count);
     }
 
     [TestMethod]
@@ -915,6 +1114,45 @@ public class MsixServiceIdentityTests : BaseCommandTests
             ])
         ]);
 
+    [TestMethod]
+    public async Task ReadPackageListFromAssetsFile_SelectsExactFrameworkAndRuntimeGraph()
+    {
+        var assetsPath = Path.Join(_tempDirectory.FullName, "project.assets.json");
+        await File.WriteAllTextAsync(
+            assetsPath,
+            """
+            {
+              "targets": {
+                "net9.0-windows10.0.26100.0/win-x64": {
+                  "Microsoft.WindowsAppSDK/1.7.250101": { "type": "package" }
+                },
+                "net9.0-windows10.0.26100.0/win-arm64": {
+                  "Microsoft.WindowsAppSDK/1.8.260317003": { "type": "package" },
+                  "Microsoft.WindowsAppRuntime.1.8/8000.702.311.0": { "type": "package" },
+                  "Referenced.Project/1.0.0": { "type": "project" }
+                }
+              }
+            }
+            """,
+            TestContext.CancellationToken);
+
+        var result = MsixService.ReadPackageListFromAssetsFile(
+            new FileInfo(assetsPath),
+            "net9.0-windows10.0.26100.0",
+            "arm64");
+
+        Assert.IsNotNull(result);
+        var packages = result.Projects.Single().Frameworks.Single().TransitivePackages;
+        Assert.IsTrue(packages.Any(package =>
+            package.Id == "Microsoft.WindowsAppSDK" &&
+            package.ResolvedVersion == "1.8.260317003"));
+        Assert.IsTrue(packages.Any(package =>
+            package.Id == "Microsoft.WindowsAppRuntime.1.8" &&
+            package.ResolvedVersion == "8000.702.311.0"));
+        Assert.IsFalse(packages.Any(package => package.Id == "Referenced.Project"));
+        Assert.IsFalse(packages.Any(package => package.ResolvedVersion == "1.7.250101"));
+    }
+
     private Task InvokeEnsureWindowsAppRuntimeInstalledAsync(DotNetPackageListJson? list) =>
         (Task)EnsureWindowsAppRuntimeInstalledMethod.Invoke(
             _msixService, [list, null, TestTaskContext, TestContext.CancellationToken, false])!;
@@ -981,12 +1219,12 @@ public class MsixServiceIdentityTests : BaseCommandTests
         var csproj = new FileInfo(Path.Combine(_tempDirectory.FullName, "App.csproj"));
 
         await _msixService.EnsureWindowsAppRuntimeInstalledAsync(
-            csproj, "x64", framework: null, noRestore: true, TestTaskContext, TestContext.CancellationToken);
+            csproj, null, "x64", framework: null, noRestore: true, TestTaskContext, TestContext.CancellationToken);
         Assert.AreEqual(true, _fakeDotNet.LastGetPackageListNoRestore,
             "--no-restore must be forwarded to dotnet list package during runtime discovery");
 
         await _msixService.EnsureWindowsAppRuntimeInstalledAsync(
-            csproj, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken);
+            csproj, null, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken);
         Assert.AreEqual(false, _fakeDotNet.LastGetPackageListNoRestore,
             "runtime discovery must restore normally when --no-restore was not requested");
     }
@@ -1004,7 +1242,7 @@ public class MsixServiceIdentityTests : BaseCommandTests
 
         var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
             _msixService.EnsureWindowsAppRuntimeInstalledAsync(
-                csproj, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken));
+                csproj, null, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken));
 
         StringAssert.Contains(ex.Message, "could not be located");
     }
@@ -1025,7 +1263,7 @@ public class MsixServiceIdentityTests : BaseCommandTests
 
         var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
             _msixService.EnsureWindowsAppRuntimeInstalledAsync(
-                csproj, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken));
+                csproj, null, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken));
 
         StringAssert.Contains(ex.Message, "not registered");
     }
@@ -1043,7 +1281,7 @@ public class MsixServiceIdentityTests : BaseCommandTests
         var csproj = new FileInfo(Path.Combine(_tempDirectory.FullName, "App.csproj"));
 
         await _msixService.EnsureWindowsAppRuntimeInstalledAsync(
-            csproj, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken);
+            csproj, null, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken);
 
         Assert.HasCount(1, _fakeWindowsAppRuntime.InstallRuntimeCalls);
     }
@@ -1060,7 +1298,7 @@ public class MsixServiceIdentityTests : BaseCommandTests
         var csproj = new FileInfo(Path.Combine(_tempDirectory.FullName, "App.csproj"));
 
         await _msixService.EnsureWindowsAppRuntimeInstalledAsync(
-            csproj, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken);
+            csproj, null, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken);
 
         var messages = TestTask.SubTasks.OfType<StatusMessageTask>().Select(t => t.CompletedMessage ?? string.Empty).ToList();
         Assert.IsTrue(
@@ -1246,4 +1484,3 @@ internal sealed class ScriptedMtBuildToolsService : IBuildToolsService
         return _inner.RunBuildToolAsync(tool, arguments, taskContext, printErrors, toolPathOverride, environment, workingDirectory, cancellationToken);
     }
 }
-

@@ -37,7 +37,10 @@ internal sealed partial class ProjectRunService
     /// (no MSBuild round-trip); any ambiguity (unresolvable reference path, missing file, cycle-bounded
     /// overflow) resolves conservatively to "do not inject", preserving today's RID-only behavior.
     /// </summary>
-    internal static ProjectRunOptions ResolvePlatformInjection(FileInfo csproj, ProjectRunOptions options)
+    internal static ProjectRunOptions ResolvePlatformInjection(
+        FileInfo csproj,
+        ProjectRunOptions options,
+        bool requireConcreteRid = false)
     {
         // A user -p:Platform is authoritative and forwarded as-is (WarnOnOverriddenFlags surfaces an
         // arch/Platform mismatch); never override it. It still conveys the architecture, so it counts when
@@ -64,7 +67,9 @@ internal sealed partial class ProjectRunService
         // that provable case; every other project keeps today's behavior, including a split closure with no
         // effective Platform, where the RID is the only thing conveying the architecture.
         var platformInEffect = userPlatform || token is not null;
-        var omitRid = platformInEffect && ProjectReferenceClosureSplitsOnRuntimeIdentifier(csproj);
+        var omitRid = !requireConcreteRid &&
+            platformInEffect &&
+            ProjectReferenceClosureSplitsOnRuntimeIdentifier(csproj);
 
         return options with
         {
